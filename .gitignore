@@ -1,0 +1,101 @@
+# Environment Files - NEVER commit these
+.env
+.env.test
+.env.prod
+.env.local
+.env.*.local
+
+# Google Drive Credentials - NEVER commit
+Backend/drive_service_account.json
+Backend/.gdrive_token.json
+drive_service_account.json
+.gdrive_token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Resume Cache
+Backend/resumes/
+Backend/resumes_cache/
+Backend/resumes_cache_test/
+Backend/resumes_cache_prod/
+Backend/resumes_gdrive/
+
+# Node (Frontend)
+node_modules/
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.vite/
+
+# Docker
+.dockerignore
+
+# Backups
+*.bak
+*.backup
+backup_*.sql
+*_backup.sql
+database_backups/
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+_test*.txt
+_tmp*.txt
+
+# Test outputs
+Backend/_*.txt
+
+# SSL Certificates - NEVER commit these
+certbot/
+nginx/nginx-temp.conf
+*.pem
+*.crt
+*.key

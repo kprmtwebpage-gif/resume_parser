@@ -1,0 +1,341 @@
+================================================================================
+           GOOGLE DRIVE RESUME PARSER - AUTOMATION OPTIONS
+================================================================================
+
+When new PDFs are added to your Google Drive folder, you have 3 options to 
+automatically detect and process them. The system uses smart caching - it only
+downloads NEW or CHANGED files, skipping files already processed.
+
+================================================================================
+OPTION 1: MANUAL RUN (Recommended for Development)
+================================================================================
+
+WHEN TO USE:
+  - When you want full control over when processing happens
+  - For testing and development
+  - When you need to verify changes before processing
+
+HOW TO RUN:
+  1. Open PowerShell
+  2. Navigate to the project folder:
+     cd "c:\Users\prave\PycharmProjects\Resume_Parsing -Latest_Santhosh\Resume_Parsing -Latest\Resume_Parsing -Latest"
+  3. Run the parser:
+     python parser.py
+
+WHAT HAPPENS:
+  ✅ Connects to Google Drive
+  ✅ Scans all files in the folder
+  ✅ Downloads ONLY new or modified files (uses MD5 checksum comparison)
+  ✅ Skips files already downloaded
+  ✅ Parses new resumes and stores in database
+  ✅ Skips candidates already in database
+
+EXAMPLE OUTPUT:
+  Google Drive sync: scanned=15 downloaded=3 dir=resumes_gdrive
+  Parsing: NewResume1.pdf
+  Processed: NewResume1.pdf
+  ...
+
+RUN IT ANYTIME: Just execute "python parser.py" whenever you upload new resumes.
+
+
+================================================================================
+OPTION 2: CONTINUOUS WATCHER (Recommended for Testing)
+================================================================================
+
+WHEN TO USE:
+  - When you're actively uploading resumes and want automatic processing
+  - For testing and development environments
+  - When you need immediate feedback
+  - Great for demos and presentations
+
+HOW TO RUN:
+  1. Open PowerShell
+  2. Navigate to the project folder:
+     cd "c:\Users\prave\PycharmProjects\Resume_Parsing -Latest_Santhosh\Resume_Parsing -Latest\Resume_Parsing -Latest"
+  3. Run the watcher:
+     python auto_watch_gdrive.py
+
+WHAT HAPPENS:
+  ✅ Runs continuously in a loop
+  ✅ Checks Google Drive every 5 minutes (default)
+  ✅ Downloads only new/changed files
+  ✅ Parses new resumes automatically
+  ✅ Displays timestamp and status for each check
+  ✅ Runs until you press Ctrl+C to stop
+
+CUSTOMIZE CHECK INTERVAL:
+  Default is 5 minutes (300 seconds). To change:
+  
+  For 10 minutes:
+    $env:WATCH_INTERVAL_SECONDS=600
+    python auto_watch_gdrive.py
+  
+  For 30 minutes:
+    $env:WATCH_INTERVAL_SECONDS=1800
+    python auto_watch_gdrive.py
+  
+  For 1 hour:
+    $env:WATCH_INTERVAL_SECONDS=3600
+    python auto_watch_gdrive.py
+
+TO STOP:
+  Press Ctrl+C in the PowerShell window
+
+EXAMPLE OUTPUT:
+  🔍 Starting Google Drive watcher...
+  📂 Checking for new resumes every 300 seconds (5.0 minutes)
+  ⏰ Started at: 2026-02-07 14:30:00
+  
+  ================================================================================
+  🔄 Check #1 - 2026-02-07 14:30:00
+  ================================================================================
+  Google Drive sync: scanned=15 downloaded=2 dir=resumes_gdrive
+  ✅ Sync and processing completed successfully
+  
+  ⏳ Waiting 300 seconds until next check...
+     Next check at: 2026-02-07 14:35:00
+
+NOTE: This runs ONLY while the PowerShell window is open. If you close the 
+      window or restart your computer, you need to run it again.
+      For production use, see Option 3.
+
+
+================================================================================
+OPTION 3: WINDOWS TASK SCHEDULER (Recommended for Production)
+================================================================================
+
+WHEN TO USE:
+  - For production environments
+  - When you need automatic processing 24/7
+  - When you want it to run even if you're not logged in
+  - For unattended operation
+  - Most reliable and professional solution
+
+HOW TO SETUP:
+  1. Open PowerShell AS ADMINISTRATOR
+     (Right-click PowerShell icon → "Run as Administrator")
+  
+  2. Navigate to the project folder:
+     cd "c:\Users\prave\PycharmProjects\Resume_Parsing -Latest_Santhosh\Resume_Parsing -Latest\Resume_Parsing -Latest"
+  
+  3. Run the setup script:
+     .\setup_scheduled_task.ps1
+  
+  4. Done! The task is now scheduled and will run automatically.
+
+WHAT HAPPENS:
+  ✅ Creates a Windows scheduled task named "ResumeParserGDriveSync"
+  ✅ Runs every 15 minutes automatically
+  ✅ Works even when you're not logged in
+  ✅ Starts automatically after Windows restart
+  ✅ Only runs if network is available
+  ✅ Downloads only new/changed files
+  ✅ Parses new resumes into database
+
+CUSTOMIZE CHECK INTERVAL:
+  To change from 15 minutes to a different interval:
+  
+  1. Open setup_scheduled_task.ps1 in a text editor
+  2. Find this line (around line 25):
+     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15)
+  3. Change "-Minutes 15" to your desired interval:
+     - For 30 minutes: -Minutes 30
+     - For 1 hour: -Hours 1
+     - For 2 hours: -Hours 2
+  4. Save and run the setup script again
+
+MANAGEMENT COMMANDS:
+  
+  View task status:
+    Get-ScheduledTask -TaskName "ResumeParserGDriveSync"
+  
+  Run task immediately (test it):
+    Start-ScheduledTask -TaskName "ResumeParserGDriveSync"
+  
+  Disable task (pause automatic runs):
+    Disable-ScheduledTask -TaskName "ResumeParserGDriveSync"
+  
+  Enable task (resume automatic runs):
+    Enable-ScheduledTask -TaskName "ResumeParserGDriveSync"
+  
+  Remove task completely:
+    Unregister-ScheduledTask -TaskName "ResumeParserGDriveSync" -Confirm:$false
+  
+  View task history/logs:
+    1. Open Task Scheduler (search in Windows Start menu)
+    2. Find "ResumeParserGDriveSync" in the task list
+    3. Click on "History" tab to see all runs
+
+CHECK LOGS:
+  The scheduled task runs in the background. To see output:
+  1. Open Task Scheduler
+  2. Find "ResumeParserGDriveSync"
+  3. Right-click → Properties
+  4. Go to "History" tab to see execution logs
+
+
+================================================================================
+SMART CACHING - HOW IT WORKS
+================================================================================
+
+All three options use the same intelligent caching system:
+
+1. FIRST RUN:
+   - Scans all files in Google Drive folder
+   - Downloads all .pdf and .docx files
+   - Calculates MD5 checksum for each file
+   - Saves files to: resumes_gdrive/
+   - Parses all resumes into database
+
+2. SUBSEQUENT RUNS:
+   - Scans all files in Google Drive folder
+   - Compares MD5 checksums with local files
+   - ONLY downloads files that are:
+     • New (not in local cache)
+     • Modified (different MD5 checksum)
+   - Skips unchanged files (no need to re-download)
+   - ONLY parses new resumes (checks database for existing candidates)
+
+EXAMPLE:
+  - Google Drive has 20 resumes
+  - First run: Downloads 20, parses 20
+  - You add 3 new resumes to Drive
+  - Next run: Downloads 3, parses 3 (skips the original 20)
+  - You modify 1 existing resume in Drive
+  - Next run: Downloads 1, parses 1 (the modified one)
+
+
+================================================================================
+FILE TYPES SUPPORTED
+================================================================================
+
+Currently supported formats:
+  ✅ .pdf  (Adobe PDF)
+  ✅ .docx (Microsoft Word 2007+)
+
+NOT currently supported:
+  ❌ .doc  (Old Microsoft Word format)
+  ❌ .txt  (Plain text)
+  ❌ .rtf  (Rich Text Format)
+
+If you need support for .doc files, ask to modify the allowed_exts setting.
+
+
+================================================================================
+ENVIRONMENT CONFIGURATION
+================================================================================
+
+All settings are in the .env file:
+
+REQUIRED SETTINGS:
+  RESUME_INPUT_MODE=drive                                    # Enable Google Drive mode
+  GDRIVE_FOLDER_ID=1ov-R7c-LShP2ueXKKPckSTuoqy_35Y2e         # Your Drive folder ID
+  GDRIVE_CREDENTIALS_JSON=../drive_service_account.json      # Auth credentials
+
+DATABASE SETTINGS:
+  DB_NAME=postgres
+  DB_USER=postgres
+  DB_PASSWORD=admin
+  DB_HOST=localhost
+  DB_PORT=5432
+
+OPTIONAL SETTINGS:
+  GDRIVE_TOKEN_JSON=.gdrive_token.json                       # OAuth token cache
+  GDRIVE_DOWNLOAD_DIR=resumes_gdrive                         # Local cache directory
+  GDRIVE_PAGE_SIZE=200                                       # Files per API call
+  PDF_TIMEOUT_SECONDS=30                                     # PDF parsing timeout
+  QUIET=0                                                    # Set to 1 for less output
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+ISSUE: "No files found in Drive folder"
+  → Check GDRIVE_FOLDER_ID is correct
+  → Verify service account has access to the folder
+  → Make sure folder isn't empty
+
+ISSUE: "Authentication failed"
+  → Check drive_service_account.json exists and is valid
+  → Verify service account email has access to the Drive folder
+  → Share the folder with the service account email
+
+ISSUE: "Files not downloading"
+  → Check file extensions (.pdf and .docx only)
+  → Verify files aren't corrupted in Google Drive
+  → Check network connection
+
+ISSUE: "Task Scheduler not running"
+  → Open Task Scheduler and check task status
+  → Verify Python path is correct in the task
+  → Check task history for error messages
+  → Ensure network is available
+
+ISSUE: "Duplicate candidates in database"
+  → The parser checks for existing candidates by name+email
+  → If resume has different name/email, it creates new entry
+  → This is normal behavior for different candidates
+
+
+================================================================================
+RECOMMENDATIONS
+================================================================================
+
+FOR DEVELOPMENT:
+  ✅ Use Option 1 (Manual run)
+  ✅ Run whenever you want to test
+  ✅ Full control and immediate feedback
+
+FOR ACTIVE TESTING/DEMOS:
+  ✅ Use Option 2 (Continuous watcher)
+  ✅ Set interval to 5-10 minutes
+  ✅ Keep PowerShell window open
+
+FOR PRODUCTION:
+  ✅ Use Option 3 (Task Scheduler)
+  ✅ Set interval to 15-30 minutes
+  ✅ Set it up once and forget it
+  ✅ Monitor via Task Scheduler history
+
+
+================================================================================
+QUICK START GUIDE
+================================================================================
+
+If you're new and just want to get started:
+
+1. FIRST TIME SETUP:
+   - Make sure .env file has correct GDRIVE_FOLDER_ID
+   - Make sure drive_service_account.json exists
+   - Share your Google Drive folder with the service account email
+
+2. TEST IT MANUALLY:
+   python parser.py
+
+3. IF IT WORKS, SETUP AUTOMATION:
+   - For development: Keep running "python parser.py" manually
+   - For production: Run .\setup_scheduled_task.ps1
+
+4. VERIFY IT'S WORKING:
+   - Upload a test resume to Google Drive
+   - Wait for the interval (or run manually)
+   - Check your database for the new candidate
+
+That's it! 🎉
+
+
+================================================================================
+CONTACT & SUPPORT
+================================================================================
+
+If you encounter issues:
+1. Check the troubleshooting section above
+2. Review the terminal output for error messages
+3. Check Task Scheduler history for scheduled task issues
+4. Verify .env settings are correct
+5. Test manually first (Option 1) before using automation
+
+Created: February 7, 2026
+Version: 1.0

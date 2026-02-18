@@ -1,0 +1,17 @@
+
+pdfplumber>=0.11
+python-docx>=1.1
+pandas>=2.0
+openpyxl>=3.1
+psycopg2-binary>=2.9
+python-dotenv>=1.0
+phonenumbers>=8.13
+pycountry>=23.12
+pytesseract>=0.3.10
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Optional: Google Drive folder sync (RESUME_INPUT_MODE=gdrive)
+google-api-python-client>=2.120
+google-auth>=2.25
+google-auth-oauthlib>=1.2

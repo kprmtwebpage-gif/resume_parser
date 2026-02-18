@@ -1,0 +1,407 @@
+================================================================================
+        GOOGLE DRIVE SYNC MODULE - STANDALONE INTEGRATION GUIDE
+================================================================================
+
+This guide explains how to integrate ONLY the Google Drive sync functionality
+into your updated resume parser module.
+
+================================================================================
+REQUIRED FILES FOR GOOGLE DRIVE INTEGRATION
+================================================================================
+
+Copy these files to your new project:
+
+1. google_drive_sync.py
+   - Core Google Drive sync module
+   - Handles authentication and file download
+   - Can be used standalone
+
+2. drive_service_account.json (or your credentials file)
+   - Google Drive API credentials
+   - Service account or OAuth credentials
+
+3. .env (optional - or use environment variables)
+   - Configuration settings
+   - Can be replaced with your own config system
+
+4. requirements_gdrive.txt (will be created)
+   - Only Google Drive dependencies
+   - Install separately: pip install -r requirements_gdrive.txt
+
+
+================================================================================
+MINIMAL INTEGRATION EXAMPLE
+================================================================================
+
+# Example: How to use google_drive_sync in your own parser
+
+from pathlib import Path
+from google_drive_sync import sync_drive_folder
+
+# Configuration
+GDRIVE_FOLDER_ID = "your-folder-id-here"
+CREDENTIALS_JSON = Path("path/to/credentials.json")
+TOKEN_JSON = Path(".gdrive_token.json")
+DOWNLOAD_DIR = Path("resumes_cache")
+
+# Sync files from Google Drive
+scanned, downloaded = sync_drive_folder(
+    folder_id=GDRIVE_FOLDER_ID,
+    download_dir=DOWNLOAD_DIR,
+    credentials_json=CREDENTIALS_JSON,
+    token_json=TOKEN_JSON,
+    allowed_exts={".pdf", ".docx"}  # Only these file types
+)
+
+print(f"Scanned {scanned} files, downloaded {downloaded} new/updated files")
+
+# Now process the files in DOWNLOAD_DIR with YOUR parser
+for resume_file in DOWNLOAD_DIR.glob("*.pdf"):
+    # Call your own parsing function
+    your_parse_function(resume_file)
+
+for resume_file in DOWNLOAD_DIR.glob("*.docx"):
+    # Call your own parsing function
+    your_parse_function(resume_file)
+
+
+================================================================================
+FUNCTION SIGNATURE
+================================================================================
+
+def sync_drive_folder(
+    *,
+    folder_id: str,              # Google Drive folder ID
+    download_dir: Path,          # Where to download files
+    credentials_json: Path,      # Path to credentials JSON
+    token_json: Path,            # Path to token cache
+    allowed_exts: set[str] | None = None  # e.g., {".pdf", ".docx"}
+) -> tuple[int, int]:  # Returns (scanned_count, downloaded_count)
+    """
+    Syncs a Google Drive folder to local directory.
+    Only downloads new or modified files (uses MD5 checksum).
+    Returns tuple of (files_scanned, files_downloaded)
+    """
+
+
+================================================================================
+ENVIRONMENT VARIABLES (Optional)
+================================================================================
+
+If you want to use environment variables instead of passing parameters:
+
+GDRIVE_FOLDER_ID=your-folder-id-here
+GDRIVE_CREDENTIALS_JSON=path/to/credentials.json
+GDRIVE_TOKEN_JSON=.gdrive_token.json
+GDRIVE_DOWNLOAD_DIR=resumes_cache
+GDRIVE_PAGE_SIZE=200              # Optional: files per API call
+GDRIVE_QUERY_EXTRA=               # Optional: additional Drive query filter
+
+
+================================================================================
+AUTHENTICATION TYPES SUPPORTED
+================================================================================
+
+1. SERVICE ACCOUNT (Recommended for automation)
+   - Non-interactive
+   - Works for background processes
+   - Credentials file looks like:
+     {
+       "type": "service_account",
+       "project_id": "...",
+       "private_key_id": "...",
+       ...
+     }
+   - Share Drive folder with service account email
+
+2. OAUTH USER CREDENTIALS (For interactive use)
+   - First run opens browser for authentication
+   - Subsequent runs use cached token
+   - Credentials file is OAuth client secrets JSON
+
+
+================================================================================
+DEPENDENCIES
+================================================================================
+
+Install these packages in your project:
+
+pip install google-api-python-client
+pip install google-auth
+pip install google-auth-oauthlib
+pip install google-auth-httplib2
+
+Or use the requirements_gdrive.txt file that will be created.
+
+
+================================================================================
+SMART CACHING BEHAVIOR
+================================================================================
+
+The sync_drive_folder function:
+1. Lists all files in the Google Drive folder
+2. Compares with local files using MD5 checksum
+3. ONLY downloads files that are:
+   - New (not in local cache)
+   - Modified (different MD5 checksum)
+4. Skips unchanged files completely
+5. Handles filename collisions by appending drive file ID
+
+This means:
+- First run: Downloads all files
+- Subsequent runs: Only downloads new/changed files
+- Very efficient for large resume collections
+
+
+================================================================================
+INTEGRATION STEPS
+================================================================================
+
+Step 1: Copy Files
+------------------
+Copy these files to your new project:
+  ✓ google_drive_sync.py
+  ✓ drive_service_account.json (or your credentials)
+  ✓ requirements_gdrive.txt
+
+
+Step 2: Install Dependencies
+-----------------------------
+pip install -r requirements_gdrive.txt
+
+
+Step 3: Configure
+-----------------
+Set up your folder ID and credentials path in your code or .env file
+
+
+Step 4: Import and Use
+----------------------
+from google_drive_sync import sync_drive_folder
+
+# In your main function, before parsing:
+scanned, downloaded = sync_drive_folder(
+    folder_id="your-folder-id",
+    download_dir=Path("resumes_cache"),
+    credentials_json=Path("credentials.json"),
+    token_json=Path(".token.json"),
+    allowed_exts={".pdf", ".docx"}
+)
+
+# Then parse files from resumes_cache directory
+for file in Path("resumes_cache").glob("*.*"):
+    your_parser.parse(file)
+
+
+Step 5: Test
+------------
+Run your program and verify:
+  ✓ Files download from Google Drive
+  ✓ Your parser processes them
+  ✓ Subsequent runs only download new files
+
+
+================================================================================
+COMPLETE STANDALONE EXAMPLE
+================================================================================
+
+# your_resume_parser.py
+
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+from google_drive_sync import sync_drive_folder
+
+# Load configuration
+load_dotenv()
+
+def parse_resume(file_path):
+    """Your own resume parsing logic here"""
+    print(f"Parsing: {file_path.name}")
+    # Your parsing code...
+    # Extract name, email, skills, etc.
+    # Store in your database
+    print(f"Processed: {file_path.name}")
+
+def main():
+    # Google Drive configuration
+    folder_id = os.getenv("GDRIVE_FOLDER_ID")
+    creds_json = Path(os.getenv("GDRIVE_CREDENTIALS_JSON", "credentials.json"))
+    token_json = Path(".gdrive_token.json")
+    cache_dir = Path("resumes_cache")
+    
+    if not folder_id:
+        print("Error: GDRIVE_FOLDER_ID not set")
+        return 1
+    
+    if not creds_json.exists():
+        print(f"Error: Credentials file not found: {creds_json}")
+        return 1
+    
+    print("Syncing from Google Drive...")
+    scanned, downloaded = sync_drive_folder(
+        folder_id=folder_id,
+        download_dir=cache_dir,
+        credentials_json=creds_json,
+        token_json=token_json,
+        allowed_exts={".pdf", ".docx"}
+    )
+    print(f"Sync complete: {scanned} scanned, {downloaded} downloaded\n")
+    
+    # Process all resumes in cache directory
+    print("Processing resumes...")
+    resume_files = list(cache_dir.glob("*.pdf")) + list(cache_dir.glob("*.docx"))
+    
+    for resume_file in resume_files:
+        try:
+            parse_resume(resume_file)
+        except Exception as e:
+            print(f"Error parsing {resume_file.name}: {e}")
+    
+    print(f"\nProcessed {len(resume_files)} resumes")
+    return 0
+
+if __name__ == "__main__":
+    exit(main())
+
+
+================================================================================
+ADVANCED: CONTINUOUS MONITORING
+================================================================================
+
+To continuously monitor Google Drive for new resumes:
+
+import time
+from datetime import datetime
+
+def watch_and_sync(interval_seconds=300):
+    """Continuously sync and process new resumes"""
+    while True:
+        print(f"\n[{datetime.now()}] Checking for new resumes...")
+        
+        # Sync from Drive
+        scanned, downloaded = sync_drive_folder(...)
+        
+        if downloaded > 0:
+            print(f"Found {downloaded} new resumes!")
+            # Process only new files here
+        else:
+            print("No new resumes")
+        
+        print(f"Next check in {interval_seconds} seconds...")
+        time.sleep(interval_seconds)
+
+# Usage
+watch_and_sync(interval_seconds=300)  # Check every 5 minutes
+
+
+================================================================================
+FILES YOU DON'T NEED
+================================================================================
+
+These files are specific to the old parser and NOT needed for integration:
+
+✗ parser.py                              # Old parser - use your own
+✗ app.py                                 # Old Flask app
+✗ db_*.py                                # Database scripts for old parser
+✗ debug_*.py                             # Debug scripts
+✗ drive_watcher.py                       # Alternative implementation
+✗ drive_test.py                          # Test file
+✗ auto_watch_gdrive.py                   # Depends on parser.py
+✗ check_gdrive_sync.py                   # Diagnostic script
+✗ All other parsing/database files       # Use your own implementations
+
+
+================================================================================
+WHAT YOU NEED vs WHAT YOU HAVE
+================================================================================
+
+NEED (for Google Drive sync):
+  ✓ google_drive_sync.py               # Core sync module
+  ✓ credentials.json                   # Your Drive credentials
+  ✓ requirements_gdrive.txt            # Dependencies
+  ✓ .env or config                     # Settings
+
+HAVE (your updated parser):
+  ✓ Your own parsing logic
+  ✓ Your own database code
+  ✓ Your own data models
+  ✓ Your own Flask/API code
+
+INTEGRATION:
+  Just import sync_drive_folder and call it before your parsing!
+
+
+================================================================================
+TESTING THE INTEGRATION
+================================================================================
+
+1. Create test script:
+   python test_gdrive_integration.py
+
+2. Verify it downloads files:
+   - Check resumes_cache directory
+   - Confirm files from Drive appear
+
+3. Test with your parser:
+   - Pass downloaded files to your parser
+   - Verify data extraction works
+
+4. Test caching:
+   - Run twice
+   - Second run should download 0 files
+
+5. Test new file detection:
+   - Add new resume to Drive
+   - Run again
+   - Should download only the new file
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: "Module not found: google_drive_sync"
+→ Make sure google_drive_sync.py is in same directory or PYTHONPATH
+
+Issue: "No module named 'googleapiclient'"
+→ Install dependencies: pip install -r requirements_gdrive.txt
+
+Issue: "Authentication failed"
+→ Check credentials.json is valid
+→ Verify folder is shared with service account email
+
+Issue: "No files downloaded"
+→ Check GDRIVE_FOLDER_ID is correct
+→ Verify files exist in the Drive folder
+→ Check allowed_exts includes your file types
+
+Issue: "Permission denied"
+→ Share the Drive folder with service account email
+→ Or use OAuth credentials with proper permissions
+
+
+================================================================================
+SUPPORT FILES CREATED
+================================================================================
+
+The following standalone files will be created for you:
+1. requirements_gdrive.txt          - Only GDrive dependencies
+2. gdrive_standalone_example.py     - Complete integration example
+3. test_gdrive_sync.py              - Test script
+
+
+================================================================================
+SUMMARY
+================================================================================
+
+To integrate Google Drive sync into your updated parser:
+
+1. Copy google_drive_sync.py to your project
+2. Install dependencies from requirements_gdrive.txt
+3. Import and call sync_drive_folder() before parsing
+4. Process files from the cache directory with YOUR parser
+5. That's it!
+
+The google_drive_sync module is completely independent and doesn't depend
+on the old parser code. It just downloads files - you handle the parsing.
