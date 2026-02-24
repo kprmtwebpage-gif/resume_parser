@@ -3491,14 +3491,21 @@ def extract_visa(text):
 
 # ---------------- LINKEDIN ----------------
 def extract_linkedin(text):
-    match = re.search(
-        r"(https?://)?(www\.)?linkedin\.com/in/[a-zA-Z0-9\-_%]+",
-        text,
-        flags=re.I,
-    )
-    if match:
-        url = match.group().strip()
-        # Normalise scheme
+    """Extract LinkedIn profile URL from resume text.
+
+    Applies a three-tier strategy:
+    1. Scan lines that carry an explicit 'LinkedIn' label first — these are
+       typically on page 1 of the resume and the most reliable source.
+    2. Run the full URL regex over the entire supplied text.
+    3. Normalise and validate whatever URL was found.
+
+    Also handles PDF space-broken URLs like
+    "linkedin .com /in/ john-smith" by collapsing whitespace inside URL fragments
+    before the main regex runs.
+    """
+
+    def _normalise_url(raw: str) -> str | None:
+        url = raw.strip()
         if not url.lower().startswith("http"):
             url = "https://" + url
         url = re.sub(r"^http://", "https://", url, flags=re.I)
@@ -3507,10 +3514,72 @@ def extract_linkedin(text):
         # Remove trailing hyphens/slashes that occur when PDF text wraps mid-URL
         url = re.sub(r"[-/]+$", "", url)
         # Validate the slug is non-empty after the /in/ prefix
-        slug_match = re.search(r"/in/([a-zA-Z0-9][a-zA-Z0-9\-_%]*)", url)
+        slug_match = re.search(r"/in/([a-zA-Z0-9][a-zA-Z0-9\-_%]{1,})", url)
         if not slug_match:
             return None
+        # Reject obviously-bad slugs (pure numbers, single char)
+        slug = slug_match.group(1)
+        if slug.isdigit() or len(slug) < 2:
+            return None
         return url
+
+    _LI_URL_RE = re.compile(
+        r"(?:https?://)?(?:www\.)?linkedin\.com\s*/\s*in\s*/\s*[a-zA-Z0-9][a-zA-Z0-9\-_%]*",
+        re.I,
+    )
+    # Collapse PDF-introduced whitespace inside URL fragments before the main scan.
+    # e.g. "https:// www. linkedin .com /in/ john-smith" -> collapsible.
+    _broken_url_re = re.compile(
+        r"(?:https?://)?\s*(?:www\.)?\s*linkedin\s*\.\s*com\s*/\s*in\s*/\s*([a-zA-Z0-9][a-zA-Z0-9\-_%\s]*)",
+        re.I,
+    )
+
+    lines = non_empty_lines(text or "")
+
+    # ── Tier 1: Lines that contain an explicit LinkedIn label ────────────────
+    # These lines are virtually always in the contact/header block of page 1.
+    for ln in lines[:80]:
+        if not re.search(r"(?i)\blinked\s*in\b", ln):
+            continue
+        # Try the standard URL pattern first.
+        m = _LI_URL_RE.search(ln)
+        if m:
+            result = _normalise_url(m.group())
+            if result:
+                return result
+        # Handle PDF-broken URL on the same line.
+        m2 = _broken_url_re.search(ln)
+        if m2:
+            slug_raw = re.sub(r"\s+", "", m2.group(1))  # collapse spaces in slug
+            if slug_raw and not slug_raw.isdigit() and len(slug_raw) >= 2:
+                return _normalise_url(f"https://www.linkedin.com/in/{slug_raw}")
+        # Handle shorthand label: "LinkedIn: john-smith" or "LinkedIn: /in/john-smith"
+        label_m = re.search(
+            r"(?i)linked\s*in\s*[:\-]\s*(?:/\s*in\s*/\s*)?([a-zA-Z0-9][a-zA-Z0-9\-_%]{2,})",
+            ln,
+        )
+        if label_m:
+            slug = label_m.group(1).strip()
+            # Reject common false positives ("LinkedIn: Profile", "LinkedIn: View")
+            if slug.casefold() not in {"profile", "view", "link", "url", "connect", "visit"}:
+                result = _normalise_url(f"https://www.linkedin.com/in/{slug}")
+                if result:
+                    return result
+
+    # ── Tier 2: Full-text URL regex scan ────────────────────────────────────
+    # Collapse PDF whitespace in a scratch copy to catch broken URLs anywhere.
+    scratch = re.sub(
+        r"(linkedin)\s*\.\s*(com)",
+        r"\1.\2",
+        (text or ""),
+        flags=re.I,
+    )
+    m = _LI_URL_RE.search(scratch)
+    if m:
+        result = _normalise_url(m.group())
+        if result:
+            return result
+
     return None
 
 
@@ -4702,8 +4771,8 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         return uniq
 
     # Prefer the earliest clean title-looking line in the header.
-    # This avoids picking later wrapped skill sentences (common in PDF extractions).
-    for idx, ln in enumerate(lines[:15]):
+    # First-page / header blocks can be 20-25 non-empty lines tall, so scan[:25].
+    for idx, ln in enumerate(lines[:25]):
         for raw in header_variants(ln):
             compact = re.sub(r"\s+", " ", raw).strip()
             if not (4 <= len(compact) <= 70):
@@ -5255,9 +5324,23 @@ def main() -> int:
                 if ln:
                     last_name = ln
 
-            # Prefer first-page/top-of-resume contact/location fields (then fall back to full text).
-            phone = extract_phone(header_extraction_text) or extract_phone(extraction_text) or None
+            # ── First-page-priority extraction for all contact/header fields ──────
+            # Three-tier waterfall for every field:
+            #   Tier 1: first_page/header block (most reliable – fewest noise lines)
+            #   Tier 2: full text with links appended
+            #   Tier 3: raw resume_text (final safety net)
+
+            # Phone ──────────────────────────────────────────────────────────────
+            phone = (
+                extract_phone(header_extraction_text)
+                or extract_phone(extraction_text)
+                or None
+            )
             phone_to_store = format_phone_display(phone) or (re.sub(r"\D+", "", str(phone)) if phone else None)
+
+            # Address / Location ──────────────────────────────────────────────────
+            # Call extract_address with the narrowest text first so the location_parser
+            # module gets the cleanest possible input (no experience bullets).
             address = (
                 extract_address(
                     header_text,
@@ -5265,6 +5348,17 @@ def main() -> int:
                     last_name=last_name,
                     phone=phone,
                     allow_phone_fallback=False,
+                )
+                or (
+                    extract_address(
+                        priority_source_text,
+                        first_name=first_name,
+                        last_name=last_name,
+                        phone=phone,
+                        allow_phone_fallback=False,
+                    )
+                    if priority_source_text and priority_source_text != header_text
+                    else None
                 )
                 or extract_address(resume_text, first_name=first_name, last_name=last_name, phone=phone)
                 or None
@@ -5285,7 +5379,20 @@ def main() -> int:
                 [{k: v for k, v in e.items() if k != "raw_line"} for e in education_entries]
             ) if education_entries else None
             visa_support, visa_type = extract_visa(resume_text_norm)
-            linkedin = extract_linkedin(header_extraction_text) or extract_linkedin(extraction_text) or None
+
+            # LinkedIn ────────────────────────────────────────────────────────────
+            # Tier 1: header block (contains the contact lines)
+            # Tier 2: full text + embedded hyperlinks (PDF annotations carry URLs)
+            # Tier 3: raw links list extracted from PDF annotations
+            linkedin = (
+                extract_linkedin(header_extraction_text)
+                or extract_linkedin(extraction_text)
+                or next(
+                    (u for u in links if re.search(r"linkedin\.com/in/", u, re.I)),
+                    None,
+                )
+                or None
+            )
 
             # Store NULL for missing last names.
             # Keep 1-letter last-name initials only when they are confidently sourced from the filename
@@ -5308,9 +5415,18 @@ def main() -> int:
                     else:
                         last_name = ""
 
-            # Job title is also typically on page 1; prefer that context.
-            job_title = extract_job_title(header_text, first_name=first_name, last_name=last_name) or extract_job_title(
-                resume_text, first_name=first_name, last_name=last_name
+            # Job title ───────────────────────────────────────────────────────────
+            # Tier 1: header/first-page block (title is almost always here)
+            # Tier 2: full priority_source_text (wider first-page slice)
+            # Tier 3: entire resume text (deepest fallback)
+            job_title = (
+                extract_job_title(header_text, first_name=first_name, last_name=last_name)
+                or (
+                    extract_job_title(priority_source_text, first_name=first_name, last_name=last_name)
+                    if priority_source_text and priority_source_text != header_text
+                    else None
+                )
+                or extract_job_title(resume_text, first_name=first_name, last_name=last_name)
             )
             skills = canonicalize_skill_list(extract_skills(resume_text) or "") or None
             experience_years = extract_role_experience_years(resume_text_norm, job_title) or extract_experience_years(resume_text_norm)
