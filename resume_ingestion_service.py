@@ -74,6 +74,13 @@ def sync_and_parse():
             
             if result == 0:
                 print(f"✅ Successfully parsed and loaded resumes to database")
+                # Step 3: Apply all manual corrections (names + job titles)
+                # keyed by resume_filename so they work on any environment
+                try:
+                    from post_parse_fixes import apply_fixes
+                    apply_fixes()
+                except Exception as _fix_err:
+                    print(f"⚠️  post_parse_fixes failed (non-fatal): {_fix_err}")
                 return True
             else:
                 print(f"⚠️  Parser returned status code: {result}")

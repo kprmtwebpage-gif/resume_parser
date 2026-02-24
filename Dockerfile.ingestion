@@ -18,7 +18,8 @@ WORKDIR /app
 
 # Install Python dependencies
 COPY Backend/requirements.txt ./Backend/requirements.txt
-RUN pip install --no-cache-dir -r Backend/requirements.txt
+RUN pip install --no-cache-dir -r Backend/requirements.txt \
+    && python -m spacy download en_core_web_sm
 
 # Copy backend source code
 COPY Backend/ ./Backend/
