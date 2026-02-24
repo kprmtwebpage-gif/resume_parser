@@ -45,6 +45,7 @@ services:
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       APP_ENV: ${APP_ENV}
+      GDRIVE_FOLDER_ID: ${GDRIVE_FOLDER_ID:-}
     volumes:
       - resume_cache:/app/Backend/resumes_cache
     depends_on:
