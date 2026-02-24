@@ -1024,6 +1024,129 @@ async def chatbot_clear():
     chatbot_instance.clear_history()
     return {"message": "History cleared"}
 
+
+@app.get("/chatbot/roles")
+async def chatbot_roles():
+    """Return distinct job titles for chatbot role-picker UI"""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""SELECT DISTINCT job_title
+                    FROM {SKILLS_TABLE}
+                    WHERE job_title IS NOT NULL AND job_title != ''
+                    ORDER BY job_title"""
+            )
+            rows = cursor.fetchall()
+    return [row["job_title"] for row in rows]
+
+
+@app.get("/chatbot/search")
+async def chatbot_search(q: str = ""):
+    """Search candidates by query string (name, job title, skills, location)"""
+    query = q.strip()
+    if not query:
+        return []
+
+    words = [w for w in query.split() if w]
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            conditions = []
+            params = []
+            for word in words:
+                pattern = f"%{word}%"
+                conditions.append(
+                    """(
+                        c.first_name ILIKE %s
+                        OR c.last_name ILIKE %s
+                        OR CONCAT(c.first_name, ' ', c.last_name) ILIKE %s
+                        OR c.address ILIKE %s
+                        OR s.job_title ILIKE %s
+                        OR s.tech_skills ILIKE %s
+                    )"""
+                )
+                params.extend([pattern] * 6)
+
+            where_clause = " AND ".join(conditions) if conditions else "TRUE"
+            cursor.execute(
+                f"""SELECT DISTINCT c.id, c.first_name, c.last_name, c.email, c.phone,
+                           c.address, c.resume_filename, c.profile_picture_url,
+                           c.linkedin, c.visa_support,
+                           c.work_authorization_type as work_authorization,
+                           s.job_title, s.tech_skills, s.certifications,
+                           s.years_of_experience as professional_experience,
+                           c.qualification, c.education_structured
+                    FROM {CANDIDATES_TABLE} c
+                    LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
+                    WHERE {where_clause}
+                    ORDER BY c.id
+                    LIMIT 50""",
+                params,
+            )
+            rows = cursor.fetchall()
+
+    return [
+        Candidate(
+            id=row["id"],
+            first_name=row.get("first_name"),
+            last_name=row.get("last_name"),
+            address=row.get("address"),
+            location=row.get("address"),
+            resume_filename=row.get("resume_filename"),
+            profile_picture_url=row.get("profile_picture_url"),
+            job_title=row.get("job_title"),
+            qualification=row.get("qualification"),
+            linkedin=row.get("linkedin"),
+            visa_support="Yes" if row.get("visa_support") else "No" if row.get("visa_support") is not None else None,
+            work_authorization=row.get("work_authorization"),
+            email=row.get("email"),
+            phone=row.get("phone"),
+            emails=_as_list(row.get("email")),
+            phones=_as_list(row.get("phone")),
+            certifications=row.get("certifications"),
+            tech_skills=row.get("tech_skills"),
+            skills=_split_csv(row.get("tech_skills")),
+            professional_experience=str(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
+            education=_build_education(row),
+            experience=Experience(
+                job_title=row.get("job_title"),
+                years_of_experience=float(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
+                certifications=_split_csv(row.get("certifications")),
+            ),
+        )
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Chat session stubs (frontend calls these for session persistence;
+# we return lightweight 200 responses so the UI doesn't error)
+# ---------------------------------------------------------------------------
+
+@app.post("/chat/session")
+async def chat_create_session():
+    """Create a new chat session (stub — returns a UUID)"""
+    import uuid
+    return {"session_id": str(uuid.uuid4()), "status": "ok"}
+
+
+@app.get("/chat/history/{session_id}")
+async def chat_get_history(session_id: str):
+    """Get chat history for a session (stub — returns empty)"""
+    return {"messages": [], "session_id": session_id}
+
+
+@app.post("/chat/message/{session_id}")
+async def chat_post_message(session_id: str, request: Request):
+    """Persist a chat message (stub — no-op)"""
+    return {"status": "ok", "session_id": session_id}
+
+
+@app.delete("/chat/history/{session_id}")
+async def chat_delete_history(session_id: str):
+    """Delete chat history for a session (stub — no-op)"""
+    return {"status": "ok", "session_id": session_id}
+
+
 # ---------------------------------------------------------------------------
 # EMAIL GENERATION
 # ---------------------------------------------------------------------------

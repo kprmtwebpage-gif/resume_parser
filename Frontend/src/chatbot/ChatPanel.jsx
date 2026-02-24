@@ -6,7 +6,7 @@ import { parseCandidateResponse, getGreetingMessage } from './rules';
 import axios from 'axios';
 import companyLogo from '../assets/company-logo.png';
 
-const API_BASE = import.meta.env.VITE_CHATBOT_API_BASE || 'http://127.0.0.1:8000';
+const API_BASE = import.meta.env.VITE_CHATBOT_API_BASE || '';
 const ROLES_CACHE_KEY = 'chatbot_roles_cache';
 const SESSION_KEY = 'chatbot_session_id';
 const MESSAGES_CACHE_KEY = 'chatbot_messages_cache';

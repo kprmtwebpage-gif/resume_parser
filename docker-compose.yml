@@ -72,6 +72,8 @@ services:
       SERVE_FRONTEND: "1"
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
+    volumes:
+      - resume_cache:/app/Backend/resumes_cache
     depends_on:
       database:
         condition: service_healthy
