@@ -694,6 +694,62 @@ def non_empty_lines(text: str) -> list[str]:
     return [ln.strip() for ln in text.split("\n") if ln.strip()]
 
 
+# Major section headings that signal the start of the body of a resume.
+# The first occurrence of any of these marks the end of the "first page / header block".
+_RESUME_SECTION_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:professional\s+)?(?:work\s+)?experience|employment(?:\s+history)?|"
+    r"work\s+history|career\s+(?:history|summary|objective)|"
+    r"(?:professional\s+)?summary|objective|"
+    r"(?:technical\s+)?skills?(?:\s+(?:summary|profile|set|overview))?|"
+    r"core\s+(?:competencies|skills)|key\s+skills?|"
+    r"areas?\s+of\s+expertise|technical\s+expertise|technical\s+proficiencies?|"
+    r"education(?:al)?(?:\s+background)?|academic(?:\s+background)?|"
+    r"qualifications?|certifications?|courses?|training|"
+    r"projects?(?:\s+(?:summary|experience))?|"
+    r"publications?|awards?|honors?|achievements?|"
+    r"languages?|interests?|hobbies|volunteer|extracurricular|references?"
+    r")\s*(?::|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _extract_docx_header_block(text: str) -> str:
+    """Return the header block of a DOCX resume as a 'first-page' proxy.
+
+    Scans for the first major section heading (Experience, Skills, Education…)
+    and returns everything before it.  This mirrors what ``first_page_text`` does
+    for PDFs so that all field-extraction logic can use the same priority path
+    regardless of file format.
+
+    Returns the full text unchanged when no section heading is found.
+    """
+    lines = text.splitlines()
+    total = len(lines)
+    cut_at = total  # default: no cut
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Gate: must be short enough to be a heading, not a body sentence.
+        if not stripped or len(stripped) > 80:
+            continue
+        # Require at least 6 non-empty lines already seen to avoid cutting at the
+        # very top (some resumes have "Summary" as their first line).
+        non_empty_so_far = sum(1 for ln in lines[:i] if ln.strip())
+        if non_empty_so_far < 6:
+            continue
+        if _RESUME_SECTION_RE.match(stripped):
+            cut_at = i
+            break
+    block = "\n".join(lines[:cut_at]).strip()
+    # Sanity-check: if the block looks too short compared to the full text
+    # (likely a bad cut), fall back to the first 40 non-empty lines of the doc.
+    non_empty_block = [ln for ln in block.splitlines() if ln.strip()]
+    if len(non_empty_block) < 4 and total > 20:
+        non_empty_all = [ln for ln in lines if ln.strip()]
+        block = "\n".join(non_empty_all[:40])
+    return block
+
+
 def _build_header_text(
     resume_text: str,
     links: list[str] | None = None,
@@ -1403,8 +1459,9 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "working",
     }
 
-    # Scan a bit deeper than 12 lines; many resumes have a header block.
-    for idx, line in enumerate(lines[:25]):
+    # Scan up to 50 lines: the first-page / header-block can be quite tall
+    # (contact info, LinkedIn, address, title all precede the actual name on some layouts).
+    for idx, line in enumerate(lines[:50]):
         if is_label_line(line):
             continue
 
@@ -4995,6 +5052,8 @@ def main() -> int:
                     resume_text, links, first_page_text = extract_pdf_with_timeout(path, timeout_seconds=pdf_timeout_seconds)
                 else:
                     resume_text = extract_text_from_docx(path)
+                    # Simulate "first page" for DOCX by cutting at the first section heading.
+                    first_page_text = _extract_docx_header_block(resume_text)
             except Exception as e:
                 is_timeout = isinstance(e, TimeoutError)
                 report["skipped"].append(
@@ -5013,15 +5072,17 @@ def main() -> int:
             resume_text_norm = resume_text.lower()
 
             # Priority block:
-            # - PDFs: use first page text (where resumes usually put contact + applied role)
-            # - DOCX: fall back to the top-of-resume slice
-            priority_source_text = normalize_text(first_page_text) if (suffix == ".pdf" and first_page_text) else resume_text
+            # Both PDFs and DOCXs now produce a ``first_page_text`` / header-block
+            # so all field extraction uses the same first-page-priority path.
+            priority_source_text = normalize_text(first_page_text) if first_page_text else resume_text
             header_text, header_extraction_text = _build_header_text(
                 priority_source_text,
                 links,
                 max_lines=120,
                 max_chars=4500,
-                fraction=1.0 if (suffix == ".pdf" and first_page_text) else 0.30,
+                # Use fraction=1.0 (entire priority block) when we have a proper
+                # first-page or header-block; otherwise fall back to the top 30%.
+                fraction=1.0 if first_page_text else 0.30,
             )
 
             # De-dupe key: hash the raw file bytes so different files never collide
@@ -5044,7 +5105,21 @@ def main() -> int:
             # Prefer extracting name from the priority block first; fall back to full text.
             body_name_top = extract_name(header_text, email=email)
             body_name_full = extract_name(resume_text, email=email)
-            body_name = body_name_top if sum(bool(x) for x in body_name_top) >= sum(bool(x) for x in body_name_full) else body_name_full
+            # Prefer the header/first-page result: it is closer to the candidate's actual
+            # name block and less likely to pick a role-sentence or skills line.
+            # Only fall back to the full-text result when the header returned nothing.
+            _top_parts = sum(bool(x) for x in body_name_top)
+            _full_parts = sum(bool(x) for x in body_name_full)
+            if _top_parts >= 2:
+                # Header gave us both first + last — use it unconditionally.
+                body_name = body_name_top
+            elif _top_parts == 1 and _full_parts >= 2:
+                # Header found only one part; full text found both — prefer full.
+                body_name = body_name_full
+            elif _top_parts >= _full_parts:
+                body_name = body_name_top
+            else:
+                body_name = body_name_full
             file_name_guess = infer_name_from_filename(file, email=email)
             email_guess = _name_from_email(email) if email else ("", "")
             first_name, last_name = _pick_best_name_pair(

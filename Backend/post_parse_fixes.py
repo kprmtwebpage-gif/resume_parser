@@ -78,6 +78,8 @@ CORRECTIONS: dict[str, tuple[str | None, str | None, str | None]] = {
     "resumes_cache/ResumePavaniP.pdf":                             ("Pavani",        "",             None),
     "resumes_cache/ResumePrasanthiV.docx":                         ("Prasanthi",     "",             "Data Scientist"),
     "resumes_cache/ResumeRavitejaK.pdf":                           ("Raviteja",      "",             "Azure Data Engineer"),
+    "resumes_cache/ResumeSadiqM.pdf":                              ("Sadiq",         "M",            None),
+    "resumes_cache/ResumeSaiJanapala.pdf":                         ("Sai",           "Janapala",     None),
     "resumes_cache/ResumeSatyaChelluboina.docx":                   ("Satyaveni",     "Chelluboina",  None),
     "resumes_cache/ResumeShirishGanta.pdf":                        ("Shirish",       "Ganta",        "Java Full Stack Developer"),
     "resumes_cache/ResumeVAISHNAVIK.pdf":                          ("Vaishnavi",     "",             None),
