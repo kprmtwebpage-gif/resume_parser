@@ -17,7 +17,54 @@ import pdfplumber
 import psycopg2
 from dotenv import load_dotenv
 
-from data_normalization import canonicalize_job_title, canonicalize_skill_list, extract_qualification
+from data_normalization import (
+    canonicalize_job_title,
+    canonicalize_skill_list,
+    extract_qualification,
+)
+from education_parser import (
+    parse_education_section,
+    education_to_flat_string,
+)
+try:
+    from location_parser import (
+        detect_location_with_fallback as _detect_loc_with_fallback,
+        location_result_to_string as _loc_result_to_str,
+    )
+    _LOCATION_PARSER_AVAILABLE = True
+except ImportError:
+    _LOCATION_PARSER_AVAILABLE = False
+
+try:
+    from llm_extractor import llm_extract as _llm_extract
+    _LLM_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    _LLM_EXTRACTOR_AVAILABLE = False
+    def _llm_extract(*_a, **_k):  # type: ignore[misc]
+        return None
+
+try:
+    from validation_layer import (
+        validate_name,
+        validate_location,
+        validate_degree,
+        validate_applied_title,
+        _NLP as _SPACY_NLP,
+        _SPACY_AVAILABLE as _SPACY_NER_AVAILABLE,
+    )
+    _VALIDATION_LAYER_AVAILABLE = True
+except ImportError:
+    _VALIDATION_LAYER_AVAILABLE = False
+    _SPACY_NLP = None
+    _SPACY_NER_AVAILABLE = False
+    def validate_name(fn, ln):  # type: ignore[misc]
+        return fn, ln
+    def validate_location(loc):  # type: ignore[misc]
+        return loc
+    def validate_degree(deg):  # type: ignore[misc]
+        return deg
+    def validate_applied_title(title, text):  # type: ignore[misc]
+        return title
 
 
 # Shared canonicalization for US state abbreviations.
@@ -301,6 +348,22 @@ def _pdf_ocr_page_text(page) -> str:
         return ""
 
 
+def _extract_via_pypdfium2(path: str) -> str:
+    """Fallback PDF text extraction using pypdfium2 (Chrome PDF engine).
+    Handles PDFs that pdfplumber/pdfminer cannot parse.
+    """
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+        pdf = pdfium.PdfDocument(path)
+        parts = []
+        for page in pdf:
+            textpage = page.get_textpage()
+            parts.append(textpage.get_text_range())
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 def extract_text_from_pdf(path: str) -> str:
     text_parts: list[str] = []
     with pdfplumber.open(path) as pdf:
@@ -322,7 +385,11 @@ def extract_text_from_pdf(path: str) -> str:
                         break
             if extracted:
                 text_parts.append(extracted)
-    return "\n".join(text_parts)
+    result = "\n".join(text_parts)
+    if not result.strip():
+        # pdfplumber returned nothing — try pypdfium2 (Chrome PDF engine)
+        result = _extract_via_pypdfium2(path)
+    return result
 
 
 def extract_text_and_first_page_from_pdf(path: str) -> tuple[str, str]:
@@ -419,7 +486,16 @@ def extract_text_and_first_page_from_pdf(path: str) -> tuple[str, str]:
                     found_contact = True
                 elif _text_has_contact_signals(extracted):
                     found_contact = True
-    return "\n".join(text_parts), first_page_text
+    full_text = "\n".join(text_parts)
+    if not full_text.strip():
+        # pdfplumber returned nothing for all pages — try pypdfium2 (Chrome PDF engine)
+        fallback = _extract_via_pypdfium2(path)
+        if fallback.strip():
+            # Split on form-feed or use first 3000 chars as first page approximation
+            pages = fallback.split("\x0c") if "\x0c" in fallback else [fallback]
+            full_text = fallback
+            first_page_text = pages[0].strip() if pages else fallback
+    return full_text, first_page_text
 
 
 def _pdf_extract_worker(path: str, send_end) -> None:
@@ -1111,6 +1187,19 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "senior",
         "jr",
         "junior",
+        # Degree abbreviations that should never be treated as a surname.
+        "msc",
+        "bsc",
+        "btech",
+        "mtech",
+        "mba",
+        "phd",
+        "bca",
+        "mca",
+        "com",
+        "eng",
+        "frontend",
+        "backend",
     }
     section_words = {
         "professional summary",
@@ -1138,6 +1227,16 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         # Common section headers that can be misclassified as a name.
         "expertise snapshot",
         "applications technologies",
+        "technical",
+        "proficiencies",
+        "technical proficiencies",
+        "core competencies",
+        "key skills",
+        "technical skills",
+        "technical expertise",
+        "tools and technologies",
+        "technical summary",
+        "core skills",
     }
 
     lines = [_segment_compact_line(ln) for ln in non_empty_lines(text)]
@@ -1209,7 +1308,16 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
     def split_name_from_header(ln: str) -> str:
         # Two-column DOCX headers often look like:
         # "Satya Veni Chelluboina              Java Full Stack Developer"
+        # After _segment_compact_line, multi-spaces may be collapsed to one:
+        # "NIHARIKA A Phone: +1(469)301-6649"
         parts = [p.strip() for p in re.split(r"\s{3,}", ln) if p.strip()]
+        if len(parts) <= 1:
+            # Fallback: split on contact/title labels when spaces were collapsed
+            # e.g. "NIHARIKA A Phone: +1(469)" → "NIHARIKA A"
+            parts = [p.strip() for p in re.split(
+                r"(?i)\s+(?:phone|email|e-?mail|mobile|cell|tel|linkedin|github|address|location)\s*:",
+                ln,
+            ) if p.strip()]
         return parts[0] if parts else ln
 
     bad_name_leading_tokens = {
@@ -1227,6 +1335,17 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "skills",
         "summary",
         "objective",
+        # Additional bad leading tokens
+        "used",
+        "using",
+        "tracking",
+        "technical",
+        "core",
+        "key",
+        "various",
+        "responsible",
+        "worked",
+        "working",
     }
 
     # Scan a bit deeper than 12 lines; many resumes have a header block.
@@ -1246,13 +1365,21 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             # Remove URLs
             ln = re.sub(r"(?i)https?://\S+", " ", ln)
             ln = re.sub(r"(?i)\bwww\.\S+", " ", ln)
+            # Remove space-separated URL tokens produced by _segment_compact_line
+            # e.g. "https://www linkedin com/in/niharikaar/"  → strip "linkedin" residual
+            # Also strip any token that looks like a URL path fragment (word/word/word)
+            ln = re.sub(r"(?i)\b[a-z0-9-]+/in/[a-z0-9-]+/?", " ", ln)  # e.g. com/in/niharikaar/
+            # Handle _segment_compact_line-split email usernames, e.g.:
+            #   "shiva313757@gmail.com" -> "shiva 313757@gmail.com" after segmentation.
+            # Remove the whole pattern (word + digits@domain) before the standard email pass.
+            ln = re.sub(r"(?i)\b[A-Za-z][A-Za-z0-9]*\s+\d+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", " ", ln)
             # Remove emails
             ln = re.sub(r"(?i)\b[A-Z0-9._%+-]+\s*@\s*[A-Z0-9.-]+\s*\.\s*[A-Z]{2,}\b", " ", ln)
             ln = re.sub(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", " ", ln)
             # Remove phone-like runs
             ln = re.sub(r"\b\+?\d[\d ()\-]{8,}\d\b", " ", ln)
-            # Remove common labels
-            ln = re.sub(r"(?i)\b(mail\s*id|e-?mail|email|phone|mobile|linkedin|github)\b\s*[:\-]?", " ", ln)
+            # Remove common labels — including segmented "Linked In" form of "LinkedIn"
+            ln = re.sub(r"(?i)\b(mail\s*id|e-?mail|email|phone|mobile|linked\s*in|linkedin|github)\b\s*[:\-]?", " ", ln)
             # Remove stray numbers/ids in the header (e.g., LinkedIn slug numbers)
             ln = re.sub(r"\b\d{2,}\b", " ", ln)
             ln = re.sub(r"\s+", " ", ln).strip(" ,|\t")
@@ -1282,16 +1409,29 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         # Tokenize and drop common suffixes.
         tokens = [t for t in re.split(r"\s+", cleaned) if t]
         tokens = [t.strip(",.") for t in tokens]
-        suffixes = {"jr", "sr", "ii", "iii", "iv"}
+        suffixes = {"jr", "sr", "ii", "iii", "iv",
+                    "msc", "bsc", "mba", "phd", "btech", "mtech",
+                    "be", "bca", "mca", "mca", "mca"}
         while tokens and tokens[-1].lower().strip(".") in suffixes:
             tokens = tokens[:-1]
         if not looks_like_name_tokens(tokens):
             continue
         if tokens and tokens[0].casefold() in bad_name_leading_tokens:
             continue
+        # Suffixes that, when present at the end of any token, mark it as a role word.
+        _role_suffixes = ("developer", "engineer", "analyst", "architect",
+                          "consultant", "specialist", "administrator")
+
         def is_role_token(tok: str) -> bool:
             t = tok.lower().strip(".,")
-            return t in role_words or (t.endswith("ing") and t[:-3] in role_words)
+            if t in role_words:
+                return True
+            if t.endswith("ing") and t[:-3] in role_words:
+                return True
+            # Catch compound role tokens like "Dotnetdeveloper", "Javadeveloper"
+            if any(t.endswith(sfx) for sfx in _role_suffixes) and len(t) > min(len(sfx) for sfx in _role_suffixes):
+                return True
+            return False
 
         if any(is_role_token(t) for t in tokens):
             # If it's a name followed by a title, keep only the name prefix.
@@ -1331,16 +1471,41 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         first = tokens[0]
         last = tokens[-1] if len(tokens) >= 2 else ""
         last_alpha = re.sub(r"[^A-Za-z]", "", last)
-        # Keep last initials only in early header lines; otherwise treat them as missing.
+        # Keep last initials in early header lines (idx ≤ 5) regardless of case.
+        # In later lines, drop single-char tokens that are likely not a surname.
         if len(last_alpha) <= 1:
-            letters = re.sub(r"[^A-Za-z]", "", cleaned)
-            if not (idx <= 2 and letters and letters.isupper()):
+            if not (idx <= 5 and last_alpha):
                 last = ""
 
         first = first[:1].upper() + first[1:].lower() if first else ""
         last = last[:1].upper() + last[1:].lower() if last else ""
         if first:
             candidates.append((score, (first, last)))
+
+    # ── spaCy NER boost ────────────────────────────────────────────
+    # PERSON entities found in the top 12 lines of the resume are added as
+    # high-confidence candidates (score ≈75) so they beat heuristic results
+    # (max ~65) and provide a fallback when heuristics find nothing.
+    if _SPACY_NER_AVAILABLE and _SPACY_NLP is not None:
+        try:
+            _ner_header = " ".join(str(ln) for ln in lines[:12])
+            _doc = _SPACY_NLP(_ner_header[:600])
+            for _ent in _doc.ents:
+                if _ent.label_ == "PERSON":
+                    _etoks = [t.strip(".,") for t in _ent.text.split() if t.strip(".,")]
+                    if not looks_like_name_tokens(_etoks):
+                        continue
+                    if _etoks[0].casefold() in bad_name_leading_tokens:
+                        continue
+                    _sfn = _etoks[0][:1].upper() + _etoks[0][1:].lower()
+                    _sln = (_etoks[-1][:1].upper() + _etoks[-1][1:].lower()) if len(_etoks) >= 2 else ""
+                    if _sfn.casefold() not in role_words and _sln.casefold() not in role_words:
+                        # Earlier entity start ⇒ slight bonus
+                        _ner_score = 75 + max(0, 5 - _ent.start)
+                        candidates.append((_ner_score, (_sfn, _sln)))
+        except Exception:
+            pass
+    # ── end NER boost ────────────────────────────────────────────
 
     if not candidates:
         # Fall back to email-based guess if nothing else was found.
@@ -1430,7 +1595,25 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "datascientist",
         "scientist",
         "admin",
+        # Tech-stack words that appear in filenames but are not surname candidates.
+        "net",
+        "dotnet",
+        "java",
+        "python",
+        "react",
+        "angular",
+        "aws",
+        "azure",
+        "cloud",
+        "sql",
+        "bi",
     }
+    # Suffixes: a token *ending* with any of these is also a role token
+    # (e.g. "dotnetdeveloper", "javadeveloper", "fullstackengineer").
+    _fn_role_suffixes = (
+        "developer", "engineer", "analyst", "architect",
+        "consultant", "specialist", "administrator",
+    )
     org_tokens = {
         "inc",
         "incorporated",
@@ -1491,6 +1674,9 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         # Reject filenames containing skills/roles/org words.
         part_compact = re.sub(r"[^a-z0-9.+#]", "", part_cf)
         if part_cf in roleish_tokens or part_compact in roleish_tokens:
+            return "", ""
+        # Also reject compound role tokens like "dotnetdeveloper", "javadeveloper".
+        if any(part_compact.endswith(sfx) for sfx in _fn_role_suffixes) and len(part_compact) > min(len(s) for s in _fn_role_suffixes):
             return "", ""
         if part_cf in org_tokens or part_compact in org_tokens:
             return "", ""
@@ -1613,13 +1799,55 @@ def _pick_best_name_pair(
         "application",
         "technologies",
         "technology",
+        # Tech-stack / degree tokens that wrongly appear in filenames as surnames.
+        "stack",
+        "full",
+        "msc",
+        "bsc",
+        "com",
+        "net",
+        "dotnet",
+        "java",
+        "python",
+        "react",
+        "angular",
+        "aws",
+        "azure",
+        "sql",
+        "backend",
+        "frontend",
+        "tracking",
+        "used",
+        "analyst",
+        "architect",
+        "consultant",
+        "specialist",
+        "manager",
+        "lead",
+        "intern",
+        "senior",
+        "junior",
     }
+    # Role-suffix patterns: any token ending with these is also a bad token.
+    _bad_token_suffixes = (
+        "developer", "engineer", "analyst", "architect",
+        "consultant", "specialist", "administrator",
+    )
+
+    def _is_bad_token(tok: str) -> bool:
+        t = (tok or "").strip().casefold()
+        if t in bad_tokens:
+            return True
+        # Compound role tokens like "dotnetdeveloper", "fullstackengineer"
+        if any(t.endswith(sfx) for sfx in _bad_token_suffixes) and len(t) > min(len(s) for s in _bad_token_suffixes):
+            return True
+        return False
 
     def looks_plausible_filename_pair(pair: tuple[str, str]) -> bool:
         fn, ln = (pair[0] or "").strip(), (pair[1] or "").strip()
         if not fn or not ln:
             return False
-        if fn.casefold() in bad_tokens or ln.casefold() in bad_tokens:
+        if _is_bad_token(fn) or _is_bad_token(ln):
             return False
         fn_alpha = re.sub(r"[^A-Za-z]", "", fn)
         ln_alpha = re.sub(r"[^A-Za-z]", "", ln)
@@ -1634,9 +1862,9 @@ def _pick_best_name_pair(
             s += 20
         if ln:
             s += 30
-        if fn.casefold() in bad_tokens:
+        if _is_bad_token(fn):
             s -= 60
-        if ln.casefold() in bad_tokens:
+        if _is_bad_token(ln):
             s -= 60
         if fn and len(re.sub(r"[^A-Za-z]", "", fn)) <= 1:
             s -= 30
@@ -1654,13 +1882,19 @@ def _pick_best_name_pair(
         """Reward names that actually appear in the resume text.
 
         This is especially important for filename guesses.
+        Email addresses are stripped from confirm_text so that a name
+        derived from the email local-part cannot self-confirm against it.
+        (e.g. "atniha.reddy@gmail.com" must not confirm first_name="Atniha")
         """
 
         fn, ln = (pair[0] or "").strip(), (pair[1] or "").strip()
         if not confirm_text or (not fn and not ln):
             return 0
 
-        t = re.sub(r"\s+", " ", confirm_text).casefold()
+        # Strip all email addresses before checking so email-local-part-derived
+        # names cannot confirm themselves against the email in the resume text.
+        stripped = re.sub(r"[\w.+%-]+@[\w.-]+\.[A-Za-z]{2,}", " ", confirm_text)
+        t = re.sub(r"\s+", " ", stripped).casefold()
 
         def norm_word(w: str) -> str:
             return re.sub(r"[^a-z]", "", w.casefold())
@@ -1733,6 +1967,11 @@ def _pick_best_name_pair(
         if non_empty:
             best_pair = max(non_empty, key=lambda x: x[0])[1]
             best_fn, best_ln = (best_pair[0] or "").strip(), (best_pair[1] or "").strip()
+    # Sanitize: discard tokens that contain no alphabetic characters (e.g. "(", ".", "-")
+    if best_fn and not re.search(r"[A-Za-z]", best_fn):
+        best_fn = ""
+    if best_ln and not re.search(r"[A-Za-z]", best_ln):
+        best_ln = ""
     return best_fn, best_ln
 
 
@@ -1806,6 +2045,25 @@ def extract_address(
     all_lines = [_segment_compact_line(ln) for ln in non_empty_lines(text)]
 
     skills_master = _skills_master_set()
+
+    # ── Primary path: use location_parser for a skill-context-safe result ──────
+    # The module limits its scan to the contact/header section, applies a
+    # skill-context guard (rejects city candidates preceded by tech/tool names),
+    # and returns a structured dict.  A "high" confidence result is returned
+    # immediately; medium/low are kept as a backup candidate (_lp_str) and
+    # used when the regex logic below finds nothing.
+    _lp_str: str = ""
+    _lp_confidence: str = "low"
+    if _LOCATION_PARSER_AVAILABLE:
+        try:
+            _lp_result = _detect_loc_with_fallback(text, str(phone) if phone else None)
+            _lp_confidence = _lp_result.get("confidence", "low")
+            _lp_str = _loc_result_to_str(_lp_result)
+            if _lp_confidence == "high" and _lp_str:
+                return _lp_str
+        except Exception:
+            _lp_str = ""
+            _lp_confidence = "low"
 
     def _infer_phone_preference(phone_value: str | int | None) -> tuple[str, str]:
         """Return (preferred_country, preferred_state_full).
@@ -2161,6 +2419,17 @@ def extract_address(
         # org-ish tokens seen in resumes
         "freddie",
         "mac",
+        # Testing frameworks / tools — prevents "Xunit, Mississippi", "Xaml, Mississippi" etc.
+        "xunit", "nunit", "junit", "testng", "mstest", "specflow",
+        "selenium", "moq", "mockito", "jest", "jasmine", "karma", "pytest",
+        "xaml", "wpf", "winforms", "blazor", "silverlight",
+        # Key generic terms that are never a city name
+        "testing", "automation", "tdd", "bdd",
+        # Additional JS / web frameworks sometimes adjacent to state names in skill lists
+        "angular", "react", "redux", "vue", "svelte", "jquery",
+        "typescript", "nodejs",
+        # DevOps / process tokens
+        "terraform", "ansible", "devops", "cicd", "agile", "scrum", "kanban",
     }
 
     def _looks_like_sql_state_suffix(full_line: str, state_match_end: int) -> bool:
@@ -2334,6 +2603,38 @@ def extract_address(
             break
 
     top = all_lines[:cutoff]
+
+    # Detect experience section start so we never treat employer city lines as a
+    # candidate's home location.  We record the index in `top` (not all_lines).
+    _exp_hdr_re = re.compile(
+        r"(?i)^\s*(?:professional\s+)?(?:work\s+)?experience\b"
+        r"|^\s*employment\s+(?:history|summary)\b"
+        r"|^\s*work\s+history\b"
+    )
+    _experience_section_start_idx: int | None = None
+    for _idx, _ln in enumerate(top):
+        stripped_ln = _ln.strip()
+        if _exp_hdr_re.search(stripped_ln) and len(stripped_ln) < 60:
+            _experience_section_start_idx = _idx
+            break
+
+    # Track the skills section start in the FULL all_lines list so the deep
+    # fallback scan stops before reaching technology name bullets.
+    # This is the primary fix for false positives like "Xunit, Mississippi".
+    _skills_hdg_re = re.compile(
+        r"(?i)^\s*(technical\s+skills?|skills?|core\s+(?:skills?|competencies)|"  
+        r"key\s+skills?|expertise(?:\s+snapshot)?|competencies|technologies|"  
+        r"tools?\s*(?:and|&)\s*technologies)\s*$"
+    )
+    _skills_section_start_idx: int | None = None
+    for _si, _sl in enumerate(all_lines[:300]):
+        _sl_stripped = _sl.strip()
+        if not _sl_stripped or len(_sl_stripped) > 80:
+            continue
+        if _skills_hdg_re.search(_sl_stripped):
+            _skills_section_start_idx = _si
+            break
+
     zip_state_re = re.compile(r"\b(" + "|".join(sorted(US_STATE_ABBRS)) + r")\b\s*\d{5}(?:-\d{4})?\b")
     city_state_zip_re = re.compile(
         r"\b([A-Za-z][A-Za-z .'-]{1,})[,\s]+(" + "|".join(sorted(US_STATE_ABBRS)) + r")\s*\d{5}(?:-\d{4})?\b"
@@ -2648,6 +2949,12 @@ def extract_address(
         if _looks_like_experience_location_line(ln):
             continue
 
+        # Past the experience section heading: accept location only when it has
+        # an explicit contact/address label (e.g. "Address:", "Location:").
+        if _experience_section_start_idx is not None and i >= _experience_section_start_idx:
+            if not preferred_location_label_re.search(ln):
+                continue
+
         # If a contact line contains separators, sometimes one segment is location.
         # Handle this BEFORE skipping because the line may contain "LinkedIn" or an email.
         if any(sep in ln for sep in ["|", "◇", "·", "•", "∙"]):
@@ -2870,9 +3177,16 @@ def extract_address(
     city_state_country_any = re.compile(r"\b([A-Z][A-Za-z .'-]{1,}),\s*([A-Za-z .'-]{2,}|[A-Z]{2})\s*,\s*([A-Za-z .'-]{2,})\b")
     city_state_name_any = re.compile(r"\b([A-Z][A-Za-z .'-]{1,}),\s*([A-Z][A-Za-z .'-]{2,})\b")
 
-    for ln in all_lines[:300]:
+    for i_fb, ln in enumerate(all_lines[:300]):
         if _looks_like_experience_location_line(ln):
             continue
+        # Stop harvesting location from the experience section in the deep fallback too.
+        if _experience_section_start_idx is not None and i_fb >= _experience_section_start_idx:
+            continue
+        # Stop at the skills section — technology names in skill bullets are NOT locations.
+        # This is the primary fix for "Xunit, Mississippi, United States" false positives.
+        if _skills_section_start_idx is not None and i_fb >= _skills_section_start_idx:
+            break
 
         # As above: redact emails/URLs rather than skipping the whole line,
         # since many resumes put email + location together.
@@ -2951,6 +3265,12 @@ def extract_address(
                     return format_location(None, preferred_state or None, preferred_country)
 
         return best_loc
+
+    # Use location_parser medium/low-confidence result if the full regex scan
+    # also found nothing valid.  This is the final content-based attempt before
+    # falling back to the phone-derived country/state.
+    if not best_loc and _lp_str:
+        return _lp_str
 
     # Final fallback: if we couldn't find a location string in the text,
     # optionally use phone-derived country/state rather than returning blank.
@@ -3042,9 +3362,19 @@ def extract_linkedin(text):
         flags=re.I,
     )
     if match:
-        url = match.group()
-        if not url.startswith("http"):
+        url = match.group().strip()
+        # Normalise scheme
+        if not url.lower().startswith("http"):
             url = "https://" + url
+        url = re.sub(r"^http://", "https://", url, flags=re.I)
+        # Ensure www. prefix for consistency
+        url = re.sub(r"^https://linkedin\.com/", "https://www.linkedin.com/", url, flags=re.I)
+        # Remove trailing hyphens/slashes that occur when PDF text wraps mid-URL
+        url = re.sub(r"[-/]+$", "", url)
+        # Validate the slug is non-empty after the /in/ prefix
+        slug_match = re.search(r"/in/([a-zA-Z0-9][a-zA-Z0-9\-_%]*)", url)
+        if not slug_match:
+            return None
         return url
     return None
 
@@ -4755,7 +5085,21 @@ def main() -> int:
                 or extract_address(resume_text, first_name=first_name, last_name=last_name, phone=phone)
                 or None
             )
-            qualification = extract_qualification(resume_text)
+            # ── Education: structured parse first, flat fallback ────────────
+            education_entries = parse_education_section(resume_text)
+            if education_entries:
+                # Derive the flat qualification string from structured entries
+                # (keeps backward-compat with the qualification TEXT column)
+                from data_normalization import post_normalize_qualification
+                _flat = education_to_flat_string(education_entries)
+                qualification = post_normalize_qualification(_flat) if _flat else extract_qualification(resume_text)
+            else:
+                qualification = extract_qualification(resume_text)
+                education_entries = []
+            import json as _json
+            _edu_structured = _json.dumps(
+                [{k: v for k, v in e.items() if k != "raw_line"} for e in education_entries]
+            ) if education_entries else None
             visa_support, visa_type = extract_visa(resume_text_norm)
             linkedin = extract_linkedin(header_extraction_text) or extract_linkedin(extraction_text) or None
 
@@ -4787,6 +5131,57 @@ def main() -> int:
             skills = canonicalize_skill_list(extract_skills(resume_text) or "") or None
             experience_years = extract_role_experience_years(resume_text_norm, job_title) or extract_experience_years(resume_text_norm)
             certifications = extract_standard_certifications(resume_text, job_title=job_title, skills=skills)
+
+            # ── LLM enrichment layer (opt-in via LLM_EXTRACT_ENABLED=true) ────────
+            _llm = _llm_extract(resume_text, ocr_text="")
+            if _llm:
+                # Job title: prefer LLM when it has high confidence or rule-based missed
+                _llm_jt = _llm.get("job_title")
+                _llm_jt_conf = _llm.get("job_title_confidence") or 0.0
+                if _llm_jt and (_llm_jt_conf >= 0.85 or not job_title):
+                    job_title = _llm_jt
+
+                # LinkedIn: fill in when rule-based extraction missed it
+                _llm_li = _llm.get("linkedin_url")
+                if _llm_li and not linkedin:
+                    linkedin = _llm_li
+
+                # Certifications: use LLM list when rule-based returned nothing
+                _llm_certs = _llm.get("certifications") or []
+                if _llm_certs and not certifications:
+                    certifications = ", ".join(
+                        c.get("normalized_name") or c.get("name", "")
+                        for c in _llm_certs if c.get("name")
+                    ) or None
+
+                # Education: enrich structured entries when rule-based returned none
+                _llm_edu = _llm.get("education") or []
+                if _llm_edu and not education_entries:
+                    education_entries = [
+                        {
+                            "degree":            e.get("normalized_degree") or e.get("degree") or "",
+                            "specialization":    e.get("field_of_study") or "",
+                            "university":        e.get("university") or "",
+                            "grad_year":         e.get("grad_year") or "",
+                            "level":             e.get("level") or "",
+                            "confidence":        e.get("confidence") or 0.0,
+                        }
+                        for e in _llm_edu if isinstance(e, dict)
+                    ]
+                    import json as _json2
+                    _edu_structured = _json2.dumps(
+                        [{k: v for k, v in e.items() if k != "raw_line"} for e in education_entries]
+                    ) if education_entries else _edu_structured
+            # ── end LLM enrichment ────────────────────────────────────────────
+
+            # ── Validation layer (post-processing, applied after extraction) ──
+            if _VALIDATION_LAYER_AVAILABLE:
+                first_name, last_name = validate_name(first_name, last_name)
+                address = validate_location(address)
+                qualification = validate_degree(qualification)
+                job_title = validate_applied_title(job_title, resume_text)
+            # ── end validation layer ──────────────────────────────────────────
+
             # professional_experience removed
 
             parsed_at = datetime.now()
@@ -4819,8 +5214,9 @@ def main() -> int:
                 f"""
                 INSERT INTO {CANDIDATES_TABLE}
                 (first_name, last_name, address, phone, email, qualification,
-                 visa_support, work_authorization_type, linkedin, resume_filename, resume_sha256, parsed_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 visa_support, work_authorization_type, linkedin, resume_filename,
+                 resume_sha256, parsed_at, education_structured)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (resume_sha256) DO UPDATE SET
                     first_name = EXCLUDED.first_name,
                     last_name = EXCLUDED.last_name,
@@ -4832,7 +5228,8 @@ def main() -> int:
                     work_authorization_type = EXCLUDED.work_authorization_type,
                     linkedin = EXCLUDED.linkedin,
                     resume_filename = EXCLUDED.resume_filename,
-                    parsed_at = EXCLUDED.parsed_at
+                    parsed_at = EXCLUDED.parsed_at,
+                    education_structured = EXCLUDED.education_structured
                 RETURNING id
             """,
                 (
@@ -4848,6 +5245,7 @@ def main() -> int:
                     resume_file_ref,
                     resume_sha256,
                     parsed_at,
+                    _edu_structured,
                 ),
             )
 

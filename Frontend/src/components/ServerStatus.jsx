@@ -10,8 +10,7 @@ export default function ServerStatus() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 3000)
       
-      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
-      const response = await fetch(`${apiBaseUrl}/`, { 
+      const response = await fetch('/', { 
         method: 'GET',
         mode: 'cors',
         signal: controller.signal
@@ -63,31 +62,31 @@ export default function ServerStatus() {
   if (backendStatus === 'running' || (backendStatus === 'checking' && retryCount < 5)) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm">
-      <div className="mx-4 max-w-md rounded-xl bg-white p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/90">
+      <div className="mx-4 max-w-md rounded-lg bg-white p-6 shadow-modal border border-neutral-200">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
             <svg className="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-slate-900">Backend Server Not Running</h3>
+          <h3 className="text-lg font-semibold text-neutral-900">Backend Server Not Running</h3>
         </div>
 
-        <div className="space-y-3 text-sm text-slate-600">
+        <div className="space-y-3 text-sm text-neutral-600">
           <p>The frontend UI is running, but the backend API server is not accessible.</p>
           
-          <div className="rounded-lg bg-slate-50 p-3 font-mono text-xs">
-            <div className="mb-1 font-semibold text-slate-700">Status:</div>
-            <div className="text-slate-600">
+          <div className="rounded-lg bg-neutral-50 p-3 font-mono text-xs border border-neutral-200">
+            <div className="mb-1 font-semibold text-neutral-700">Status:</div>
+            <div className="text-neutral-600">
               Frontend: <span className="text-green-600">✓ Running</span> (http://127.0.0.1:5173)
             </div>
-            <div className="text-slate-600">
+            <div className="text-neutral-600">
               Backend: <span className="text-red-600">✗ {backendStatus === 'checking' ? 'Checking...' : 'Offline'}</span> (http://127.0.0.1:8000)
             </div>
           </div>
 
-          <div className="rounded-lg bg-blue-50 p-3">
+          <div className="rounded-lg bg-blue-50 p-3 border border-blue-200">
             <div className="mb-2 font-semibold text-blue-900">To start the backend:</div>
             <ol className="list-inside list-decimal space-y-1 text-blue-800">
               <li>Open a terminal in the <code className="rounded bg-blue-100 px-1">Backend</code> folder</li>

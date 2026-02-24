@@ -46,3 +46,31 @@ export async function fetchCandidateById(id) {
   const res = await api.get(`/candidates/${id}`)
   return res.data
 }
+
+export async function updateCandidate(id, data) {
+  const res = await api.patch(`/candidates/${id}`, data)
+  return res.data
+}
+
+export async function uploadResume(file, onProgress) {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  const res = await api.post('/upload-resume', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    onUploadProgress: (progressEvent) => {
+      if (onProgress && progressEvent.total) {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        onProgress(percentCompleted)
+      }
+    },
+  })
+  return res.data
+}
+
+export async function fetchStats() {
+  const res = await api.get('/stats')
+  return res.data
+}

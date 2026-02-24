@@ -17,10 +17,10 @@ export default function ProfileTabs({ active, onChange }) {
           type="button"
           onClick={() => onChange(t.key)}
           className={classNames(
-            'rounded-xl px-5 py-3 text-sm font-bold transition-all duration-200',
+            'rounded-button px-5 py-2.5 text-sm font-semibold transition-all duration-200',
             active === t.key
-              ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/30 scale-105'
-              : 'bg-white text-slate-700 ring-2 ring-slate-200 hover:ring-blue-400 hover:shadow-md hover:scale-105'
+              ? 'bg-brand-500 text-white'
+              : 'bg-white text-neutral-700 border border-neutral-300 hover:border-brand-400 hover:bg-neutral-50'
           )}
         >
           {t.label}

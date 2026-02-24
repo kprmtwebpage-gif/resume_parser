@@ -30,3 +30,57 @@ HTML
 CSS
 REST
 GraphQL
+
+# Testing frameworks (added to prevent false-positive location extraction)
+XUnit
+NUnit
+JUnit
+TestNG
+MSTest
+SpecFlow
+Cucumber
+Selenium
+Playwright
+Cypress
+Puppeteer
+Moq
+Mockito
+Jest
+Jasmine
+Karma
+Pytest
+TDD
+BDD
+
+# Windows / .NET UI tech
+XAML
+WPF
+WinForms
+Blazor
+Silverlight
+UWP
+MAUI
+Razor
+
+# Additional web / JS tools
+Redux
+Svelte
+jQuery
+TypeScript
+NodeJS
+Webpack
+Babel
+
+# DevOps / process
+Terraform
+Ansible
+DevOps
+CI/CD
+Agile
+Scrum
+Kanban
+
+# Misc that can appear before state names in skill bullets
+Integration Testing
+Unit Testing
+Automation Testing

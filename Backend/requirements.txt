@@ -10,8 +10,20 @@ pycountry>=23.12
 pytesseract>=0.3.10
 fastapi>=0.104.0
 uvicorn>=0.24.0
+python-multipart>=0.0.9
+
+# Optional: structured NER-based university extraction (spaCy ≤3.7 + Python ≤3.12)
+# spacy>=3.5,<3.8
+# en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz
 
 # Optional: Google Drive folder sync (RESUME_INPUT_MODE=gdrive)
 google-api-python-client>=2.120
 google-auth>=2.25
 google-auth-oauthlib>=1.2
+
+# Optional: LLM-powered extraction layer (set LLM_EXTRACT_ENABLED=true to activate)
+# Choose ONE depending on your LLM provider:
+#   OpenAI / Groq / any OpenAI-compatible API:
+# openai>=1.0
+#   Anthropic Claude:
+# anthropic>=0.20

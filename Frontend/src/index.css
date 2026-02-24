@@ -3,35 +3,48 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* Corporate Color Palette */
+    --color-primary: #1F4FD8;
+    --color-primary-hover: #1A42B8;
+    --color-primary-light: #E6EFFF;
+    --color-bg-primary: #FFFFFF;
+    --color-bg-secondary: #F5F7FA;
+    --color-text-primary: #1A1A1A;
+    --color-text-secondary: #6B7280;
+    --color-border: #E5E7EB;
+    --color-border-focus: #1F4FD8;
+  }
+
   html {
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
       'Apple Color Emoji', 'Segoe UI Emoji';
   }
 
   body {
-    @apply bg-slate-50 text-slate-900;
+    @apply bg-neutral-100 text-neutral-900;
   }
 }
 
 @layer components {
   .card {
-    @apply rounded-xl bg-white shadow-card;
+    @apply rounded-card bg-white shadow-card border border-neutral-200;
   }
 
   .btn {
-    @apply inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition;
+    @apply inline-flex items-center justify-center rounded-button px-4 py-2.5 text-sm font-semibold transition-all duration-200;
   }
 
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+    @apply btn bg-brand-500 text-white hover:bg-brand-600 shadow-button;
   }
 
   .btn-secondary {
-    @apply btn bg-white text-slate-700 ring-1 ring-inset ring-slate-200 hover:bg-slate-50;
+    @apply btn bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50;
   }
 
   .input {
-    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100;
+    @apply w-full rounded-button border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100;
   }
 }
 

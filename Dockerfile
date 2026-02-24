@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────
+# Stage 1 – Build the React/Vite frontend
+# ─────────────────────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/Frontend
+
+# Install dependencies
+COPY Frontend/package*.json ./
+RUN npm ci
+
+# Copy source and build
+COPY Frontend/ ./
+RUN npm run build
+
+
+# ─────────────────────────────────────────────────────────
+# Stage 2 – Python backend + bundled frontend
+# ─────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+# System dependencies (tesseract for pytesseract, poppler for pdfplumber)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    poppler-utils \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY Backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend source
+COPY Backend/ ./Backend/
+
+# Copy built frontend into expected path
+COPY --from=frontend-builder /app/Frontend/dist ./Frontend/dist
+
+# Set env defaults (overridden at runtime via --env-file or -e flags)
+ENV PYTHONUNBUFFERED=1 \
+    SERVE_FRONTEND=1 \
+    API_HOST=0.0.0.0 \
+    API_PORT=8000
+
+WORKDIR /app/Backend
+
+EXPOSE 8000
+
+CMD ["python", "api_server.py"]

@@ -1,8 +1,11 @@
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   EnvelopeIcon,
   MapPinIcon,
   PhoneIcon,
 } from '@heroicons/react/24/outline'
+import ResumeViewer from './ResumeViewer.jsx'
+import EmailProviderModal from './EmailProviderModal.jsx'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -10,118 +13,285 @@ function initials(first, last) {
   return (a + b).toUpperCase() || '—'
 }
 
-function sanitizeLinkedInUrl(url) {
-  if (!url) return null
-  
-  // Trim whitespace
-  url = url.trim()
-  
-  // If URL doesn't start with http/https, add https
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = 'https://' + url
-  }
-  
-  // Convert http to https for LinkedIn
-  if (url.startsWith('http://') && url.includes('linkedin.com')) {
-    url = url.replace('http://', 'https://')
-  }
-  
-  return url
-}
+export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit }) {
+  const [isViewerOpen, setIsViewerOpen] = useState(false)
+  const [isGenerated, setIsGenerated] = useState(false)
+  const [isDownloaded, setIsDownloaded] = useState(false)
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const dropdownRef = useRef(null)
 
-export default function ProfileCard({ row, checked, onToggle, onOpen }) {
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
   const location = row.location || row.address || '—'
+  const hasResume = row.resume_filename
+  const baseResumeUrl = hasResume ? `/candidates/${row.id}/resume` : null
+  const viewResumeUrl = hasResume ? `/candidates/${row.id}/resume?inline=true` : null
+  const downloadResumeUrl = hasResume ? baseResumeUrl : null
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false)
+      }
+    }
+    
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isDropdownOpen])
+
+  const handleViewResume = useCallback((e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!viewResumeUrl) return
+    setIsViewerOpen(true)
+    setIsDropdownOpen(false)
+  }, [viewResumeUrl])
+
+  const handleDownloadResume = useCallback((e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!downloadResumeUrl) return
+    
+    // Mark as downloaded (temporary state only)
+    setIsDownloaded(true)
+    setIsDropdownOpen(false)
+    
+    // Then trigger download
+    const link = document.createElement('a')
+    link.href = downloadResumeUrl
+    link.download = row.resume_filename || `resume_${row.id}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [downloadResumeUrl, row.resume_filename, row.id])
+
+  const handleCloseViewer = useCallback(() => {
+    setIsViewerOpen(false)
+  }, [])
+
+  const handleGenerateClick = useCallback((e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    // Mark as generated and open modal
+    setIsGenerated(true)
+    setIsDropdownOpen(false)
+    setIsEmailModalOpen(true)
+  }, [])
+
+  const handleEmailProvider = useCallback((provider) => {
+    // Generate email subject and body from candidate data
+    const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
+    const primarySkill = row.job_title || row.primary_skill || 'N/A'
+    
+    const subject = `Profile Submission – ${fullName} – ${primarySkill}`
+    
+    const body = `PERSONAL DETAILS:
+Full Name: ${fullName}
+Current Location: ${row.location || row.address || 'N/A'}
+Phone: ${row.phone || 'N/A'}
+Email: ${row.email || 'N/A'}
+LinkedIn: ${row.linkedin_url || 'N/A'}
+
+EDUCATIONAL DETAILS:
+Degree: ${row.degree || row.education || 'N/A'}
+University: ${row.university || 'N/A'}
+Year of Completion: ${row.graduation_year || 'N/A'}
+
+SUBMITTAL DETAILS:
+Work Authorization: ${row.work_authorization || row.visa_status || 'N/A'}
+Submittal Type: ${row.submittal_type || 'N/A'}
+Rate: $${row.rate || row.hourly_rate || 'N/A'}
+Availability: ${row.availability || 'N/A'}`
+
+    // Encode subject and body for URL
+    const encodedSubject = encodeURIComponent(subject)
+    const encodedBody = encodeURIComponent(body)
+
+    // Build email URL based on provider
+    let emailUrl = ''
+    if (provider === 'gmail') {
+      emailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=&su=${encodedSubject}&body=${encodedBody}`
+    } else if (provider === 'outlook') {
+      emailUrl = `https://outlook.office.com/mail/deeplink/compose?to=&subject=${encodedSubject}&body=${encodedBody}`
+    }
+
+    // Open in new tab
+    if (emailUrl) {
+      window.open(emailUrl, '_blank', 'noopener,noreferrer')
+    }
+
+    // Close modal
+    setIsEmailModalOpen(false)
+  }, [row])
+
+  const handleEditClick = useCallback((e) => {
+    e.stopPropagation()
+    setIsDropdownOpen(false)
+    onEdit()
+  }, [onEdit])
 
   return (
-    <div className="group relative grid grid-cols-[48px_1fr_300px] items-center gap-6 px-6 py-5 transition-all duration-200 hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-purple-50/50 rounded-xl hover:shadow-lg hover:scale-[1.01]">
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 to-purple-500/0 group-hover:from-blue-500/5 group-hover:to-purple-500/5 rounded-xl transition-all duration-200"></div>
-      <div className="relative flex items-center">
-        <input
-          type="checkbox"
-          className="h-5 w-5 rounded-lg border-2 border-slate-300 text-blue-600 focus:ring-blue-200 focus:ring-4 transition-all hover:border-blue-400 cursor-pointer"
-          checked={checked}
-          onChange={(e) => onToggle(e.target.checked)}
-        />
-      </div>
+    <div className="bg-white hover:bg-neutral-50/50 transition-colors duration-150">
+      <div className="grid items-center py-4" style={{ gridTemplateColumns: '5% 27% 26% 32% 10%', width: '100%' }}>
+        <div className="flex justify-center px-4">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border border-neutral-300 text-brand-500 focus:ring-brand-200 focus:ring-2 transition-all hover:border-brand-400 cursor-pointer"
+            checked={checked}
+            onChange={(e) => onToggle(e.target.checked)}
+          />
+        </div>
 
-      <div className="relative grid grid-cols-[1fr_220px] gap-8">
-        <div className="flex items-center gap-4">
-          <div className="relative h-12 w-12 rounded-xl overflow-hidden bg-gradient-to-br from-blue-500 to-purple-600 shadow-md ring-2 ring-white group-hover:shadow-lg transition-all">
-            {row.profile_picture_url ? (
-              <img 
-                src={row.profile_picture_url} 
-                alt={`${row.first_name || ''} ${row.last_name || ''}`.trim()}
-                className="h-full w-full object-cover"
-                onError={(e) => {
-                  // Hide image and show initials if loading fails
-                  e.target.style.display = 'none'
-                }}
-              />
-            ) : null}
-            <div className={`absolute inset-0 flex items-center justify-center text-base font-bold text-white ${row.profile_picture_url ? 'hidden' : ''}`}>
-              {initials(row.first_name, row.last_name)}
+        <div className="overflow-hidden px-6">
+          <div className="flex items-center gap-2">
+            <div className="relative h-9 w-9 rounded-lg overflow-hidden bg-brand-500 flex items-center justify-center flex-shrink-0">
+              {row.profile_picture_url ? (
+                <img 
+                  src={row.profile_picture_url} 
+                  alt={`${row.first_name || ''} ${row.last_name || ''}`.trim()}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    e.target.style.display = 'none'
+                  }}
+                />
+              ) : null}
+              <div className={`absolute inset-0 flex items-center justify-center text-sm font-semibold text-white ${row.profile_picture_url ? 'hidden' : ''}`}>
+                {initials(row.first_name, row.last_name)}
+              </div>
+            </div>
+
+            <div className="min-w-0">
+              <button
+                type="button"
+                className="block truncate text-left text-sm font-semibold text-neutral-900 hover:text-brand-500 transition-colors"
+                onClick={onOpen}
+                title={fullName}
+              >
+                {fullName}
+              </button>
+              <div className="truncate text-xs text-neutral-600" title={row.job_title || ''}>
+                {row.job_title || '—'}
+              </div>
             </div>
           </div>
+        </div>
 
-          <div className="min-w-0">
-            <button
-              type="button"
-              className="block truncate text-left text-base font-bold text-slate-900 hover:text-blue-600 transition-colors"
-              onClick={onOpen}
-            >
-              {fullName}
-            </button>
-            <div className="mt-1 truncate text-sm font-medium text-slate-600">
-              {row.job_title || '—'}
-              {row.company ? <span className="text-slate-400"> · </span> : null}
-              {row.company ? row.company : null}
-            </div>
-            {row.linkedin && (
-              <div className="mt-1 flex items-center gap-2">
-                <a
-                  href={sanitizeLinkedInUrl(row.linkedin)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center rounded-md p-1 text-[#0A66C2] hover:bg-blue-50"
-                  title="View LinkedIn Profile"
-                >
-                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-                  </svg>
+        <div className="overflow-hidden px-6">
+          <div className="flex items-center gap-1.5 text-sm text-neutral-800">
+            <MapPinIcon className="h-4 w-4 text-neutral-500 flex-shrink-0" />
+            <span className="truncate" title={location}>{location}</span>
+          </div>
+        </div>
+
+        <div className="overflow-hidden px-6">
+          <div className="space-y-1">
+            {row.email && (
+              <div className="flex items-center gap-1.5 text-sm text-neutral-800 overflow-hidden">
+                <EnvelopeIcon className="h-4 w-4 text-neutral-500 flex-shrink-0" />
+                <a href={`mailto:${row.email}`} className="hover:text-brand-500 truncate" title={row.email}>
+                  {row.email}
                 </a>
               </div>
+            )}
+            {row.phone && (
+              <div className="flex items-center gap-1.5 text-sm text-neutral-800">
+                <PhoneIcon className="h-4 w-4 text-neutral-500 flex-shrink-0" />
+                <a href={`tel:${row.phone}`} className="hover:text-brand-500 truncate" title={row.phone}>
+                  {row.phone}
+                </a>
+              </div>
+            )}
+            {!row.email && !row.phone && (
+              <span className="text-neutral-400 text-sm">—</span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-base text-slate-700">
-          <MapPinIcon className="h-5 w-5 text-slate-400 flex-shrink-0" />
-          <span className="break-words">{location}</span>
+        {/* Actions Dropdown */}
+        <div className="flex justify-end px-4" ref={dropdownRef}>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsDropdownOpen(!isDropdownOpen)
+              }}
+              className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
+            >
+              Actions
+              <span className="text-neutral-400">⋮</span>
+            </button>
+
+            {/* Dropdown Menu */}
+            {isDropdownOpen && (
+              <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-md shadow-lg border border-neutral-200 py-1 z-50"
+                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}
+              >
+                <button
+                  type="button"
+                  onClick={handleEditClick}
+                  className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGenerateClick}
+                  className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                >
+                  Send Mail
+                </button>
+                {hasResume ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleViewResume}
+                      className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                    >
+                      View Resume
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadResume}
+                      className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                    >
+                      Download Resume
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="px-4 py-2 text-sm text-neutral-400 cursor-not-allowed">
+                      View Resume
+                    </div>
+                    <div className="px-4 py-2 text-sm text-neutral-400 cursor-not-allowed">
+                      Download Resume
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-col items-end justify-center gap-1.5 text-sm">
-        {row.email && (
-          <div className="flex items-center gap-1.5 text-slate-700">
-            <EnvelopeIcon className="h-4 w-4 text-slate-400 flex-shrink-0" />
-            <a href={`mailto:${row.email}`} className="hover:text-blue-600 font-medium break-words text-right" title={row.email}>
-              {row.email}
-            </a>
-          </div>
-        )}
-        {row.phone && (
-          <div className="flex items-center gap-1.5 text-slate-700">
-            <PhoneIcon className="h-4 w-4 text-slate-400" />
-            <a href={`tel:${row.phone}`} className="hover:text-blue-600 font-medium" title={row.phone}>
-              {row.phone}
-            </a>
-          </div>
-        )}
-        {!row.email && !row.phone && (
-          <span className="text-slate-400">—</span>
-        )}
-      </div>
+      <ResumeViewer
+        isOpen={isViewerOpen}
+        onClose={handleCloseViewer}
+        resumeUrl={viewResumeUrl}
+        fileName={row.resume_filename}
+      />
+
+      <EmailProviderModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+        onSelectProvider={handleEmailProvider}
+      />
     </div>
   )
 }

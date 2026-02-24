@@ -1,7 +1,10 @@
-# Environment Files - NEVER commit these
+# Environment Files - NEVER commit real credentials
+# Commit only the .env.*.example template files instead
 .env
-.env.test
+.env.dev
+.env.uat
 .env.prod
+.env.test
 .env.local
 .env.*.local
 

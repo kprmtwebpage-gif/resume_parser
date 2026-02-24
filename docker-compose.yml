@@ -1,0 +1,85 @@
+# ================================================================
+# docker-compose.yml  –  BASE configuration (no ports, no restart)
+#
+# Never use this file alone. Always combine with an env overlay:
+#
+#   DEV:   docker compose -p resume-dev  --env-file .env.dev  \
+#            -f docker-compose.yml -f docker-compose.dev.yml  up -d --build
+#
+#   UAT:   docker compose -p resume-uat  --env-file .env.uat  \
+#            -f docker-compose.yml -f docker-compose.uat.yml  up -d --build
+#
+#   PROD:  docker compose -p resume-prod --env-file .env.prod \
+#            -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# ================================================================
+
+services:
+
+  # ── PostgreSQL database ──────────────────────────────────
+  database:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - resume-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Resume Ingestion / Parser service ───────────────────
+  ingestion:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingestion
+    environment:
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      APP_ENV: ${APP_ENV}
+    volumes:
+      - resume_cache:/app/Backend/resumes_cache
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - resume-network
+
+  # ── Web API + Frontend ───────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      APP_ENV: ${APP_ENV}
+      SERVE_FRONTEND: "1"
+      API_HOST: "0.0.0.0"
+      API_PORT: "8000"
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - resume-network
+
+# ── Named volumes ────────────────────────────────────────
+volumes:
+  postgres_data:
+  resume_cache:
+
+# ── Networks ─────────────────────────────────────────────
+networks:
+  resume-network:
+    driver: bridge

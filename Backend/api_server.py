@@ -2,14 +2,24 @@
 FastAPI server for Resume Parsing Application
 Serves candidate data from PostgreSQL database
 """
+import json
 import os
 from contextlib import contextmanager
-from typing import List, Optional
+from typing import Any, List, Optional
+
+try:
+    from education_parser import parse_education_section
+    _EDU_PARSER_AVAILABLE = True
+except ImportError:
+    _EDU_PARSER_AVAILABLE = False
 
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
+import tempfile
+import shutil
+
+from fastapi import FastAPI, File, HTTPException, Query, Request, BackgroundTasks, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,15 +44,20 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
-# CORS configuration - allows both dev and production
+# CORS configuration - allows dev, production, and server IP
+_extra_origins = [o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()]
+_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://89.167.60.41:8000",
+    "http://89.167.60.41",
+] + _extra_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173", 
-        "http://127.0.0.1:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000"
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,6 +108,41 @@ def _as_list(value: Optional[str]) -> List[str]:
     return [value] if value else []
 
 
+def _build_education(row: dict) -> Any:
+    """Return the best available education representation for a DB row.
+
+    Priority:
+    1. education_structured JSONB column (list of dicts) — clean structured data.
+    2. On-the-fly parse of the qualification flat string via education_parser.
+    3. Raw qualification string as plain fallback.
+    """
+    edu_s = row.get("education_structured")
+    if edu_s:
+        # psycopg2 RealDictCursor with JSONB returns already-decoded Python objects
+        if isinstance(edu_s, list) and edu_s:
+            return edu_s
+        if isinstance(edu_s, str):
+            try:
+                parsed = json.loads(edu_s)
+                if isinstance(parsed, list) and parsed:
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    # Try live parse of the flat qualification string
+    qual = row.get("qualification")
+    if qual and _EDU_PARSER_AVAILABLE:
+        try:
+            entries = parse_education_section(qual)
+            if entries:
+                return [{k: v for k, v in e.items() if k != "raw_line"} for e in entries]
+        except Exception:
+            pass
+
+    # Final fallback: return the flat string (backward-compat)
+    return qual or None
+
+
 class Experience(BaseModel):
     job_title: Optional[str] = None
     years_of_experience: Optional[float] = None
@@ -117,7 +167,9 @@ class Candidate(BaseModel):
     phones: List[str] = []
     skills: List[str] = []
     experience: Optional[Experience] = None
-    education: Optional[str] = None
+    # education is a structured list when education_structured is populated,
+    # otherwise falls back to the flat qualification string.
+    education: Optional[Any] = None
     summary: Optional[str] = None
     resume_filename: Optional[str] = None
 
@@ -148,7 +200,7 @@ async def get_candidates(
     name: Optional[str] = Query(None, description="Search by name"),
     location: Optional[str] = Query(None, description="Search by location"),
     jobTitle: Optional[str] = Query(None, description="Search by job title"),
-    limit: int = Query(10, ge=1, le=100, description="Number of results per page"),
+    limit: int = Query(10, ge=1, le=1000, description="Number of results per page"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
     """
@@ -220,7 +272,9 @@ async def get_candidates(
                 """
                 data_sql = f"""
                     SELECT DISTINCT c.id, c.first_name, c.last_name, c.email, c.phone, c.address, 
-                           c.profile_picture_url, s.job_title, c.qualification, c.linkedin, c.visa_support, 
+                           c.resume_filename, c.profile_picture_url, s.job_title, c.qualification,
+                           c.education_structured,
+                           c.linkedin, c.visa_support, 
                            c.work_authorization_type as work_authorization, s.certifications, 
                            s.tech_skills, s.years_of_experience as professional_experience
                     FROM {CANDIDATES_TABLE} c
@@ -236,7 +290,8 @@ async def get_candidates(
                 data_sql = f"""
                     SELECT c.id, c.first_name, c.last_name, c.email, c.phone, c.address,
                            c.resume_filename, c.profile_picture_url,
-                           s.job_title, c.qualification, c.linkedin, c.visa_support, 
+                           s.job_title, c.qualification, c.education_structured,
+                           c.linkedin, c.visa_support, 
                            c.work_authorization_type as work_authorization, s.certifications, 
                            s.tech_skills, s.years_of_experience as professional_experience
                     FROM {CANDIDATES_TABLE} c
@@ -274,7 +329,7 @@ async def get_candidates(
                     tech_skills=row.get("tech_skills"),
                     skills=_split_csv(row.get("tech_skills")),
                     professional_experience=str(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
-                    education=row.get("qualification"),
+                    education=_build_education(row),
                     experience=Experience(
                         job_title=row.get("job_title"),
                         years_of_experience=float(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
@@ -299,7 +354,7 @@ async def get_candidate(candidate_id: int):
         with conn.cursor() as cursor:
             cursor.execute(f"""
                 SELECT c.id, c.first_name, c.last_name, c.email, c.phone, c.address,
-                       c.resume_filename,
+                       c.resume_filename, c.education_structured,
                        s.job_title, c.qualification, c.linkedin, c.visa_support, 
                        c.work_authorization_type as work_authorization, s.certifications, 
                        s.tech_skills, s.years_of_experience as professional_experience
@@ -333,7 +388,7 @@ async def get_candidate(candidate_id: int):
                 tech_skills=row.get("tech_skills"),
                 skills=_split_csv(row.get("tech_skills")),
                 professional_experience=str(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
-                education=row.get("qualification"),
+                education=_build_education(row),
                 experience=Experience(
                     job_title=row.get("job_title"),
                     years_of_experience=float(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
@@ -493,9 +548,10 @@ async def search_job_titles(
 
 
 @app.get("/candidates/{candidate_id}/resume")
-async def download_resume(candidate_id: int):
+async def download_resume(candidate_id: int, inline: bool = Query(False, description="Serve inline for viewing instead of download")):
     """
-    Download the original resume file for a candidate
+    Serve the original resume file for a candidate.
+    Pass ?inline=true to display in browser (PDF preview); omit for download.
     """
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -513,14 +569,213 @@ async def download_resume(candidate_id: int):
             if not os.path.exists(resume_path):
                 raise HTTPException(status_code=404, detail="Resume file does not exist on disk")
             
-            # Get just the filename for download
             filename = os.path.basename(resume_path)
+            is_pdf = resume_path.lower().endswith(".pdf")
+            media_type = "application/pdf" if is_pdf else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            
+            disposition = "inline" if inline else "attachment"
+            headers = {"Content-Disposition": f'{disposition}; filename="{filename}"'}
             
             return FileResponse(
                 path=resume_path,
-                media_type="application/pdf" if resume_path.endswith(".pdf") else "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                filename=filename
+                media_type=media_type,
+                headers=headers,
             )
+
+
+class CandidateUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    job_title: Optional[str] = None
+    location: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    linkedin: Optional[str] = None
+    skills: Optional[List[str]] = None
+
+
+@app.patch("/candidates/{candidate_id}")
+async def update_candidate(candidate_id: int, data: CandidateUpdate):
+    """Update candidate profile fields in the database."""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            # Check candidate exists
+            cursor.execute(f"SELECT id FROM {CANDIDATES_TABLE} WHERE id = %s", (candidate_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Candidate not found")
+
+            # Build SET clause for candidate_profile
+            profile_fields = {}
+            if data.first_name is not None:
+                profile_fields["first_name"] = data.first_name.strip()
+            if data.last_name is not None:
+                profile_fields["last_name"] = data.last_name.strip()
+            if data.email is not None:
+                profile_fields["email"] = data.email.strip() or None
+            if data.phone is not None:
+                profile_fields["phone"] = data.phone.strip() or None
+            if data.linkedin is not None:
+                profile_fields["linkedin"] = data.linkedin.strip() or None
+            if data.location is not None:
+                profile_fields["address"] = data.location.strip() or None
+
+            if profile_fields:
+                set_clause = ", ".join(f"{col} = %s" for col in profile_fields)
+                values = list(profile_fields.values()) + [candidate_id]
+                cursor.execute(
+                    f"UPDATE {CANDIDATES_TABLE} SET {set_clause} WHERE id = %s",
+                    values
+                )
+
+            # Build SET clause for candidate_skills_profile
+            skills_fields = {}
+            if data.job_title is not None:
+                skills_fields["job_title"] = data.job_title.strip() or None
+            if data.skills is not None:
+                clean_skills = [s.strip() for s in data.skills if s.strip()]
+                skills_fields["tech_skills"] = ", ".join(clean_skills) if clean_skills else None
+
+            if skills_fields:
+                # Upsert into skills table
+                cursor.execute(
+                    f"SELECT candidate_id FROM {SKILLS_TABLE} WHERE candidate_id = %s",
+                    (candidate_id,)
+                )
+                if cursor.fetchone():
+                    set_clause = ", ".join(f"{col} = %s" for col in skills_fields)
+                    values = list(skills_fields.values()) + [candidate_id]
+                    cursor.execute(
+                        f"UPDATE {SKILLS_TABLE} SET {set_clause} WHERE candidate_id = %s",
+                        values
+                    )
+                else:
+                    cols = ["candidate_id"] + list(skills_fields.keys())
+                    placeholders = ", ".join(["%s"] * len(cols))
+                    values = [candidate_id] + list(skills_fields.values())
+                    cursor.execute(
+                        f"INSERT INTO {SKILLS_TABLE} ({', '.join(cols)}) VALUES ({placeholders})",
+                        values
+                    )
+
+            conn.commit()
+            return {"success": True, "id": candidate_id}
+
+
+@app.post("/upload-resume")
+async def upload_resume_endpoint(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Upload a resume file, parse it, and add to the database."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    allowed = {".pdf", ".doc", ".docx"}
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}. Use PDF, DOC, or DOCX.")
+
+    backend_dir = Path(__file__).resolve().parent
+    cache_dir = backend_dir / "resumes_cache"
+    cache_dir.mkdir(exist_ok=True)
+
+    # Check if this filename already exists in the database.
+    # Strip any trailing _timestamp suffix from the stem so that both
+    # "ResumeFoo.pdf" and "ResumeFoo_1234567890.pdf" map to base stem "ResumeFoo".
+    import re as _re
+    raw_stem = Path(file.filename).stem          # e.g. "ResumeSuryaPrakash" or "ResumeSuryaPrakash_1771934430"
+    base_stem = _re.sub(r'_\d{7,13}$', '', raw_stem)  # strip trailing _timestamp if present
+    # Escape regex special characters in the stem (dots, parentheses, etc.)
+    escaped_stem = _re.escape(base_stem)
+    # Matches: resumes_cache/ResumeSuryaPrakash.pdf  OR  resumes_cache/ResumeSuryaPrakash_<digits>.pdf
+    regex_pattern = rf'^resumes_cache/{escaped_stem}(_\d{{7,13}})?{_re.escape(suffix)}$'
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""SELECT c.id, c.first_name, c.last_name, c.email, s.job_title
+                    FROM {CANDIDATES_TABLE} c
+                    LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
+                    WHERE c.resume_filename ~ %s
+                    LIMIT 1""",
+                (regex_pattern,)
+            )
+            existing = cursor.fetchone()
+
+    if existing:
+        full_name = " ".join(filter(None, [existing.get("first_name"), existing.get("last_name")])) or None
+        return {
+            "status": "duplicate",
+            "message": "File already exists in database",
+            "id": existing["id"],
+            "name": full_name,
+            "email": existing.get("email"),
+            "job_title": existing.get("job_title"),
+        }
+
+    dest_path = cache_dir / file.filename
+    # Avoid overwriting existing file with different content
+    if dest_path.exists():
+        base = Path(file.filename).stem
+        dest_path = cache_dir / f"{base}_{int(os.path.getmtime(str(dest_path)))}{suffix}"
+
+    contents = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(contents)
+
+    save_name = dest_path.name
+
+    # Run parser for only this file
+    env = os.environ.copy()
+    env["RESUME_INPUT_DIR"] = str(cache_dir)
+    env["RESUME_PROCESS_ONLY"] = save_name
+    env["QUIET"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(backend_dir / "parser.py")],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(backend_dir),
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Parsing timed out. File may be too complex.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Parser error: {e}")
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "")[:500]
+        raise HTTPException(status_code=500, detail=f"Parser failed: {stderr}")
+
+    # Look up the newly created candidate by resume filename
+    relative_filename = f"resumes_cache/{save_name}"
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""SELECT c.id, c.first_name, c.last_name, c.email, s.job_title
+                    FROM {CANDIDATES_TABLE} c
+                    LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
+                    WHERE c.resume_filename = %s
+                    ORDER BY c.id DESC LIMIT 1""",
+                (relative_filename,)
+            )
+            row = cursor.fetchone()
+
+    if not row:
+        return {
+            "status": "completed",
+            "message": "Resume uploaded and parsed (candidate may already exist)",
+            "name": None, "email": None, "job_title": None,
+        }
+
+    full_name = " ".join(filter(None, [row.get("first_name"), row.get("last_name")])) or None
+    return {
+        "status": "completed",
+        "id": row["id"],
+        "name": full_name,
+        "email": row.get("email"),
+        "job_title": row.get("job_title"),
+    }
 
 
 # Google Drive Integration Endpoints
@@ -769,6 +1024,234 @@ async def chatbot_clear():
     chatbot_instance.clear_history()
     return {"message": "History cleared"}
 
+# ---------------------------------------------------------------------------
+# EMAIL GENERATION
+# ---------------------------------------------------------------------------
+
+class GenerateEmailRequest(BaseModel):
+    # Personal / Contact
+    name: Optional[str] = None
+    location: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    linkedin: Optional[str] = None
+    dob_year: Optional[str] = None
+    video_interview: Optional[str] = None
+    # Education
+    degree: Optional[str] = None
+    specialization: Optional[str] = None
+    university: Optional[str] = None
+    campus: Optional[str] = None
+    grad_year: Optional[str] = None
+    # Work / Submission
+    job_title: Optional[str] = None
+    experience_years: Optional[str] = None
+    submittal_type: Optional[str] = None
+    authorized: Optional[str] = None
+    sponsorship: Optional[str] = None
+    work_authorization: Optional[str] = None
+    rate: Optional[str] = None
+    availability: Optional[str] = None
+    passport: Optional[str] = None
+    # Signature
+    recruiter_name: Optional[str] = None
+
+
+# ── HTML email helpers ────────────────────────────────────────────────────────
+
+def _esc(s: str) -> str:
+    """Minimal HTML escape."""
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+# Inline styles — no external CSS so Outlook renders correctly
+_TABLE_STYLE = (
+    'border-collapse:collapse;width:100%;font-family:Calibri,Arial,sans-serif;'
+    'font-size:11pt;'
+)
+_LABEL_CELL = (
+    'border:1px solid #000;padding:6px 10px;background:#D9E1F2;'
+    'font-weight:normal;width:50%;vertical-align:top;'
+)
+_VALUE_CELL = (
+    'border:1px solid #000;padding:6px 10px;background:#FFFFFF;'
+    'width:50%;vertical-align:top;'
+)
+
+
+def _html_table(rows: list, caption: str = "") -> str:
+    """
+    Build one Excel-style HTML table.
+    rows = list of (label, value) tuples.
+    """
+    parts = []
+    if caption:
+        parts.append(
+            f'<p style="margin:8px 0 2px 0;font-family:Calibri,Arial,sans-serif;'
+            f'font-size:11pt;font-weight:bold;">{_esc(caption)}</p>'
+        )
+    parts.append(f'<table style="{_TABLE_STYLE}">')
+    for label, value in rows:
+        parts.append(
+            f'<tr>'
+            f'<td style="{_LABEL_CELL}">{_esc(label)}</td>'
+            f'<td style="{_VALUE_CELL}">{_esc(value)}</td>'
+            f'</tr>'
+        )
+    parts.append('</table>')
+    return "\n".join(parts)
+
+
+def _compose_email(data: GenerateEmailRequest) -> dict:
+    """Return subject + html_body with three Excel-style HTML tables."""
+    name = (data.name or "").strip() or "Candidate"
+    job  = (data.job_title or "").strip()
+
+    subject = (
+        f"Candidate Submission: {name} - {job}"
+        if job
+        else f"Candidate Submission: {name}"
+    )
+
+    # ── Section 1 : Personal / Contact ───────────────────────────────────────
+    personal_rows = [
+        ("Full name of Candidate",                           name),
+        ("Current location (City, State and Zip code)",      data.location or ""),
+        ("Phone(s)",                                         data.phone or ""),
+        ("E-mail ID(s)",                                     data.email or ""),
+        ("Date of birth (year) if provided by candidate: -", data.dob_year or ""),
+        ("LinkedIn URL",                                     data.linkedin or ""),
+        (
+            "Is the candidate aware of Video interview and ready to take "
+            "video interview on Webex / Zoom?",
+            data.video_interview or "Yes",
+        ),
+    ]
+
+    # ── Section 2 : Education ────────────────────────────────────────────────
+    degree_label = data.degree or ""
+    if data.specialization:
+        degree_label = f"{degree_label} {data.specialization}".strip()
+    degree_value = f"{degree_label} / {data.campus}".strip(" /") if data.campus else degree_label
+
+    edu_rows = [
+        ("Bachelor's degree in",  degree_value),
+        ("University",            data.university or ""),
+        ("Year of completion",    data.grad_year or ""),
+        ("Highest Education",     degree_label),
+        ("University",            data.university or ""),
+        ("Year of completion",    data.grad_year or ""),
+    ]
+
+    # ── Section 3 : Work / Submission ────────────────────────────────────────
+    work_rows = [
+        ("Submittal type (C2C or FTE to CitiusTech)",                data.submittal_type or ""),
+        ("Is the candidate authorized to work legally in the US?",   data.authorized or "Yes"),
+        ("Does the candidate require any sponsorship (now or future)?", data.sponsorship or "No"),
+        ("Work authorization type",                                  data.work_authorization or ""),
+        ("Rate (per hour on C2C to CitiusTech)",                     data.rate or ""),
+        ("Available to join (including relocation time):",           data.availability or ""),
+        ("Passport Number",                                          data.passport or ""),
+    ]
+
+    # ── Assemble full HTML body ───────────────────────────────────────────────
+    sig = _esc(data.recruiter_name) if data.recruiter_name else ""
+    html_body = f"""<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;">
+<p>Hello,</p>
+<p>Please find below the candidate details for your review:</p>
+
+{_html_table(personal_rows)}
+
+<br/>
+{_html_table(edu_rows)}
+
+<br/>
+{_html_table(work_rows)}
+
+<p>Please let me know if you need any additional information.</p>
+<p>Best regards{"<br/>" + sig if sig else ""}</p>
+</div>"""
+
+    return {"subject": subject, "html_body": html_body}
+
+
+@app.post("/email/generate")
+async def generate_email(data: GenerateEmailRequest):
+    """Generate a formatted candidate-submission email subject + body."""
+    return _compose_email(data)
+
+
+@app.post("/email/parse-document")
+async def parse_additional_document(file: UploadFile = File(...)):
+    """
+    Accept an uploaded PDF or DOCX file; extract key fields using the
+    existing parser and return them as a flat JSON object that the
+    frontend can merge into the compose form.
+    """
+    allowed = {".pdf", ".docx", ".doc"}
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Please upload PDF or DOCX.",
+        )
+
+    # Save to temp file
+    suffix = ext
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    try:
+        # Import parser functions lazily so the endpoint starts even if
+        # optional deps are missing.
+        from parser import (
+            extract_text_from_docx,
+            extract_text_from_pdf,
+            extract_email,
+            extract_phone,
+            extract_name,
+        )
+        from education_parser import parse_education_section
+
+        if ext == ".pdf":
+            text = extract_text_from_pdf(tmp_path)
+        else:
+            text = extract_text_from_docx(tmp_path)
+
+        email_val = (extract_email(text) or [None])[0]
+        phone_val = (extract_phone(text) or [None])[0]
+        first, last = extract_name(text, email=email_val)
+        name = f"{first} {last}".strip() or None
+
+        edu_entries = []
+        try:
+            raw_edu = parse_education_section(text)
+            edu_entries = [{k: v for k, v in e.items() if k != "raw_line"} for e in raw_edu]
+        except Exception:
+            pass
+
+        first_edu = edu_entries[0] if edu_entries else {}
+
+        return {
+            "name": name,
+            "email": email_val,
+            "phone": phone_val,
+            "degree": first_edu.get("degree"),
+            "specialization": first_edu.get("specialization"),
+            "university": first_edu.get("university"),
+            "education_list": edu_entries,
+            "raw_text_preview": text[:500] if text else "",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Parsing failed: {exc}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 # Mount built frontend for production (only when SERVE_FRONTEND env var is set)
 # To enable: set SERVE_FRONTEND=1 in .env or environment
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "Frontend", "dist")
@@ -813,7 +1296,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"⚠️  Warning: Could not apply corrections: {e}")
     
-    print(f"🚀 Starting API server on http://127.0.0.1:8000")
-    print(f"📖 API Documentation: http://127.0.0.1:8000/docs")
+    api_host = os.getenv("API_HOST", "127.0.0.1")
+    api_port = int(os.getenv("API_PORT", "8000"))
+    print(f"🚀 Starting API server on http://{api_host}:{api_port}")
+    print(f"📖 API Documentation: http://{api_host}:{api_port}/docs")
     
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host=api_host, port=api_port)

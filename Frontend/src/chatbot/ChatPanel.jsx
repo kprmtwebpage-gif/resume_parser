@@ -1,21 +1,34 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 import ChatHistory from './ChatHistory';
 import { selectCandidate } from './candidateEvents';
-import {
-  extractSearchTerms,
-  generateSuggestions,
-  buildSearchQuery,
-  parseCandidateResponse,
-  getGreetingMessage,
-} from './rules';
+import { parseCandidateResponse, getGreetingMessage } from './rules';
 import axios from 'axios';
 import companyLogo from '../assets/company-logo.png';
 
-const API_BASE = import.meta.env.VITE_CHATBOT_API_BASE || '';
+const API_BASE = import.meta.env.VITE_CHATBOT_API_BASE || 'http://127.0.0.1:8000';
+const ROLES_CACHE_KEY = 'chatbot_roles_cache';
+const SESSION_KEY = 'chatbot_session_id';
+const MESSAGES_CACHE_KEY = 'chatbot_messages_cache';
 
-export default function ChatPanel({ onClose }) {
-  const [messages, setMessages] = useState([]);
+export default function ChatPanel({ onClose, onMinimize, isVisible }) {
+  // Initialize messages from localStorage to persist across visibility changes
+  const [messages, setMessages] = useState(() => {
+    const saved = localStorage.getItem(MESSAGES_CACHE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Convert timestamp strings back to Date objects
+        return parsed.map(msg => ({
+          ...msg,
+          timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+        }));
+      } catch (error) {
+        console.error('Failed to parse cached messages:', error);
+      }
+    }
+    return [];
+  });
   const [suggestions, setSuggestions] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,32 +38,107 @@ export default function ChatPanel({ onClose }) {
   const [candidates, setCandidates] = useState([]);
   const [showCandidates, setShowCandidates] = useState(false);
   const [availableJobTitles, setAvailableJobTitles] = useState([]);
+  const [sessionId, setSessionId] = useState(null);
   const messagesEndRef = useRef(null);
   const initializedRef = useRef(false);
+  const rolesLoadedRef = useRef(false);
 
-  // Load conversations from localStorage on mount
+  const getOrCreateSession = async () => {
+    let sid = localStorage.getItem(SESSION_KEY);
+    if (!sid) {
+      sid = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem(SESSION_KEY, sid);
+    }
+
+    try {
+      await axios.post(`${API_BASE}/chat/session`, {
+        session_id: sid,
+        user_id: 'hr_user'
+      });
+    } catch (error) {
+      console.error('Error creating session:', error);
+    }
+
+    return sid;
+  };
+
+  const loadChatHistory = async (sid) => {
+    try {
+      const response = await axios.get(`${API_BASE}/chat/history/${sid}`);
+      if (response.data?.messages && response.data.messages.length > 0) {
+        const loadedMessages = response.data.messages.map(msg => ({
+          type: msg.type,
+          text: msg.text,
+          timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+        }));
+        setMessages(loadedMessages);
+        return true;
+      }
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+    }
+    return false;
+  };
+
+  const saveMessageToDb = async (message) => {
+    if (!sessionId) return;
+
+    try {
+      await axios.post(`${API_BASE}/chat/message/${sessionId}`, {
+        sender: message.type,
+        message_text: message.text,
+        timestamp: message.timestamp instanceof Date ? message.timestamp.toISOString() : new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving message:', error);
+    }
+  };
+
   useEffect(() => {
+    const initializeChat = async () => {
+      if (initializedRef.current) return;
+      initializedRef.current = true;
+
+      const sid = await getOrCreateSession();
+      setSessionId(sid);
+
+      // If we already have messages in localStorage, use them (don't load from DB)
+      if (messages.length > 0) {
+        loadAvailableJobTitles();
+        return;
+      }
+
+      // Otherwise try to load from database
+      const hasHistory = await loadChatHistory(sid);
+
+      if (!hasHistory) {
+        const greeting = getGreetingMessage();
+        const greetingMsg = {
+          type: 'bot',
+          text: greeting,
+          timestamp: new Date(),
+        };
+        setMessages([greetingMsg]);
+        await saveMessageToDb(greetingMsg);
+      }
+
+      loadAvailableJobTitles();
+    };
+
+    initializeChat();
+
     const saved = localStorage.getItem('chatbot_conversations');
     if (saved) {
       setConversations(JSON.parse(saved));
     }
-    
-    // Initialize chat with welcome message
-    if (!initializedRef.current) {
-      const greeting = getGreetingMessage();
-      setMessages([
-        {
-          type: 'bot',
-          text: greeting,
-          timestamp: new Date(),
-        },
-      ]);
-      initializedRef.current = true;
-    }
-    
-    // Load available job titles from backend
-    loadAvailableJobTitles();
   }, []);
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem(MESSAGES_CACHE_KEY, JSON.stringify(messages));
+    }
+  }, [messages]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -59,54 +147,108 @@ export default function ChatPanel({ onClose }) {
 
   // Load available job titles dynamically from the system
   const loadAvailableJobTitles = async () => {
-    try {
-      // Fetch top job titles from stats endpoint
-      const response = await axios.get(`${API_BASE}/stats`);
-      if (response.data && response.data.top_job_titles) {
-        const jobTitles = response.data.top_job_titles.map(item => item.title);
-        if (jobTitles.length > 0) {
-          setAvailableJobTitles(jobTitles);
-          setSuggestions(jobTitles.slice(0, 5)); // Show top 5 job titles
-        } else {
-          // Fallback if no job titles returned
-          setDefaultSuggestions();
+    if (rolesLoadedRef.current) return;
+    rolesLoadedRef.current = true;
+
+    const cached = localStorage.getItem(ROLES_CACHE_KEY);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAvailableJobTitles(parsed);
+          setSuggestions(parsed);
+          // Show in chat if not already there
+          setMessages(prev => {
+            const alreadyShown = prev.some(m => m.type === 'jobtitles');
+            if (alreadyShown) return prev;
+            return [...prev, { type: 'jobtitles', titles: parsed, timestamp: new Date() }];
+          });
+          return;
         }
+      } catch (error) {
+        console.error('Failed to parse cached roles:', error);
+      }
+    }
+
+    try {
+      // Fetch ALL job roles from chatbot/roles endpoint
+      const response = await axios.get(`${API_BASE}/chatbot/roles`);
+      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+        const jobTitles = response.data;
+        setAvailableJobTitles(jobTitles);
+        setSuggestions(jobTitles);
+        localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(jobTitles));
+
+        // Show job titles as a clickable list inside the chat
+        setMessages(prev => {
+          const alreadyShown = prev.some(m => m.type === 'jobtitles');
+          if (alreadyShown) return prev;
+          return [...prev, { type: 'jobtitles', titles: jobTitles, timestamp: new Date() }];
+        });
       } else {
-        setDefaultSuggestions();
+        setAvailableJobTitles([]);
+        setSuggestions([]);
       }
     } catch (error) {
-      console.error('Failed to load job titles:', error);
-      // Fallback to default suggestions
-      setDefaultSuggestions();
+      console.error('Failed to load job roles:', error);
+      setAvailableJobTitles([]);
+      setSuggestions([]);
     }
   };
 
-  const setDefaultSuggestions = () => {
-    const fallbackTitles = [
-      'Java Developer',
-      'Full Stack Developer',
-      'Data Engineer',
-      'DevOps Engineer',
-      'Frontend Engineer',
-    ];
-    setSuggestions(fallbackTitles);
-    setAvailableJobTitles(fallbackTitles);
-  };
+  const initializeChat = async () => {
+    saveConversation();
+    
+    // Clear localStorage messages cache when starting new conversation
+    localStorage.removeItem(MESSAGES_CACHE_KEY);
+    
+    if (sessionId) {
+      try {
+        await axios.delete(`${API_BASE}/chat/history/${sessionId}`);
+      } catch (error) {
+        console.error('Error deleting chat history:', error);
+      }
+    }
 
-  const initializeChat = () => {
+    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem(SESSION_KEY, newSessionId);
+    setSessionId(newSessionId);
+
+    try {
+      await axios.post(`${API_BASE}/chat/session`, {
+        session_id: newSessionId,
+        user_id: 'hr_user'
+      });
+    } catch (error) {
+      console.error('Error creating new session:', error);
+    }
+
     const greeting = getGreetingMessage();
-    setMessages([
-      {
-        type: 'bot',
-        text: greeting,
-        timestamp: new Date(),
-      },
-    ]);
-    // Use available job titles from API or fallback
+    const greetingMsg = {
+      type: 'bot',
+      text: greeting,
+      timestamp: new Date(),
+    };
+    setMessages([greetingMsg]);
+    
+    if (newSessionId) {
+      try {
+        await axios.post(`${API_BASE}/chat/message/${newSessionId}`, {
+          sender: 'bot',
+          message_text: greeting,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('Error saving greeting:', error);
+      }
+    }
+
     if (availableJobTitles.length > 0) {
-      setSuggestions(availableJobTitles.slice(0, 5));
+      setSuggestions(availableJobTitles);
+      // Re-show job titles list in the fresh chat
+      setMessages(prev => [...prev, { type: 'jobtitles', titles: availableJobTitles, timestamp: new Date() }]);
     } else {
-      setDefaultSuggestions();
+      setSuggestions([]);
     }
     setCurrentConvId(null);
     setCandidates([]);
@@ -134,16 +276,27 @@ export default function ChatPanel({ onClose }) {
     localStorage.setItem('chatbot_conversations', JSON.stringify(updated));
   };
 
+  const getDynamicSuggestions = (queryText) => {
+    const normalizedInput = (queryText || '').trim().toLowerCase();
+    if (!normalizedInput) return availableJobTitles;
+    return availableJobTitles.filter((role) =>
+      String(role).toLowerCase().includes(normalizedInput)
+    );
+  };
+
   const handleSendMessage = async (text) => {
-    if (!text.trim()) return;
+    const cleanQuery = text.trim();
+    if (!cleanQuery) return;
 
     const userMessage = {
       type: 'user',
-      text: text.trim(),
+      text: cleanQuery,
       timestamp: new Date(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    await saveMessageToDb(userMessage);
+    
     setInput('');
     setLoading(true);
     setSuggestions([]);
@@ -151,67 +304,14 @@ export default function ChatPanel({ onClose }) {
     setCandidates([]);
 
     try {
-      // Normalize input and extract terms
-      const normalized = buildSearchQuery(text);
-      const terms = extractSearchTerms(normalized);
+      // Use the flexible search endpoint
+      const response = await axios.get(`${API_BASE}/chatbot/search?q=${encodeURIComponent(cleanQuery)}`);
 
-      // Always call backend chatbot search endpoint for any non-empty input
-      // Primary: try /chatbot/search, fallback to /candidates if not available
-      let response;
-      try {
-        response = await axios.get(`${API_BASE}/chatbot/search`, {
-          params: { q: normalized },
-        });
-      } catch (err) {
-        // If chatbot endpoint missing (404) or any error, attempt legacy /candidates
-        try {
-          response = await axios.get(`${API_BASE}/candidates`, {
-            params: { q: normalized, limit: 100 },
-          });
-        } catch (err2) {
-          console.error('Both chatbot.search and /candidates failed', err, err2);
-          const botMessage = {
-            type: 'bot',
-            text: 'Search failed due to a technical error. Please try again.',
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, botMessage]);
-          setLoading(false);
-          return;
-        }
-      }
-
-      const raw = Array.isArray(response.data)
-        ? response.data
-        : Array.isArray(response.data?.candidates)
-        ? response.data.candidates
-        : [];
-
-      // Flexible matching: match name or jobTitle or partial tokens (case-insensitive)
-      const q = (normalized || '').toLowerCase();
-      const filteredRaw = raw.filter((c) => {
-        const job = (c.job_title || c.jobTitle || c.title || '').toString().toLowerCase();
-        const name = (`${c.first_name || c.firstName || ''} ${c.last_name || c.lastName || ''}`.trim() || c.name || '').toString().toLowerCase();
-
-        if (!q) return false;
-        if (name.includes(q)) return true;
-        if (job.includes(q)) return true;
-
-        // token-based partial match: any token in q appears in job, or any token in job appears in q
-        const qTokens = q.split(' ').filter(Boolean);
-        const jobTokens = job.split(' ').filter(Boolean);
-
-        for (const t of qTokens) {
-          if (t.length > 1 && job.includes(t)) return true;
-        }
-        for (const t of jobTokens) {
-          if (t.length > 1 && q.includes(t)) return true;
-        }
-
-        return false;
-      });
-
-      const results = parseCandidateResponse(filteredRaw);
+      const data = response.data;
+      const candidatePayload = Array.isArray(data)
+        ? data
+        : (data?.candidates || data?.results || []);
+      const results = parseCandidateResponse(candidatePayload);
 
       if (results.length > 0) {
         setCandidates(results);
@@ -219,31 +319,51 @@ export default function ChatPanel({ onClose }) {
 
         const botMessage = {
           type: 'bot',
-          text: `Found ${results.length} candidate${results.length !== 1 ? 's' : ''} matching "${normalized}". Click on a name to view their profile.`,
+          text: `Found ${results.length} candidate${results.length !== 1 ? 's' : ''} matching "${cleanQuery}". Click a name to open their profile.`,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, botMessage]);
+        await saveMessageToDb(botMessage);
+
+        // Also push candidates as a special in-chat message
+        setMessages((prev) => [...prev, {
+          type: 'candidates',
+          candidates: results,
+          timestamp: new Date(),
+        }]);
       } else {
-        // No results - generate new suggestions
-        const newSuggestions = generateSuggestions(terms.length ? terms : [normalized || text.trim()]);
-        setSuggestions(newSuggestions);
+        const relatedSuggestions = getDynamicSuggestions(cleanQuery);
+        setSuggestions(relatedSuggestions);
 
         const botMessage = {
           type: 'bot',
-          text: `No exact matches for "${normalized}". Try one of these suggestions or search with different keywords.`,
+          text: 'No candidates found.',
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, botMessage]);
+        await saveMessageToDb(botMessage);
       }
     } catch (error) {
       console.error('Search error:', error);
-      // Only show error when the backend request fails; do not display 'no results' when valid results exist
+      if (error?.response?.status === 404) {
+        const relatedSuggestions = getDynamicSuggestions(cleanQuery);
+        setSuggestions(relatedSuggestions);
+        const botMessage = {
+          type: 'bot',
+          text: 'Search endpoint not found. Please try again in a moment.',
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, botMessage]);
+        await saveMessageToDb(botMessage);
+      } else {
       const botMessage = {
         type: 'bot',
         text: "Search failed due to a technical error. Please try again.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, botMessage]);
+      await saveMessageToDb(botMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -263,12 +383,12 @@ export default function ChatPanel({ onClose }) {
       e.stopPropagation();
     }
     selectCandidate(candidate.id, candidate.name);
-    // Keep chat open so user can see results
+    // Minimize chatbot so the profile modal is visible
+    onMinimize?.();
   };
 
-  const handleEndConversation = () => {
-    saveConversation();
-    initializeChat();
+  const handleEndConversation = async () => {
+    await initializeChat();
   };
 
   const handleViewHistory = () => {
@@ -316,6 +436,18 @@ export default function ChatPanel({ onClose }) {
               🕐
             </button>
           )}
+          <button
+            type="button"
+            className="chatbot-minimize-btn"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMinimize?.();
+            }}
+            title="Minimize"
+          >
+            −
+          </button>
           <button 
             type="button"
             className="chatbot-close-btn" 
@@ -331,37 +463,57 @@ export default function ChatPanel({ onClose }) {
 
       {/* Messages Area */}
       <div className="chatbot-messages">
-        {messages.map((msg, idx) => (
-          <MessageBubble
-            key={idx}
-            message={msg.text}
-            isUser={msg.type === 'user'}
-            timestamp={msg.timestamp}
-          />
-        ))}
-
-        {/* Candidates List */}
-        {showCandidates && candidates.length > 0 && (
-          <div className="chatbot-candidates-list">
-            {candidates.map((candidate) => (
-              <div
-                key={candidate.id}
-                className="chatbot-candidate-item"
-                onClick={(e) => handleCandidateClick(candidate, e)}
-              >
-                <div className="chatbot-candidate-name">{candidate.name}</div>
-                {candidate.jobTitle && (
-                  <div className="chatbot-candidate-role">{candidate.jobTitle}</div>
-                )}
-                {candidate.location && (
-                  <div className="chatbot-candidate-location">📍 {candidate.location}</div>
-                )}
+        {messages.map((msg, idx) => {
+          // Job titles list in chat
+          if (msg.type === 'jobtitles') {
+            return (
+              <div key={idx} className="chatbot-jobtitles-msg">
+                <div className="chatbot-jobtitles-label">Available Job Roles — click to search candidates:</div>
+                <div className="chatbot-jobtitles-grid">
+                  {(msg.titles || []).map((title, ti) => (
+                    <button
+                      key={ti}
+                      type="button"
+                      className="chatbot-jobtitle-btn"
+                      onClick={(e) => { e.preventDefault(); handleSuggestionClick(title, e); }}
+                    >
+                      {title}
+                    </button>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
-        )}
+            );
+          }
+          // Candidates list in chat
+          if (msg.type === 'candidates') {
+            return (
+              <div key={idx} className="chatbot-candidates-list">
+                {(msg.candidates || []).map((candidate) => (
+                  <div
+                    key={candidate.id}
+                    className="chatbot-candidate-item"
+                    onClick={(e) => handleCandidateClick(candidate, e)}
+                  >
+                    <div className="chatbot-candidate-name">{candidate.name}</div>
+                    {candidate.jobTitle && <div className="chatbot-candidate-role">{candidate.jobTitle}</div>}
+                    {candidate.location && <div className="chatbot-candidate-location">📍 {candidate.location}</div>}
+                  </div>
+                ))}
+              </div>
+            );
+          }
+          // Regular bot / user messages
+          return (
+            <MessageBubble
+              key={idx}
+              message={msg.text}
+              isUser={msg.type === 'user'}
+              timestamp={msg.timestamp}
+            />
+          );
+        })}
 
-        {/* Suggestions */}
+        {/* Suggestions chips (shown only when no candidates in view) */}
         {suggestions.length > 0 && !showCandidates && (
           <div className="chatbot-suggestions">
             {suggestions.map((suggestion, idx) => (

@@ -1,0 +1,21 @@
+# ================================================================
+# docker-compose.uat.yml  –  UAT environment overrides
+# Usage:
+#   docker compose -p resume-uat --env-file .env.uat \
+#     -f docker-compose.yml -f docker-compose.uat.yml \
+#     up -d --build
+# ================================================================
+services:
+
+  database:
+    container_name: resume-db-uat
+
+  ingestion:
+    container_name: resume-ingestion-uat
+    restart: unless-stopped
+
+  api:
+    container_name: resume-api-uat
+    ports:
+      - "8001:8000"
+    restart: unless-stopped

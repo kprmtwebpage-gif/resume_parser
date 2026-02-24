@@ -1,0 +1,21 @@
+# ================================================================
+# docker-compose.dev.yml  –  DEV environment overrides
+# Usage:
+#   docker compose -p resume-dev --env-file .env.dev \
+#     -f docker-compose.yml -f docker-compose.dev.yml \
+#     up -d --build
+# ================================================================
+services:
+
+  database:
+    container_name: resume-db-dev
+
+  ingestion:
+    container_name: resume-ingestion-dev
+    restart: unless-stopped
+
+  api:
+    container_name: resume-api-dev
+    ports:
+      - "8002:8000"
+    restart: unless-stopped

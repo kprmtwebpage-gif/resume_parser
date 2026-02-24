@@ -1,0 +1,22 @@
+# ================================================================
+# docker-compose.prod.yml  –  PROD environment overrides
+# Usage:
+#   docker compose -p resume-prod --env-file .env.prod \
+#     -f docker-compose.yml -f docker-compose.prod.yml \
+#     up -d --build
+# ================================================================
+services:
+
+  database:
+    container_name: resume-db-prod
+    restart: always
+
+  ingestion:
+    container_name: resume-ingestion-prod
+    restart: always
+
+  api:
+    container_name: resume-api-prod
+    ports:
+      - "8000:8000"
+    restart: always

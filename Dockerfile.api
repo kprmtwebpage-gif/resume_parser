@@ -1,0 +1,64 @@
+# =============================================================
+# Dockerfile.api  –  Web API + bundled React frontend
+# =============================================================
+# Stage 1: Build the React / Vite frontend
+# =============================================================
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/Frontend
+
+# Install dependencies (clean install from lockfile)
+COPY Frontend/package*.json ./
+RUN npm ci
+
+# Copy source and build for production
+COPY Frontend/ ./
+RUN npm run build
+
+
+# =============================================================
+# Stage 2: Python API server + pre-built frontend assets
+# =============================================================
+FROM python:3.11-slim
+
+LABEL maintainer="KPRMT Global Solutions"
+LABEL service="resume-api"
+
+# System libraries: tesseract (OCR), poppler (PDF), libpq (PostgreSQL)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    poppler-utils \
+    libpq-dev \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY Backend/requirements.txt ./Backend/requirements.txt
+RUN pip install --no-cache-dir -r Backend/requirements.txt
+
+# Copy backend source code
+COPY Backend/ ./Backend/
+
+# Copy root-level service entry-point
+COPY web_api_service.py ./
+
+# Copy built frontend dist from stage 1
+COPY --from=frontend-builder /app/Frontend/dist ./Frontend/dist
+
+# Runtime environment defaults (overridden by --env-file at runtime)
+ENV PYTHONUNBUFFERED=1 \
+    SERVE_FRONTEND=1 \
+    API_HOST=0.0.0.0 \
+    API_PORT=8000
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+WORKDIR /app
+
+CMD ["python", "web_api_service.py", "--prod"]
