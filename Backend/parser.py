@@ -1200,6 +1200,41 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "eng",
         "frontend",
         "backend",
+        # Contact/label tokens that bleed into name fields.
+        "email",
+        "phone",
+        "mobile",
+        "location",
+        "address",
+        # Generic tech compound words picked up as names by NER.
+        "web",
+        "based",
+        "machine",
+        "learning",
+        "cloud",
+        "watch",
+        "entity",
+        "framework",
+        "reduce",
+        "map",
+        "intranet",
+        "extranet",
+        "portal",
+        "platform",
+        "server",
+        "client",
+        "service",
+        "system",
+        "database",
+        "network",
+        # Immigration / civil status words that appear in headers.
+        "citizen",
+        "permanent",
+        "resident",
+        "authorization",
+        "authorized",
+        # Abbreviations for role phrases (e.g., FSD = Full Stack Developer).
+        "fsd",
     }
     section_words = {
         "professional summary",
@@ -1373,9 +1408,17 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             #   "shiva313757@gmail.com" -> "shiva 313757@gmail.com" after segmentation.
             # Remove the whole pattern (word + digits@domain) before the standard email pass.
             ln = re.sub(r"(?i)\b[A-Za-z][A-Za-z0-9]*\s+\d+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", " ", ln)
-            # Remove emails
+            # Same pattern but when _segment_compact_line also split the TLD (no .com):
+            # e.g. "Saikrishnad 18115@gmail com" - strip "Saikrishnad 18115@gmail" entirely.
+            ln = re.sub(r"(?i)\b[A-Za-z][A-Za-z0-9]*\s+\d+@[A-Za-z0-9-]+\b", " ", ln)
+            # Remove emails (standard and spacing variants)
             ln = re.sub(r"(?i)\b[A-Z0-9._%+-]+\s*@\s*[A-Z0-9.-]+\s*\.\s*[A-Z]{2,}\b", " ", ln)
             ln = re.sub(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", " ", ln)
+            # Partial email tokens where _segment_compact_line broke the TLD to a separate word:
+            # e.g. "ronaldbamker@yahoo com" - strip the "word@domain" part (no TLD).
+            ln = re.sub(r"(?i)\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\b", " ", ln)
+            # Remove any orphaned @domain fragments (e.g. "@gmail" left after number stripping).
+            ln = re.sub(r"@[A-Za-z0-9][A-Za-z0-9.-]*", " ", ln)
             # Remove phone-like runs
             ln = re.sub(r"\b\+?\d[\d ()\-]{8,}\d\b", " ", ln)
             # Remove common labels — including segmented "Linked In" form of "LinkedIn"
@@ -5023,6 +5066,32 @@ def main() -> int:
                 "application",
                 "technologies",
                 "technology",
+                # Additional tech/contact/status tokens that must not survive as name fields.
+                "email",
+                "web",
+                "based",
+                "machine",
+                "learning",
+                "cloud",
+                "watch",
+                "entity",
+                "framework",
+                "reduce",
+                "map",
+                "intranet",
+                "extranet",
+                "portal",
+                "platform",
+                "server",
+                "client",
+                "service",
+                "system",
+                "database",
+                "network",
+                "citizen",
+                "permanent",
+                "resident",
+                "fsd",
             }
             us_state_names = {v.casefold() for v in US_STATE_ABBR_TO_FULL.values()}
             def _compact_token(s: str) -> str:

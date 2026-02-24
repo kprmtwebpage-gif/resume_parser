@@ -192,6 +192,8 @@ _BAD_NAME_WORDS: frozenset = frozenset({
     "submission","submitted","attached","attaching","revised",
     "updated","latest","new","final","draft","copy","gmail",
     "yahoo","hotmail","outlook","linkedin","github",
+    # Contact labels that sometimes survive stripping and bleed into name fields.
+    "email","phone","mobile","location","address","contact",
 })
 
 _ROLE_TOKENS: frozenset = frozenset({
@@ -200,6 +202,14 @@ _ROLE_TOKENS: frozenset = frozenset({
     "junior","data","net","software","development","solutions","operations",
     "stack","full","backend","frontend","java","python","react","angular",
     "node","nodejs","aws","azure","dotnet","spark","hive",
+    # Tech compound-word components that NER can mistake for person-name tokens.
+    "web","based","machine","learning","cloud","watch","entity","framework",
+    "reduce","map","intranet","extranet","portal","platform",
+    "server","client","service","system","database","network",
+    # Civil-status / immigration tokens.
+    "citizen","permanent","resident","authorized","authorization",
+    # Common role abbreviations.
+    "fsd",
 })
 
 _NAME_HONORIFICS: re.Pattern = re.compile(
