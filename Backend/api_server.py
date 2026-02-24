@@ -182,6 +182,12 @@ class Candidate(BaseModel):
     professional_experience: Optional[str] = None
 
 
+@app.get("/health")
+async def health_check():
+    """Docker health check endpoint"""
+    return {"status": "ok"}
+
+
 @app.get("/")
 async def root():
     """Serve frontend or API status"""
