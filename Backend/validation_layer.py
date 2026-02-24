@@ -210,6 +210,8 @@ _ROLE_TOKENS: frozenset = frozenset({
     "citizen","permanent","resident","authorized","authorization",
     # Common role abbreviations.
     "fsd",
+    # Microsoft / web tech tokens.
+    "asp","mvc","visual","studio",
 })
 
 _NAME_HONORIFICS: re.Pattern = re.compile(

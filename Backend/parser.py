@@ -1235,6 +1235,11 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "authorized",
         # Abbreviations for role phrases (e.g., FSD = Full Stack Developer).
         "fsd",
+        # Microsoft / web tech compound words misread as names.
+        "asp",
+        "mvc",
+        "visual",
+        "studio",
     }
     section_words = {
         "professional summary",
@@ -1332,6 +1337,21 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "DC",
     }
     city_state_re = re.compile(r"\b[A-Za-z][A-Za-z .'-]{1,},\s*(" + "|".join(sorted(US_STATE_ABBRS)) + r")\b")
+    # Also catch full US state names, e.g. "Fairfield, Iowa" or "Irving, Texas".
+    _US_FULL_STATE_RE = re.compile(
+        r"\b[A-Za-z][A-Za-z .'-]{1,},\s*(?:"
+        r"Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|"
+        r"Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|"
+        r"Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|"
+        r"Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|"
+        r"New\s+Hampshire|New\s+Jersey|New\s+Mexico|New\s+York|"
+        r"North\s+Carolina|North\s+Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|"
+        r"Rhode\s+Island|South\s+Carolina|South\s+Dakota|Tennessee|Texas|"
+        r"Utah|Vermont|Virginia|Washington|West\s+Virginia|Wisconsin|Wyoming|"
+        r"District\s+of\s+Columbia"
+        r")\b",
+        re.IGNORECASE,
+    )
 
     def is_label_line(ln: str) -> bool:
         m = re.match(r"^\s*([A-Za-z][A-Za-z &/]{0,30})\s*:\s+", ln)
@@ -1440,8 +1460,8 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         if sum(ch.isdigit() for ch in line) >= 2:
             continue
 
-        # Avoid city/state header lines being treated as names (e.g., "Fort Mill, SC").
-        if city_state_re.search(line):
+        # Avoid city/state header lines being treated as names (e.g., "Fort Mill, SC" or "Fairfield, Iowa").
+        if city_state_re.search(line) or _US_FULL_STATE_RE.search(line):
             continue
 
         # Normalize separators and remove common prefix labels.
@@ -1525,14 +1545,17 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         if first:
             candidates.append((score, (first, last)))
 
-    # ── spaCy NER boost ────────────────────────────────────────────
-    # PERSON entities found in the top 12 lines of the resume are added as
-    # high-confidence candidates (score ≈75) so they beat heuristic results
-    # (max ~65) and provide a fallback when heuristics find nothing.
+    # spaCy NER boost
+    # PERSON entities from the top 5 lines are added as supplementary candidates
+    # with score capped at 59 - BELOW the heuristic line-0 minimum of 60 so that
+    # a well-scored heuristic candidate (e.g. ALL-CAPS line-0 = 70) always wins.
+    # Using only 5 lines prevents tech bullet-point terms (Cloud Watch, Entity
+    # Framework, Machine Learning, Map Reduce, Web Based) from being misclassified
+    # as PERSON entities and beating the correct heuristic candidate.
     if _SPACY_NER_AVAILABLE and _SPACY_NLP is not None:
         try:
-            _ner_header = " ".join(str(ln) for ln in lines[:12])
-            _doc = _SPACY_NLP(_ner_header[:600])
+            _ner_header = " ".join(str(ln) for ln in lines[:5])
+            _doc = _SPACY_NLP(_ner_header[:400])
             for _ent in _doc.ents:
                 if _ent.label_ == "PERSON":
                     _etoks = [t.strip(".,") for t in _ent.text.split() if t.strip(".,")]
@@ -1542,10 +1565,12 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                         continue
                     _sfn = _etoks[0][:1].upper() + _etoks[0][1:].lower()
                     _sln = (_etoks[-1][:1].upper() + _etoks[-1][1:].lower()) if len(_etoks) >= 2 else ""
-                    if _sfn.casefold() not in role_words and _sln.casefold() not in role_words:
-                        # Earlier entity start ⇒ slight bonus
-                        _ner_score = 75 + max(0, 5 - _ent.start)
-                        candidates.append((_ner_score, (_sfn, _sln)))
+                    # Skip if either token is a role/contact/tech word.
+                    if _sfn.casefold() in role_words or _sln.casefold() in role_words:
+                        continue
+                    # Cap at 59 so heuristic line-0 (score 60) always beats NER.
+                    _ner_score = min(59, 57 + max(0, 5 - _ent.start))
+                    candidates.append((_ner_score, (_sfn, _sln)))
         except Exception:
             pass
     # ── end NER boost ────────────────────────────────────────────
@@ -1650,6 +1675,11 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "cloud",
         "sql",
         "bi",
+        # Microsoft / web tech tokens that must not appear as surname candidates.
+        "asp",
+        "mvc",
+        "visual",
+        "studio",
     }
     # Suffixes: a token *ending* with any of these is also a role token
     # (e.g. "dotnetdeveloper", "javadeveloper", "fullstackengineer").
@@ -1870,6 +1900,11 @@ def _pick_best_name_pair(
         "intern",
         "senior",
         "junior",
+        # Microsoft / web tech tokens that must not appear as filename name tokens.
+        "asp",
+        "mvc",
+        "visual",
+        "studio",
     }
     # Role-suffix patterns: any token ending with these is also a bad token.
     _bad_token_suffixes = (
@@ -5092,6 +5127,11 @@ def main() -> int:
                 "permanent",
                 "resident",
                 "fsd",
+                # Microsoft / web tech tokens.
+                "asp",
+                "mvc",
+                "visual",
+                "studio",
             }
             us_state_names = {v.casefold() for v in US_STATE_ABBR_TO_FULL.values()}
             def _compact_token(s: str) -> str:
