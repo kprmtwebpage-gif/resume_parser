@@ -1907,7 +1907,10 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
             if local.endswith(last_initial):
                 first_guess = token_alpha[:-1]
                 if len(first_guess) >= 4:
-                    return first_guess.title(), ""  # we intentionally drop 1-letter last names later
+                    # Return the initial as the last name — don't drop it.
+                    # South/East Asian names commonly use a single-letter
+                    # last initial ("Vaishnavi K", "Raviteja K").
+                    return first_guess.title(), last_initial.upper()
 
         if email:
             local = email.split("@", 1)[0]

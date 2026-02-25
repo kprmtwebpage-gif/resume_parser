@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   EnvelopeIcon,
   MapPinIcon,
@@ -19,7 +20,9 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const [isDownloaded, setIsDownloaded] = useState(false)
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, direction: 'down' })
   const dropdownRef = useRef(null)
+  const buttonRef = useRef(null)
 
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
   const location = row.location || row.address || '—'
@@ -28,10 +31,13 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const viewResumeUrl = hasResume ? `/candidates/${row.id}/resume?inline=true` : null
   const downloadResumeUrl = hasResume ? baseResumeUrl : null
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside (check both the trigger button area and the portal menu)
+  const portalMenuRef = useRef(null)
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+      const inButton = dropdownRef.current && dropdownRef.current.contains(event.target)
+      const inMenu = portalMenuRef.current && portalMenuRef.current.contains(event.target)
+      if (!inButton && !inMenu) {
         setIsDropdownOpen(false)
       }
     }
@@ -218,8 +224,20 @@ Availability: ${row.availability || 'N/A'}`
           <div className="relative">
             <button
               type="button"
+              ref={buttonRef}
               onClick={(e) => {
                 e.stopPropagation()
+                if (!isDropdownOpen && buttonRef.current) {
+                  const rect = buttonRef.current.getBoundingClientRect()
+                  const spaceBelow = window.innerHeight - rect.bottom
+                  const menuW = 176 // w-44 = 11rem = 176px
+                  const openUp = spaceBelow < 200
+                  setDropdownPos({
+                    top: openUp ? rect.top : rect.bottom + 4,
+                    left: rect.right - menuW,
+                    direction: openUp ? 'up' : 'down',
+                  })
+                }
                 setIsDropdownOpen(!isDropdownOpen)
               }}
               className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
@@ -228,10 +246,17 @@ Availability: ${row.availability || 'N/A'}`
               <span className="text-neutral-400">⋮</span>
             </button>
 
-            {/* Dropdown Menu */}
-            {isDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-md shadow-lg border border-neutral-200 py-1 z-50"
-                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}
+            {/* Dropdown Menu — rendered via portal to escape overflow-hidden parents */}
+            {isDropdownOpen && createPortal(
+              <div
+                ref={portalMenuRef}
+                className="fixed w-44 bg-white rounded-md shadow-lg border border-neutral-200 py-1 z-[9999]"
+                style={{
+                  top: dropdownPos.direction === 'up' ? undefined : dropdownPos.top,
+                  bottom: dropdownPos.direction === 'up' ? (window.innerHeight - dropdownPos.top + 4) : undefined,
+                  left: dropdownPos.left,
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                }}
               >
                 <button
                   type="button"
@@ -274,7 +299,8 @@ Availability: ${row.availability || 'N/A'}`
                     </div>
                   </>
                 )}
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>
