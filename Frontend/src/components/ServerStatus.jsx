@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react'
 import { apiUrl } from '../config'
 
+// This component is a local-dev helper only.
+// On deployed servers (UAT, DEV, PROD) it must not render — the backend
+// is managed by Docker and nginx, not started manually.
+const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+
 export default function ServerStatus() {
   const [backendStatus, setBackendStatus] = useState('checking')
-  const [frontendStatus, setFrontendStatus] = useState('running')
+  const [frontendStatus] = useState('running')
   const [retryCount, setRetryCount] = useState(0)
+
+  // Skip entirely when running on a remote/deployed server
+  if (!IS_LOCAL) return null
 
   const checkBackend = async () => {
     try {
