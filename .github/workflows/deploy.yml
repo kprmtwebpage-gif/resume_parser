@@ -1,0 +1,60 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - dev      # auto-deploy on push to dev
+      - uat      # auto-deploy on push to uat
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev / uat / prod)'
+        required: true
+        default: 'uat'
+        type: choice
+        options: [dev, uat, prod]
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.ref_name || inputs.environment }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ inputs.environment }}"
+          else
+            ENV="${GITHUB_REF_NAME}"
+          fi
+          echo "name=$ENV" >> $GITHUB_OUTPUT
+          echo "Deploying to: $ENV"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            set -e
+            cd /root/resume-parser
+
+            # Pull the correct branch
+            git fetch origin
+            git checkout ${{ steps.env.outputs.name }}
+            git pull origin ${{ steps.env.outputs.name }}
+
+            # Run the appropriate deploy script
+            ENV="${{ steps.env.outputs.name }}"
+            if [ "$ENV" = "dev" ]; then
+              bash deploy_dev.sh
+            elif [ "$ENV" = "uat" ]; then
+              bash deploy_uat.sh
+            elif [ "$ENV" = "prod" ]; then
+              bash deploy_prod.sh
+            else
+              echo "Unknown environment: $ENV"
+              exit 1
+            fi

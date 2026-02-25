@@ -1,0 +1,155 @@
+================================================================
+  CI/CD PIPELINE – Resume Parser Project
+================================================================
+
+OVERVIEW
+--------
+One server (89.167.60.41), one codebase (/root/resume-parser),
+three isolated Docker stacks (dev / uat / prod), automated via
+GitHub Actions.
+
+HOW IT WORKS
+------------
+
+  Developer pushes code to GitHub branch
+            |
+            v
+  GitHub Actions detects the push
+            |
+            v
+  GitHub Actions SSHs into server (89.167.60.41)
+            |
+            v
+  Server pulls latest code from that branch
+            |
+            v
+  Deploy script builds Docker images + starts containers
+            |
+            v
+  Health check confirms service is up
+
+
+BRANCH → ENVIRONMENT MAPPING
+-----------------------------
+
+  Branch   │  Deploy Script    │  Stack          │  Port
+  ─────────┼───────────────────┼─────────────────┼───────
+  dev      │  deploy_dev.sh    │  resume-dev     │  8002
+  uat      │  deploy_uat.sh    │  resume-uat     │  8001
+  prod     │  deploy_prod.sh   │  resume-prod    │  8000
+
+
+TRIGGER RULES
+-------------
+
+  - Push to 'dev'   → auto-deploy to DEV  (immediate)
+  - Push to 'uat'   → auto-deploy to UAT  (immediate)
+  - Push to 'prod'  → manual trigger only (safety gate)
+  - Any branch      → manual trigger via GitHub UI (workflow_dispatch)
+
+
+SERVER ARCHITECTURE
+-------------------
+
+  /root/resume-parser/          ← single git repo
+  ├── docker-compose.yml        ← base config (shared by all envs)
+  ├── docker-compose.dev.yml    ← dev overrides  (port 8002)
+  ├── docker-compose.uat.yml    ← uat overrides  (port 8001)
+  ├── docker-compose.prod.yml   ← prod overrides (port 8000)
+  ├── .env.dev                  ← dev secrets  (DB: resume_dev)
+  ├── .env.uat                  ← uat secrets  (DB: resume_uat)
+  ├── .env.prod                 ← prod secrets (DB: resume_prod)
+  ├── deploy_dev.sh
+  ├── deploy_uat.sh
+  └── deploy_prod.sh
+
+  Each stack has its own isolated containers + database volume:
+  ┌─────────────────────────────┐
+  │  resume-api-dev             │  ← API + Frontend
+  │  resume-ingestion-dev       │  ← Resume parser
+  │  resume-db-dev (postgres)   │  ← Isolated DB
+  └─────────────────────────────┘
+  ┌─────────────────────────────┐
+  │  resume-api-uat             │
+  │  resume-ingestion-uat       │
+  │  resume-db-uat (postgres)   │
+  └─────────────────────────────┘
+  ┌─────────────────────────────┐
+  │  resume-api-prod            │
+  │  resume-ingestion-prod      │
+  │  resume-db-prod (postgres)  │
+  └─────────────────────────────┘
+
+
+GITHUB ACTIONS WORKFLOW FILE
+-----------------------------
+
+  Location: .github/workflows/deploy.yml
+
+  The workflow:
+  1. Detects which branch was pushed
+  2. SSHs into the server using stored secrets
+  3. Runs git checkout <branch> + git pull
+  4. Runs the matching deploy script
+  5. Deploy script: builds Docker images, starts containers,
+     waits 10-15s, runs health check
+
+
+SETUP STEPS (one-time)
+-----------------------
+
+  1. Add GitHub Secrets (repo → Settings → Secrets → Actions):
+
+       SSH_HOST     = 89.167.60.41
+       SSH_USER     = root
+       SSH_PASSWORD = kprMt&1984
+
+  2. Push the workflow + deploy scripts to GitHub:
+
+       git add .github deploy_dev.sh deploy_prod.sh deploy_uat.sh
+       git commit -m "ci: add GitHub Actions deploy pipeline"
+       git push origin dev
+
+  3. Done. All future pushes auto-deploy.
+
+
+MANUAL DEPLOY (from GitHub UI)
+-------------------------------
+
+  GitHub → Your Repo → Actions → Deploy → Run workflow
+  → Select environment: dev / uat / prod
+  → Click "Run workflow"
+
+
+USEFUL SERVER COMMANDS (SSH into 89.167.60.41)
+-----------------------------------------------
+
+  Check running containers:
+    docker ps
+
+  View logs for UAT API:
+    docker compose -p resume-uat logs -f api
+
+  View logs for DEV API:
+    docker compose -p resume-dev logs -f api
+
+  Stop UAT stack:
+    docker compose -p resume-uat down
+
+  Restart UAT stack:
+    docker compose -p resume-uat restart
+
+  Manual deploy on server:
+    cd /root/resume-parser
+    git checkout uat && git pull
+    bash deploy_uat.sh
+
+
+URLs
+----
+
+  UAT:  https://kprmtglobalsolutions.duckdns.org/uat/
+  PROD: https://kprmtglobalsolutions.duckdns.org/
+  DEV:  http://89.167.60.41:8002/  (internal only)
+
+================================================================
