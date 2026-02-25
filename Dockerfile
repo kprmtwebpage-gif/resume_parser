@@ -8,8 +8,6 @@ WORKDIR /app/Frontend
 # Build-time env injection (base path and API URL for hosted environments)
 ARG BASE_PATH=""
 ARG VITE_API_BASE_URL=""
-ENV VITE_BASE_PATH=$BASE_PATH \
-    VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 # Install dependencies
 COPY Frontend/package*.json ./
@@ -17,6 +15,13 @@ RUN npm ci
 
 # Copy source and build
 COPY Frontend/ ./
+
+# Write env vars to .env file so Vite picks them up at build time
+RUN if [ -n "$VITE_API_BASE_URL" ]; then \
+      echo "VITE_API_BASE_URL=$VITE_API_BASE_URL" > .env && \
+      echo "VITE_BASE_PATH=$BASE_PATH" >> .env; \
+    fi
+
 RUN npm run build
 
 
