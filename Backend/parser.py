@@ -5330,16 +5330,17 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             # Skip bullet-point description lines
             if exp_ln.startswith(("\u2022", "\u00b7", "-", "*")) or re.match(r"^[^\w]", exp_ln):
                 continue
-            # Skip if it looks like a company/location line (contains comma + state/country)
-            if re.search(r"(?i)\b(?:inc|llc|ltd|corp|pvt|private|limited)\b", exp_ln):
-                continue
 
-            # For inline format: "Full time - Company - Role (dates)"
-            # Split on " - " or " – " and check each segment for role signal
+            # For inline format: "Full time - Company LLC - Role (dates)"
+            # Try dash-segment analysis FIRST — before the company-line skip,
+            # because the line may contain "LLC" in one segment but the role in another.
             dash_segments = [s.strip() for s in re.split(r"\s+[-–—]\s+", exp_ln) if s.strip()]
             found_from_segments = False
             if len(dash_segments) >= 2:
                 for seg in dash_segments:
+                    # Skip company-looking segments
+                    if re.search(r"(?i)\b(?:inc|llc|ltd|corp|pvt|private|limited)\b", seg):
+                        continue
                     seg_clean = _date_range_re.split(seg)[0].strip()
                     seg_clean = _year_re.split(seg_clean)[0].strip()
                     seg_clean = re.sub(r"\(.*$", "", seg_clean).strip()
@@ -5352,10 +5353,9 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
                     if 3 <= len(seg_clean) <= 70 and has_role_signal(seg_clean.casefold()):
                         if not is_cert_or_exam_line(seg_clean):
                             return canonicalize_job_title(seg_clean)
-                            found_from_segments = True
-                            break
-            if found_from_segments:
-                break
+            # If no inline segments matched, skip pure company/location lines
+            if re.search(r"(?i)\b(?:inc|llc|ltd|corp|pvt|private|limited)\b", exp_ln):
+                continue
 
             # Standard format: "Associate Lead  Nov 2019 – Sept 2022"
             cleaned = _date_range_re.split(exp_ln)[0].strip()
