@@ -133,6 +133,12 @@ def canonicalize_job_title(title: str) -> str:
         p = re.sub(r"(?i)\bfront\s*end\b", "Frontend", p)
         p = re.sub(r"(?i)\bback\s*end\b", "Backend", p)
 
+        # ── "Dot Net" / "DotNet" / bare "Net" → ".NET" ──
+        p = re.sub(r"(?i)\bdot\s*net\b", ".NET", p)
+        p = re.sub(r"(?i)\bdotnet\b", ".NET", p)
+        # Bare "Net" before a role word — but NOT if already preceded by a dot
+        p = re.sub(r"(?i)(?<!\.)(?<!\w)Net\s+(?=(?:Full Stack|Developer|Engineer|Architect|Consultant))", ".NET ", p)
+
         # Re-protect in case the expansions created new compound words (e.g. "SeniorDevOps").
         for pat, placeholder in _compound_protect:
             p = pat.sub(placeholder, p)
@@ -149,6 +155,16 @@ def canonicalize_job_title(title: str) -> str:
         # ── Full-string .NET Developer shortcut ──
         if re.fullmatch(r"(?i)\.?net\s+developer", p):
             p = ".NET Developer"
+
+        # ── Broader ".NET" normalization for multi-word titles ──
+        # "Senior Net Full Stack Developer" → "Senior .NET Full Stack Developer"
+        p = re.sub(r"(?i)(?<!\.)(?<!\w)Dot\s*Net(?=\b)", ".NET", p)
+        p = re.sub(r"(?i)(?<!\.)(?<!\w)Dotnet(?=\b)", ".NET", p)
+        # Ensure lone "Net" before role keywords becomes ".NET" — skip if already ".NET"
+        p = re.sub(
+            r"(?i)(?<!\.)(?<!\w)Net\b(?=\s+(?:Full Stack|Developer|Engineer|Architect|Consultant|Programmer))",
+            ".NET", p
+        )
 
         p = normalize_spaces(p)
 

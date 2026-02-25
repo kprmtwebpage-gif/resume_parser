@@ -4482,6 +4482,10 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         # Strip leading non-title symbols (e.g., checkmarks/bullets from PDF extraction).
         t = re.sub(r"^[^A-Za-z0-9.]+", "", t).strip()
 
+        # Reject if it looks like a parenthetical fragment (e.g. "Services) and Backend (oracle")
+        if t.count(")") > t.count("(") or t.count("(") > t.count(")") + 1:
+            return ""
+
         # Many resumes embed roles like: "JUL 21– Current Role- Principal Software Engineer".
         # Prefer the explicit "Role- <title>" segment before trimming date ranges.
         m_role = re.search(r"(?i)\brole\b\s*[-:—–]\s*(.{3,120})$", t)
@@ -4516,12 +4520,20 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
 
         # Normalize punctuation artifacts
         t = re.sub(r"[._]{2,}", " ", t)
+        # Replace stray dots with spaces — but protect ".NET"
+        t = re.sub(r"(?i)\.NET\b", "ZDOTNET_PLACEHOLDER", t)
         t = t.replace(".", " ")
+        t = t.replace("ZDOTNET_PLACEHOLDER", ".NET")
         t = re.sub(r"\s+", " ", t).strip()
 
         # Normalize .NET variants
         if re.fullmatch(r"(?i)net\s+developer", t):
             t = ".NET Developer"
+        # Normalize "Dot Net" / "DotNet" → ".NET" in-place
+        t = re.sub(r"(?i)\bdot\s*net\b", ".NET", t)
+        t = re.sub(r"(?i)\bdotnet\b", ".NET", t)
+        # Bare "Net" before role words → ".NET"
+        t = re.sub(r"(?i)(?<!\.)Net\b(?=\s+(?:Full Stack|Developer|Engineer|Architect))", ".NET", t)
         return t
 
     def shrink_to_role_phrase(title: str) -> str:
@@ -4546,6 +4558,14 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             "administrator",
             "specialist",
             "manager",
+            "designer",
+            "programmer",
+            "director",
+            "scientist",
+            "lead",
+            "coordinator",
+            "master",
+            "owner",
         }
         tech_prefix = {
             "java",
@@ -4562,6 +4582,32 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             "data",
             "aws",
             "azure",
+            "cloud",
+            "devops",
+            "big",
+            "machine",
+            "learning",
+            "ai",
+            "ml",
+            "etl",
+            "bi",
+            "qa",
+            "software",
+            "web",
+            "mobile",
+            "ios",
+            "android",
+            "platform",
+            "site",
+            "reliability",
+            "solutions",
+            "technical",
+            "system",
+            "systems",
+            "stack",
+            "senior",
+            "principal",
+            "staff",
         }
 
         specific_prefix = {
@@ -4658,8 +4704,10 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     quick_role_re = re.compile(
         r"(?i)\b("
         r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|devops|sre|manager|intern|"
-        r"sde|sdet"
-        r")\b|\b(data\s+engineer|data\s+scientist|full\s*stack|front\s*end|back\s*end|backend|frontend)\b"
+        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner"
+        r")\b|\b(data\s+engineer|data\s+scientist|full\s*stack|front\s*end|back\s*end|backend|frontend|"
+        r"machine\s+learning|cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
+        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer)\b"
         r"|\b(etl\s+(?:developer|engineer|analyst))\b"
     )
 
@@ -4713,14 +4761,37 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         "etl developer",
         "etl engineer",
         "etl analyst",
+        "programmer",
+        "designer",
+        "director",
+        "scientist",
+        "lead",
+        "coordinator",
+        "scrum master",
+        "product owner",
+        "cloud engineer",
+        "platform engineer",
+        "site reliability",
+        "solutions architect",
+        "solution architect",
+        "technical lead",
+        "team lead",
+        "tech lead",
+        "ai engineer",
+        "ml engineer",
+        "machine learning",
+        "big data engineer",
+        "bi developer",
     ]
 
     # Word-boundary role detection (avoids substring accidents like matching "architect" inside "architecture" when it's just a skill).
     role_re = re.compile(
         r"(?i)\b("
         r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|devops|sre|manager|intern|"
-        r"sde|sdet"
-        r")\b|\b(data\s+engineer|data\s+scientist|full\s*stack|front\s*end|back\s*end|backend|frontend)\b"
+        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner"
+        r")\b|\b(data\s+engineer|data\s+scientist|full\s*stack|front\s*end|back\s*end|backend|frontend|"
+        r"machine\s+learning|cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
+        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer)\b"
         r"|\b(etl\s+(?:developer|engineer|analyst))\b"
     )
 
@@ -4730,10 +4801,17 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     # If the resume doesn't have a clean standalone title line, it often still
     # states the role in a sentence near the top (e.g., "experience as a Data Engineer").
     as_role_re = re.compile(
-        r"(?i)\b(?:experience\s+as\s+an?|worked\s+as\s+an?|as\s+an?|as\s+a)\s+"
-        r"(?:(senior|lead|principal|staff)\s+)?"
-        r"(data\s+engineer|data\s+scientist|software\s+engineer|java\s+developer|full\s*stack\s+developer|"
-        r"devops\s+engineer|cloud\s+engineer|\\.net\s+developer|business\s+analyst|data\s+analyst|qa\s+engineer|tester|sre)\b"
+        r"(?i)\b(?:experience\s+as\s+an?|worked\s+as\s+an?|working\s+as\s+an?|as\s+an?|as\s+a)\s+"
+        r"(?:(senior|lead|principal|staff|junior)\s+)?"
+        r"(data\s+engineer|data\s+scientist|software\s+engineer|software\s+developer|java\s+developer|"
+        r"python\s+developer|full\s*stack\s+developer|full\s*stack\s+engineer|"
+        r"devops\s+engineer|cloud\s+engineer|\\.?net\s+developer|\\.?net\s+full\s*stack\s+developer|"
+        r"front\s*end\s+developer|back\s*end\s+developer|react\s+developer|angular\s+developer|"
+        r"machine\s+learning\s+engineer|ai\s+engineer|ml\s+engineer|"
+        r"business\s+analyst|data\s+analyst|qa\s+engineer|qa\s+analyst|"
+        r"solutions?\s+architect|technical\s+architect|systems?\s+architect|"
+        r"big\s+data\s+engineer|etl\s+developer|bi\s+developer|"
+        r"tester|sre|scrum\s*master|product\s+manager|project\s+manager)\b"
     )
     for ln in non_empty_lines(text)[:40]:
         if is_cert_or_exam_line(ln):
@@ -4760,6 +4838,12 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         if not has_role_signal(sl):
             return False
         if any(x in sl for x in ["@", "http", "www."]):
+            return False
+        # Reject unbalanced parenthetical fragments (garbage extraction)
+        if s.count(")") != s.count("("):
+            return False
+        # Reject fragments starting with a closing paren or conjunction
+        if sl.startswith((")", "and ", "or ", "the ", "a ", "an ")):
             return False
 
         # Reject sentence-like fragments that often get mis-selected as a "title".
@@ -4803,6 +4887,18 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         """Strip candidate-name prefixes like 'First Middle Last <Role>'."""
         if not s:
             return s
+
+        # Tokens that look Title-Case but are actually job title keywords — never strip these as "names".
+        _NOT_NAME_TOKENS = {
+            "senior", "junior", "lead", "principal", "staff", "associate",
+            "net", "dot", "java", "python", "angular", "react", "node",
+            "full", "stack", "frontend", "backend", "data", "cloud", "devops",
+            "software", "web", "mobile", "big", "machine", "azure", "aws",
+            "developer", "engineer", "analyst", "architect", "consultant",
+            "tester", "specialist", "manager", "designer", "director",
+            "scientist", "programmer", "coordinator", "administrator",
+        }
+
         # If we don't know the extracted name, still try a heuristic strip for
         # lines like: "Satya Veni Chelluboina Java Full Stack Developer".
         if not fn or not ln_name:
@@ -4811,6 +4907,8 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
                 # If first 2-4 tokens look like a Title-Case name, drop them
                 # if the remainder still looks like a job title.
                 def is_name_tok(tok: str) -> bool:
+                    if tok.casefold() in _NOT_NAME_TOKENS:
+                        return False
                     return tok[:1].isupper() and tok[1:].islower() and tok.isalpha()
 
                 for cut in (3, 2, 4):

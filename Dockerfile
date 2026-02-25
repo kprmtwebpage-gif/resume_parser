@@ -5,6 +5,12 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/Frontend
 
+# Build-time env injection (base path and API URL for hosted environments)
+ARG BASE_PATH=""
+ARG VITE_API_BASE_URL=""
+ENV VITE_BASE_PATH=$BASE_PATH \
+    VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 # Install dependencies
 COPY Frontend/package*.json ./
 RUN npm ci
