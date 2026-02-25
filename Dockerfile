@@ -17,10 +17,10 @@ RUN npm ci
 COPY Frontend/ ./
 
 # Write env vars to .env file so Vite picks them up at build time
-RUN if [ -n "$VITE_API_BASE_URL" ]; then \
-      echo "VITE_API_BASE_URL=$VITE_API_BASE_URL" > .env && \
-      echo "VITE_BASE_PATH=$BASE_PATH" >> .env; \
-    fi
+# This overwrites the default .env from the repo
+RUN echo "VITE_API_BASE_URL=${VITE_API_BASE_URL}" > .env && \
+    echo "VITE_BASE_PATH=${BASE_PATH}" >> .env && \
+    cat .env
 
 RUN npm run build
 
