@@ -182,10 +182,39 @@ class Candidate(BaseModel):
     professional_experience: Optional[str] = None
 
 
+import subprocess as _subprocess
+
+def _git_commit_hash() -> str:
+    """Return the short git commit hash of the running code, or 'unknown'."""
+    try:
+        result = _subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=os.path.dirname(__file__),
+        )
+        return result.stdout.strip() if result.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"
+
+_COMMIT_HASH: str | None = None  # lazily cached
+
+def _get_commit() -> str:
+    global _COMMIT_HASH
+    if _COMMIT_HASH is None:
+        _COMMIT_HASH = _git_commit_hash()
+    return _COMMIT_HASH
+
+
 @app.get("/health")
 async def health_check():
     """Docker health check endpoint"""
-    return {"status": "ok"}
+    return {"status": "ok", "commit": _get_commit()}
+
+
+@app.get("/version")
+async def version():
+    """Return the deployed git commit hash for deployment verification."""
+    return {"commit": _get_commit()}
 
 
 @app.get("/")
