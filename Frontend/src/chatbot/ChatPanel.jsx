@@ -156,8 +156,7 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setAvailableJobTitles(parsed);
-          setSuggestions(parsed);
-          // Show in chat if not already there
+          // Show in chat if not already there (don't also set suggestions — the in-chat grid is sufficient)
           setMessages(prev => {
             const alreadyShown = prev.some(m => m.type === 'jobtitles');
             if (alreadyShown) return prev;
@@ -176,10 +175,9 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
       if (response.data && Array.isArray(response.data) && response.data.length > 0) {
         const jobTitles = response.data;
         setAvailableJobTitles(jobTitles);
-        setSuggestions(jobTitles);
         localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(jobTitles));
 
-        // Show job titles as a clickable list inside the chat
+        // Show job titles as a clickable list inside the chat (don't also set suggestions — avoids duplicate display)
         setMessages(prev => {
           const alreadyShown = prev.some(m => m.type === 'jobtitles');
           if (alreadyShown) return prev;
@@ -244,8 +242,7 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
     }
 
     if (availableJobTitles.length > 0) {
-      setSuggestions(availableJobTitles);
-      // Re-show job titles list in the fresh chat
+      // Re-show job titles list in the fresh chat (don't also set suggestions — avoids duplicate display)
       setMessages(prev => [...prev, { type: 'jobtitles', titles: availableJobTitles, timestamp: new Date() }]);
     } else {
       setSuggestions([]);
