@@ -178,6 +178,15 @@ _SKILL_CONTEXT_TOKENS: frozenset[str] = frozenset({
     "aws", "azure", "gcp", "docker", "kubernetes", "terraform",
     "ansible", "puppet", "chef", "jenkins", "gitlab", "github",
     "circleci", "travis", "helm", "prometheus", "grafana",
+    # AWS-specific services that spaCy GPE-tags incorrectly
+    "kinesis", "lambda", "fargate", "sagemaker", "glue", "athena",
+    "redshift", "quicksight", "firehose", "cloudfront", "cloudformation",
+    "cloudwatch", "codecommit", "codepipeline", "codebuild", "codestar",
+    "dynamodb", "elasticache", "ecs", "eks", "ecr", "emr", "msk",
+    "stepfunctions", "eventbridge", "appsync", "amplify",
+    # GCP / Azure services
+    "bigquery", "dataflow", "pubsub", "spanner", "firestore",
+    "databricks", "synapse", "datafactory", "hdinsight",
     # Languages
     "python", "java", "csharp", "golang", "rust", "scala",
     "ruby", "php", "perl", "bash", "powershell", "groovy",
@@ -224,6 +233,11 @@ _BAD_CITY_TOKENS: frozenset[str] = frozenset({
     "oracle", "postgres", "postgresql", "mysql", "mssql", "sql", "nosql",
     "mongodb", "snowflake", "aws", "azure", "gcp", "linux",
     "python", "java", "scala", "hadoop", "spark", "kafka",
+    # AWS / GCP / Azure specific services often GPE-tagged by spaCy
+    "kinesis", "lambda", "fargate", "sagemaker", "glue", "athena",
+    "redshift", "quicksight", "firehose", "cloudfront", "cloudformation",
+    "cloudwatch", "dynamodb", "elasticache", "emr", "amplify",
+    "databricks", "synapse", "datafactory",
     "svn", "git", "github",
     "mail", "email", "phone", "linked", "linkedin",
     "and", "or", "the", "for", "with", "from", "into",

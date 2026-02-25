@@ -1256,6 +1256,19 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "eng",
         "frontend",
         "backend",
+        # Java / tech framework names that appear at the start of two-column DOCX
+        # files (skills column is read before the name column) and can score high
+        # as name candidates at idx=0.  They must never be accepted as a person's
+        # first or last name.
+        "hibernate",
+        "spring",
+        "maven",
+        "gradle",
+        "struts",
+        "tomcat",
+        "webpack",
+        "docker",
+        "kubernetes",
         # Contact/label tokens that bleed into name fields.
         "email",
         "phone",
@@ -1574,6 +1587,11 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                 skill_hits += 1
         if skill_hits >= 2:
             continue
+        # A line that is a single known-skill token (e.g. "Hibernate", "Spring",
+        # "Maven") can never be a person's name — DOCX two-column layouts can put
+        # framework names at idx=0, beating the real name at a later line.
+        if skill_hits >= 1 and len(tokens) == 1:
+            continue
 
         # Score: earlier lines + cleaner tokens are better.
         score = 0
@@ -1731,6 +1749,11 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "datascientist",
         "scientist",
         "admin",
+        # Individual words from common role phrases that still signal a role context
+        # when they appear after a name in a filename (e.g. "Abhiram full stack .Net").
+        "full",
+        "stack",
+        "stacks",
         # Tech-stack words that appear in filenames but are not surname candidates.
         "net",
         "dotnet",
@@ -1812,16 +1835,34 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         if part_cf in utility_tokens:
             continue
 
+        # Also skip portmanteau tokens that end with a utility word — these are
+        # filename artifacts produced when separators are consumed (e.g.
+        # "Bhagya_Lakshmi_.Netresume.docx" → "Netresume" = "Net"+"resume").
+        if any(part_cf.endswith(ut) for ut in ("resume", "profile", "cv") if len(ut) >= 2):
+            if len(cleaned_parts) >= 2:
+                break  # we already have a full name; stop here
+            continue  # discard this artefact token and keep scanning
+
         # Reject filenames containing skills/roles/org words.
         part_compact = re.sub(r"[^a-z0-9.+#]", "", part_cf)
-        if part_cf in roleish_tokens or part_compact in roleish_tokens:
-            return "", ""
-        # Also reject compound role tokens like "dotnetdeveloper", "javadeveloper".
-        if any(part_compact.endswith(sfx) for sfx in _fn_role_suffixes) and len(part_compact) > min(len(s) for s in _fn_role_suffixes):
-            return "", ""
-        if part_cf in org_tokens or part_compact in org_tokens:
-            return "", ""
-        if part_cf in skills_master or part_compact in skills_master:
+        _is_bad = (
+            part_cf in roleish_tokens
+            or part_compact in roleish_tokens
+            or (any(part_compact.endswith(sfx) for sfx in _fn_role_suffixes) and len(part_compact) > min(len(s) for s in _fn_role_suffixes))
+            or part_cf in org_tokens
+            or part_compact in org_tokens
+            or part_cf in skills_master
+            or part_compact in skills_master
+        )
+        if _is_bad:
+            # If we've already collected ≥ 2 name-like tokens, the role/org word
+            # is a suffix that follows the person's name in the filename
+            # (e.g. "PriyankaAdhikari_Dotnet_Developer.docx" → keep Priyanka Adhikari).
+            # Also break when we have 1 clean token + an initial
+            # (e.g. "Bharadwaj P .net.docx" → keep Bharadwaj P).
+            # If we have fewer than that, we can't confidently extract a name.
+            if len(cleaned_parts) >= 2 or (len(cleaned_parts) == 1 and initial_parts):
+                break
             return "", ""
 
         alpha = part.replace("'", "").replace("-", "")
@@ -1997,6 +2038,10 @@ def _pick_best_name_pair(
             return False
         fn_alpha = re.sub(r"[^A-Za-z]", "", fn)
         ln_alpha = re.sub(r"[^A-Za-z]", "", ln)
+        # Accept a single uppercase letter as last-name initial
+        # (e.g. "Pavani P", "Jaswanth N", "Raviteja K" — common in South Asian names).
+        if len(ln_alpha) == 1 and ln_alpha.isupper():
+            return len(fn_alpha) >= 3 and len(fn_alpha) <= 30
         return len(fn_alpha) >= 3 and len(ln_alpha) >= 3 and len(fn_alpha) <= 30 and len(ln_alpha) <= 30
 
     def score(pair: tuple[str, str]) -> int:
@@ -4686,6 +4731,10 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             "working on ",
             "experience in ",
             "experienced in ",
+            # Blocks sentences like "Experience Frontend Within Framework Like Angular"
+            # that start with "experience" followed by a tech/framework word.
+            "experience ",
+            "experienced ",
             "hands on ",
             "hands-on ",
         )):
@@ -4908,6 +4957,10 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             score -= 18
         if any(x in l for x in ["years", "experience", "summary", "objective"]):
             score -= 8
+        # Strongly penalise lines that START with "experience" — these are body
+        # sentences like "Experience Frontend Within Framework Like Angular", not titles.
+        if l.startswith("experience ") or l.startswith("experienced "):
+            score -= 40
         if any(x in l for x in ["education", "skills", "certification"]):
             score -= 12
         if any(x in l for x in education_markers):
