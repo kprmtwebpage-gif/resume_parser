@@ -202,6 +202,21 @@ _SKILL_CONTEXT_TOKENS: frozenset[str] = frozenset({
     "postman", "swagger", "openapi", "jira", "confluence",
     "excel", "word", "outlook", "sharepoint", "salesforce",
     "sap", "erp", "crm",
+    # Build / project tools that spaCy GPE-tags incorrectly
+    "maven", "gradle", "ant", "npm", "yarn", "pip", "conda",
+    "webpack", "vite", "babel", "rollup", "parcel",
+    # Data / ETL tools often misidentified as GPE
+    "sqoop", "flume", "nifi", "oozie", "hive", "pig", "impala",
+    "presto", "druid", "solr", "lucene", "kibana", "logstash",
+    "talend", "informatica", "datastage", "abinitio",
+    # Java / Spring ecosystem
+    "hibernate", "struts", "tomcat", "jetty", "wildfly", "jboss",
+    "spring", "springboot", "springmvc", "springcloud",
+    "log4j", "slf4j", "jackson", "lombok", "camel",
+    # Generic verbs/adjectives spaCy may GPE-tag in header summaries
+    "developing", "developed", "development", "designing", "building",
+    "managing", "leading", "implementing", "maintaining", "creating",
+    "proficient", "experienced", "skilled", "responsible",
     # Company-ish / role-ish tokens that should never be a city
     "engineering", "developer", "architect", "analyst", "consultant",
     "technologies", "solutions", "systems", "services",
@@ -245,6 +260,19 @@ _BAD_CITY_TOKENS: frozenset[str] = frozenset({
     "xunit", "nunit", "junit", "testng", "selenium", "moq", "mockito",
     "xaml", "wpf", "winforms", "blazor", "razor",
     "testing", "automation", "agile", "scrum", "devops",
+    # Build / project tools
+    "maven", "gradle", "ant", "npm", "yarn", "pip", "conda",
+    "webpack", "vite", "babel",
+    # Data / ETL tools
+    "sqoop", "flume", "nifi", "oozie", "hive", "pig", "impala",
+    "presto", "druid", "solr", "lucene", "kibana", "logstash",
+    # Java ecosystem
+    "hibernate", "struts", "tomcat", "spring", "springboot",
+    "log4j", "jackson", "camel",
+    # Generic verbs/adjectives spaCy may GPE-tag
+    "developing", "developed", "development", "designing", "building",
+    "managing", "leading", "implementing", "maintaining",
+    "proficient", "experienced", "skilled",
 })
 
 
@@ -858,6 +886,14 @@ def extract_location(text: str) -> LocationResult | None:
                 start_char = ent.start_char
                 if _preceding_token_is_skill(header_text, start_char):
                     continue
+                # Guard: reject if the entity text itself is a known skill/tech
+                # (spaCy often GPE-tags tools like "Maven", "Sqoop", "Hibernate")
+                if _is_skill_token(ent_text):
+                    continue
+                # Guard: reject generic verbs/adjectives spaCy may GPE-tag
+                # (e.g., "Developing", "Building") — not a location.
+                if _norm_tok(ent_text) in _SKILL_CONTEXT_TOKENS:
+                    continue
                 if _is_us_state(ent_text):
                     return LocationResult(
                         city=None,
@@ -954,15 +990,20 @@ def detect_location_with_fallback(
             r["source"] = "fulltext_regex"
             return r
 
-    # Tier-1 low (header regex found something but just country / state-only)
-    if result:
-        return result
-
     # ── Tier 3 : phone area code ──────────────────────────────────────────────
+    # Try phone BEFORE accepting a low-confidence header result.  Low-confidence
+    # spaCy results (source="header_spacy") are often false positives — tech
+    # terms like "Maven", "Sqoop", person names, etc.  The phone area-code
+    # lookup is more reliable in those cases.
     if phone:
         phone_result = detect_location_from_phone(phone)
         if phone_result:
             return phone_result
+
+    # Tier-1 low (header regex found something but just country / state-only):
+    # Only used when phone fallback is unavailable.
+    if result:
+        return result
 
     # ── Tier 4 : nothing found ────────────────────────────────────────────────
     return _empty_result()

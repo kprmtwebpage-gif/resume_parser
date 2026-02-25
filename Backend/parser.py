@@ -2254,6 +2254,13 @@ def extract_address(
             _lp_result = _detect_loc_with_fallback(text, str(phone) if phone else None)
             _lp_confidence = _lp_result.get("confidence", "low")
             _lp_str = _loc_result_to_str(_lp_result)
+            # Safety net: reject _lp_str if it's a single word that matches a
+            # known skill/tech from skills_master.txt.  spaCy sometimes GPE-tags
+            # tool names like "Maven", "Sqoop", "Hibernate" that slip through
+            # the location_parser guards.
+            if _lp_str and " " not in _lp_str.strip() and _lp_str.strip(",. ").casefold() in skills_master:
+                _lp_str = ""
+                _lp_confidence = "low"
             if _lp_confidence == "high" and _lp_str:
                 return _lp_str
         except Exception:
