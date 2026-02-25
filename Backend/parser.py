@@ -4485,6 +4485,11 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         # Reject if it looks like a parenthetical fragment (e.g. "Services) and Backend (oracle")
         if t.count(")") > t.count("(") or t.count("(") > t.count(")") + 1:
             return ""
+        # Also reject reverse-ordered parens: ")" appears before "(" (garbled fragment)
+        idx_close = t.find(")")
+        idx_open = t.find("(")
+        if idx_close != -1 and (idx_open == -1 or idx_close < idx_open):
+            return ""
 
         # Many resumes embed roles like: "JUL 21– Current Role- Principal Software Engineer".
         # Prefer the explicit "Role- <title>" segment before trimming date ranges.
@@ -4801,7 +4806,9 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     # If the resume doesn't have a clean standalone title line, it often still
     # states the role in a sentence near the top (e.g., "experience as a Data Engineer").
     as_role_re = re.compile(
-        r"(?i)\b(?:experience\s+as\s+an?|worked\s+as\s+an?|working\s+as\s+an?|as\s+an?|as\s+a)\s+"
+        r"(?i)\b(?:experience\s+as\s+an?|worked\s+as\s+an?|working\s+as\s+an?|"
+        r"experience\s+in|experience\s+as|"  # also match "experience in Data Engineer"
+        r"as\s+an?|as\s+a)\s+"
         r"(?:(senior|lead|principal|staff|junior)\s+)?"
         r"(data\s+engineer|data\s+scientist|software\s+engineer|software\s+developer|java\s+developer|"
         r"python\s+developer|full\s*stack\s+developer|full\s*stack\s+engineer|"
@@ -4811,6 +4818,7 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         r"business\s+analyst|data\s+analyst|qa\s+engineer|qa\s+analyst|"
         r"solutions?\s+architect|technical\s+architect|systems?\s+architect|"
         r"big\s+data\s+engineer|etl\s+developer|bi\s+developer|"
+        r"java\s+full\s*stack\s+developer|java\s+backend\s+developer|"
         r"tester|sre|scrum\s*master|product\s+manager|project\s+manager)\b"
     )
     for ln in non_empty_lines(text)[:40]:
@@ -5293,17 +5301,20 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     # ── NEW STRATEGY: First experience-section entry ────────────────────────
     # When all other strategies fail, find the EXPERIENCE / PROFESSIONAL EXPERIENCE
     # section header and parse the first job entry's role title.
-    # Typical layout:
+    # Typical layouts:
     #   EXPERIENCE
     #   Associate Lead                Nov 2019 – Sept 2022
     #   Company Name                  City, State
+    # OR inline:
+    #   Work Experience
+    #   Full time - Company LLC - Software Developer (Jan. 2023 – Aug. 2024)
     _exp_header_re = re.compile(
         r"(?i)^(?:(?:professional|relevant|work)\s+)?experience(?:\s+(?:summary|history))?\s*:?\s*$"
     )
     _date_range_re = re.compile(
         r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
         r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
-        r"\s*'?\d{2,4}",
+        r"\.?\s*'?\d{2,4}",
         re.IGNORECASE,
     )
     _year_re = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -5311,17 +5322,46 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     for idx, ln in enumerate(_nel):
         if not _exp_header_re.match(ln.strip()):
             continue
-        # Found experience header – check next 3 lines for a role title
-        for exp_ln in _nel[idx + 1 : idx + 4]:
+        # Found experience header – check next 5 lines for a role title
+        for exp_ln in _nel[idx + 1 : idx + 6]:
             exp_ln = exp_ln.strip()
             if not exp_ln:
+                continue
+            # Skip bullet-point description lines
+            if exp_ln.startswith(("\u2022", "\u00b7", "-", "*")) or re.match(r"^[^\w]", exp_ln):
                 continue
             # Skip if it looks like a company/location line (contains comma + state/country)
             if re.search(r"(?i)\b(?:inc|llc|ltd|corp|pvt|private|limited)\b", exp_ln):
                 continue
-            # Strip trailing date ranges: "Associate Lead  Nov 2019 – Sept 2022"
+
+            # For inline format: "Full time - Company - Role (dates)"
+            # Split on " - " or " – " and check each segment for role signal
+            dash_segments = [s.strip() for s in re.split(r"\s+[-–—]\s+", exp_ln) if s.strip()]
+            found_from_segments = False
+            if len(dash_segments) >= 2:
+                for seg in dash_segments:
+                    seg_clean = _date_range_re.split(seg)[0].strip()
+                    seg_clean = _year_re.split(seg_clean)[0].strip()
+                    seg_clean = re.sub(r"\(.*$", "", seg_clean).strip()
+                    seg_clean = re.sub(r"[\s,|–—-]+$", "", seg_clean).strip()
+                    if seg_clean.casefold().startswith(("full time", "part time", "contract", "freelance")):
+                        continue
+                    seg_clean = finalize_title(seg_clean)
+                    seg_clean = shrink_to_role_phrase(seg_clean)
+                    seg_clean = finalize_title(seg_clean)
+                    if 3 <= len(seg_clean) <= 70 and has_role_signal(seg_clean.casefold()):
+                        if not is_cert_or_exam_line(seg_clean):
+                            return canonicalize_job_title(seg_clean)
+                            found_from_segments = True
+                            break
+            if found_from_segments:
+                break
+
+            # Standard format: "Associate Lead  Nov 2019 – Sept 2022"
             cleaned = _date_range_re.split(exp_ln)[0].strip()
             cleaned = _year_re.split(cleaned)[0].strip()
+            # Remove trailing parenthetical dates: "Software Developer (Jan 2023 ...)"
+            cleaned = re.sub(r"\(.*$", "", cleaned).strip()
             # Remove trailing separators and whitespace
             cleaned = re.sub(r"[\s,|–—-]+$", "", cleaned).strip()
             if not cleaned:
