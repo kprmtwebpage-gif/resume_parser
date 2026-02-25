@@ -5524,13 +5524,26 @@ def main() -> int:
                 if len(last_alpha) <= 1:
                     f_fn, f_ln = file_name_guess
                     f_ln_alpha = re.sub(r"[^A-Za-z]", "", (f_ln or ""))
-                    if (
+                    # Trust single-letter initials from the filename when they match.
+                    filename_confirms = (
                         first_name
                         and f_fn
                         and first_name.casefold() == f_fn.casefold()
                         and len(f_ln_alpha) == 1
                         and last_alpha.upper() == f_ln_alpha.upper()
-                    ):
+                    )
+                    # Also trust initials extracted from the resume body/header
+                    # text (e.g. DOCX header "KAVYA SRI G" → G is a real initial).
+                    b_fn, b_ln = body_name
+                    b_ln_alpha = re.sub(r"[^A-Za-z]", "", (b_ln or ""))
+                    body_confirms = (
+                        first_name
+                        and b_fn
+                        and first_name.casefold() == b_fn.casefold()
+                        and len(b_ln_alpha) == 1
+                        and last_alpha.upper() == b_ln_alpha.upper()
+                    )
+                    if filename_confirms or body_confirms:
                         last_name = last_alpha.upper()
                     else:
                         last_name = ""
