@@ -4828,6 +4828,77 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         if 3 <= len(guessed) <= 70 and has_role_signal(guessed.casefold()):
             return canonicalize_job_title(guessed)
 
+    # ── NEW STRATEGY: "Seeking / Looking for a <Role>" ──────────────────────
+    # Handles resumes where the objective says e.g.
+    #   "Seeking a Full Stack Developer role where I can …"
+    #   "Looking for a Senior Java Developer position"
+    _seeking_role_re = re.compile(
+        r"(?i)\b(?:seeking|looking\s+for|aspiring\s+to\s+(?:be(?:come)?|work\s+as))\s+"
+        r"(?:a\s+|an\s+)?"
+        r"(?:(?:position|role|opportunity|career)\s+(?:as|in|of)\s+(?:a\s+|an\s+)?)?"
+        r"((?:(?:senior|lead|principal|staff|junior|associate)\s+)?"
+        r"(?:\w[\w.#+]*\s+){0,4}"
+        r"(?:developer|engineer|analyst|architect|consultant|specialist|"
+        r"manager|designer|director|scientist|coordinator|tester|"
+        r"programmer|administrator|devops\s+engineer|sre|scrum\s*master|product\s*owner))"
+        r"\b"
+    )
+    for ln in non_empty_lines(text)[:40]:
+        if is_cert_or_exam_line(ln):
+            continue
+        m_seek = _seeking_role_re.search(ln)
+        if not m_seek:
+            continue
+        guessed = m_seek.group(1).strip()
+        guessed = finalize_title(guessed)
+        guessed = shrink_to_role_phrase(guessed)
+        guessed = finalize_title(guessed)
+        if 3 <= len(guessed) <= 70 and has_role_signal(guessed.casefold()):
+            return canonicalize_job_title(guessed)
+
+    # ── NEW STRATEGY: Objective / Summary section body ──────────────────────
+    # When "OBJECTIVE" or "SUMMARY" is a standalone header, scan the next few
+    # body lines for a leading role phrase like "Senior Developer with 6 yrs…"
+    # or an "Experienced <Role>" / "Results-driven <Role>" pattern.
+    _obj_header_re = re.compile(
+        r"(?i)^(?:objective|professional\s+summary|summary|profile|"
+        r"career\s+(?:objective|summary|profile))\s*:?\s*$"
+    )
+    _leading_role_re = re.compile(
+        r"(?i)^(?:(?:an?\s+)?(?:results?[\s-]*driven|detail[\s-]*oriented|highly[\s-]*(?:skilled|motivated|experienced)|"
+        r"experienced|accomplished|dedicated|passionate|versatile|dynamic|proactive|innovative|motivated)\s+)?"
+        r"((?:(?:senior|lead|principal|staff|junior|associate)\s+)?"
+        r"(?:\w[\w.#+]*\s+){0,3}"
+        r"(?:developer|engineer|analyst|architect|consultant|specialist|"
+        r"manager|designer|director|scientist|coordinator|tester|"
+        r"programmer|administrator|devops|sre))"
+        r"\s+(?:with|having|who|–|—|-|,|\()"
+    )
+    _nel = non_empty_lines(text)
+    for idx, ln in enumerate(_nel[:20]):
+        if not _obj_header_re.match(ln.strip()):
+            continue
+        # Found objective/summary header – scan next 5 body lines
+        for body_ln in _nel[idx + 1 : idx + 6]:
+            body_ln = body_ln.strip()
+            if not body_ln:
+                continue
+            # Stop if we hit another section header
+            if _obj_header_re.match(body_ln) or re.match(
+                r"(?i)^(?:education|skills|experience|certification|projects?)\s*:?\s*$",
+                body_ln,
+            ):
+                break
+            m_lead = _leading_role_re.search(body_ln)
+            if m_lead:
+                guessed = m_lead.group(1).strip()
+                guessed = finalize_title(guessed)
+                guessed = shrink_to_role_phrase(guessed)
+                guessed = finalize_title(guessed)
+                if 3 <= len(guessed) <= 70 and has_role_signal(guessed.casefold()):
+                    return canonicalize_job_title(guessed)
+        break  # only process first matching section header
+
     def is_plausible_job_title(s: str) -> bool:
         s = re.sub(r"\s+", " ", (s or "").strip())
         if not s:
@@ -5218,6 +5289,54 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             title = shrink_to_role_phrase(title)
             if 3 <= len(title) <= 80 and is_plausible_job_title(title):
                 return canonicalize_job_title(title)
+
+    # ── NEW STRATEGY: First experience-section entry ────────────────────────
+    # When all other strategies fail, find the EXPERIENCE / PROFESSIONAL EXPERIENCE
+    # section header and parse the first job entry's role title.
+    # Typical layout:
+    #   EXPERIENCE
+    #   Associate Lead                Nov 2019 – Sept 2022
+    #   Company Name                  City, State
+    _exp_header_re = re.compile(
+        r"(?i)^(?:(?:professional|relevant|work)\s+)?experience(?:\s+(?:summary|history))?\s*:?\s*$"
+    )
+    _date_range_re = re.compile(
+        r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+        r"\s*'?\d{2,4}",
+        re.IGNORECASE,
+    )
+    _year_re = re.compile(r"\b(?:19|20)\d{2}\b")
+
+    for idx, ln in enumerate(_nel):
+        if not _exp_header_re.match(ln.strip()):
+            continue
+        # Found experience header – check next 3 lines for a role title
+        for exp_ln in _nel[idx + 1 : idx + 4]:
+            exp_ln = exp_ln.strip()
+            if not exp_ln:
+                continue
+            # Skip if it looks like a company/location line (contains comma + state/country)
+            if re.search(r"(?i)\b(?:inc|llc|ltd|corp|pvt|private|limited)\b", exp_ln):
+                continue
+            # Strip trailing date ranges: "Associate Lead  Nov 2019 – Sept 2022"
+            cleaned = _date_range_re.split(exp_ln)[0].strip()
+            cleaned = _year_re.split(cleaned)[0].strip()
+            # Remove trailing separators and whitespace
+            cleaned = re.sub(r"[\s,|–—-]+$", "", cleaned).strip()
+            if not cleaned:
+                continue
+            # Also try comma-prefix: "Senior Software Engineer, ProArch IT"
+            if "," in cleaned:
+                cleaned = cleaned.split(",")[0].strip()
+            cleaned = finalize_title(cleaned)
+            cleaned = shrink_to_role_phrase(cleaned)
+            cleaned = finalize_title(cleaned)
+            if 3 <= len(cleaned) <= 70 and has_role_signal(cleaned.casefold()):
+                if not is_cert_or_exam_line(cleaned):
+                    return canonicalize_job_title(cleaned)
+        break  # only process first experience section
+
     return ""
 
 
