@@ -4,15 +4,14 @@ import { apiUrl } from '../config'
 // This component is a local-dev helper only.
 // On deployed servers (UAT, DEV, PROD) it must not render — the backend
 // is managed by Docker and nginx, not started manually.
-const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+export const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 
 export default function ServerStatus() {
   const [backendStatus, setBackendStatus] = useState('checking')
   const [frontendStatus] = useState('running')
   const [retryCount, setRetryCount] = useState(0)
 
-  // Skip entirely when running on a remote/deployed server
-  if (!IS_LOCAL) return null
+  // All hooks must be called unconditionally — guard is in App.jsx and at render time below
 
   const checkBackend = async () => {
     try {
