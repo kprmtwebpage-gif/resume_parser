@@ -21,8 +21,23 @@ import shutil
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, BackgroundTasks, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+# --- helpers ---------------------------------------------------------------
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+def _html_response(path: str) -> Response:
+    """Return an index.html FileResponse with no-cache headers
+    so deploy changes are picked up immediately."""
+    resp = FileResponse(path, media_type="text/html")
+    for k, v in _NO_CACHE_HEADERS.items():
+        resp.headers[k] = v
+    return resp
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -244,7 +259,7 @@ async def root():
     index_file = os.path.join(frontend_dist, "index.html")
     
     if os.path.exists(index_file) and os.getenv("SERVE_FRONTEND", "0") == "1":
-        return FileResponse(index_file)
+        return _html_response(index_file)
     
     return {"status": "ok", "message": "Resume Parser API is running"}
 
@@ -1448,7 +1463,7 @@ if os.path.exists(frontend_dist) and os.getenv("SERVE_FRONTEND", "0") == "1":
     async def spa_catch_all(full_path: str):
         index_file_path = os.path.join(frontend_dist, "index.html")
         if os.path.exists(index_file_path):
-            return FileResponse(index_file_path)
+            return _html_response(index_file_path)
         raise HTTPException(status_code=404, detail="Not found")
 
 
