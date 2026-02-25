@@ -41,9 +41,10 @@ jobs:
             set -e
             cd /root/resume-parser
 
-            # Pull the correct branch
+            # Clean any untracked/modified files that could block checkout
             git fetch origin
-            git checkout ${{ steps.env.outputs.name }}
+            git checkout -f ${{ steps.env.outputs.name }}
+            git clean -fd
             git pull origin ${{ steps.env.outputs.name }}
 
             # Run the appropriate deploy script
