@@ -17,12 +17,15 @@ RUN npm ci
 # Copy source and build for production
 COPY Frontend/ ./
 
-# Write env vars to .env file so Vite picks them up at build time
-# This overwrites the default .env from the repo
+# Write env vars to .env file so Vite picks them up at build time (for import.meta.env)
+# And set actual ENV vars for vite.config.js which reads process.env
 RUN echo "VITE_API_BASE_URL=${BASE_PATH}" > .env && \
     echo "VITE_BASE_PATH=${BASE_PATH}" >> .env && \
     echo "VITE_CHATBOT_API_BASE=${BASE_PATH}" >> .env && \
     cat .env
+
+# Set environment variables for vite.config.js (reads process.env.VITE_BASE_PATH)
+ENV VITE_BASE_PATH=${BASE_PATH}
 
 RUN npm run build
 
