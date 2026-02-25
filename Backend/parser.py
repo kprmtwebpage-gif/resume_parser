@@ -628,17 +628,11 @@ def extract_text_from_docx(path: str) -> str:
 
     parts: list[str] = []
 
-    # Body paragraphs
-    for para in doc.paragraphs:
-        _add(parts, getattr(para, "text", ""))
-
-    # Tables are common for 2-column contact headers (phone/email/location).
-    for table in getattr(doc, "tables", []) or []:
-        for row in getattr(table, "rows", []) or []:
-            for cell in getattr(row, "cells", []) or []:
-                _add(parts, getattr(cell, "text", ""))
-
-    # Header/footer content can also contain contact fields.
+    # ── Header/footer content FIRST — this is where candidate name,
+    # contact info, and job title typically live in professionally
+    # formatted DOCX resumes.  Placing it before body paragraphs
+    # ensures ``extract_name`` (which scans from the top) finds the
+    # name on the earliest lines.
     for section in getattr(doc, "sections", []) or []:
         for hf in (getattr(section, "header", None), getattr(section, "footer", None)):
             if hf is None:
@@ -649,6 +643,16 @@ def extract_text_from_docx(path: str) -> str:
                 for row in getattr(table, "rows", []) or []:
                     for cell in getattr(row, "cells", []) or []:
                         _add(parts, getattr(cell, "text", ""))
+
+    # Body paragraphs
+    for para in doc.paragraphs:
+        _add(parts, getattr(para, "text", ""))
+
+    # Tables are common for 2-column contact headers (phone/email/location).
+    for table in getattr(doc, "tables", []) or []:
+        for row in getattr(table, "rows", []) or []:
+            for cell in getattr(row, "cells", []) or []:
+                _add(parts, getattr(cell, "text", ""))
 
     # Fallback: if the visible DOCX text appears to lack contact info, try XML text.
     # This recovers email/phone/location stored inside Word textboxes/shapes.
@@ -1238,6 +1242,14 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "united",
         "hive",
         "spark",
+        # Management / training / process tokens misclassified as names.
+        "training",
+        "management",
+        "project",
+        "testing",
+        "agile",
+        "scrum",
+        "waterfall",
         # Seniority tokens that should not be treated as a person's first name.
         "sr",
         "senior",
@@ -1860,9 +1872,12 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
             # (e.g. "PriyankaAdhikari_Dotnet_Developer.docx" → keep Priyanka Adhikari).
             # Also break when we have 1 clean token + an initial
             # (e.g. "Bharadwaj P .net.docx" → keep Bharadwaj P).
-            # If we have fewer than that, we can't confidently extract a name.
+            # If we have exactly 1 clean token (e.g. "KAVYA-JAVA Resume.docx"),
+            # keep it as first-name-only instead of discarding everything.
             if len(cleaned_parts) >= 2 or (len(cleaned_parts) == 1 and initial_parts):
                 break
+            if len(cleaned_parts) == 1:
+                break   # keep the single name token we found
             return "", ""
 
         alpha = part.replace("'", "").replace("-", "")
@@ -1935,7 +1950,13 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
                     if remainder.isalpha():
                         return p_cf.title(), remainder.title()
 
-        # If we can't split confidently, don't use filename.
+        # If we can't split confidently, return the single token as first-name-only
+        # when it's a plausible name (≥ 3 letters).  This covers filenames like
+        # "KAVYA-JAVA Resume.docx" where the role word was stripped and a single
+        # valid name token remains.
+        token_alpha_only = re.sub(r"[^A-Za-z]", "", token)
+        if len(token_alpha_only) >= 3 and token_alpha_only.isalpha():
+            return token_alpha_only.title(), ""
         return "", ""
 
     # If we have exactly one trailing initial and at least one long token, keep the first name.
@@ -1984,6 +2005,14 @@ def _pick_best_name_pair(
         "application",
         "technologies",
         "technology",
+        # Management / training / process tokens misclassified as names.
+        "training",
+        "management",
+        "project",
+        "testing",
+        "agile",
+        "scrum",
+        "waterfall",
         # Tech-stack / degree tokens that wrongly appear in filenames as surnames.
         "stack",
         "full",
@@ -5349,6 +5378,14 @@ def main() -> int:
                 "permanent",
                 "resident",
                 "fsd",
+                # Management / training tokens misclassified as names.
+                "training",
+                "management",
+                "project",
+                "testing",
+                "agile",
+                "scrum",
+                "waterfall",
                 # Microsoft / web tech tokens.
                 "asp",
                 "mvc",
