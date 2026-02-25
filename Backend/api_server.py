@@ -145,6 +145,24 @@ def _build_education(row: dict) -> Any:
     return qual or None
 
 
+def _build_education_fast(row: dict) -> Any:
+    """Fast education builder for list endpoints — uses only pre-parsed
+    education_structured column; skips slow text-parsing fallback.
+    The detail endpoint (/candidates/{id}) still uses the full _build_education."""
+    edu_s = row.get("education_structured")
+    if edu_s:
+        if isinstance(edu_s, list) and edu_s:
+            return edu_s
+        if isinstance(edu_s, str):
+            try:
+                parsed = json.loads(edu_s)
+                if isinstance(parsed, list) and parsed:
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return None
+
+
 class Experience(BaseModel):
     job_title: Optional[str] = None
     years_of_experience: Optional[float] = None
@@ -366,7 +384,7 @@ async def get_candidates(
                     tech_skills=row.get("tech_skills"),
                     skills=_split_csv(row.get("tech_skills")),
                     professional_experience=str(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
-                    education=_build_education(row),
+                    education=_build_education_fast(row),  # fast: no text-parsing in list view
                     experience=Experience(
                         job_title=row.get("job_title"),
                         years_of_experience=float(row.get("professional_experience")) if row.get("professional_experience") is not None else None,

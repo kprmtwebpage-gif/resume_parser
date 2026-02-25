@@ -5,7 +5,7 @@ const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 
 export const api = axios.create({
   baseURL,
-  timeout: 15000,
+  timeout: 60000, // 60 seconds — list endpoint can be slow with many candidates
   headers: {
     'Cache-Control': 'no-cache, no-store, must-revalidate',
     'Pragma': 'no-cache',
