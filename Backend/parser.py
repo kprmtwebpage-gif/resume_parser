@@ -1652,8 +1652,19 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             else:
                 last = ""
 
-        first = first[:1].upper() + first[1:].lower() if first else ""
-        last = last[:1].upper() + last[1:].lower() if last else ""
+        def _title_or_keep(tok: str) -> str:
+            """Title-case names but keep short all-caps tokens (initials) as-is.
+
+            'PRAVEEN' -> 'Praveen', 'SS' -> 'SS', 'KP' -> 'KP',
+            'python/java' -> 'Python/java'
+            """
+            alpha = re.sub(r"[^A-Za-z]", "", tok)
+            if alpha.isupper() and len(alpha) <= 3:
+                return tok.upper()  # keep initials fully uppercase
+            return tok[:1].upper() + tok[1:].lower() if tok else ""
+
+        first = _title_or_keep(first)
+        last = _title_or_keep(last)
         if first:
             candidates.append((score, (first, last)))
 
@@ -1792,6 +1803,7 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "cloud",
         "sql",
         "bi",
+        "it",
         # Microsoft / web tech tokens that must not appear as surname candidates.
         "asp",
         "mvc",
@@ -1981,8 +1993,15 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
     if len(cleaned_parts) < 2:
         return "", ""
 
-    first = cleaned_parts[0].title()
-    last = cleaned_parts[-1].title()
+    def _fn_title(tok: str) -> str:
+        """Title-case but preserve short all-caps tokens (initials)."""
+        alpha = re.sub(r"[^A-Za-z]", "", tok)
+        if alpha.isupper() and len(alpha) <= 3:
+            return tok.upper()
+        return tok.title()
+
+    first = _fn_title(cleaned_parts[0])
+    last = _fn_title(cleaned_parts[-1])
     return first, last
 
 
@@ -2173,15 +2192,36 @@ def _pick_best_name_pair(
     # Prefer: header/body name, then filename (if confirmed), then email.
     body_name = merge_body_with_filename(body_name, file_name_guess)
 
+    # ---- Swap detection ----
+    # Some resumes put the name in "LAST FIRST" order (common in Indian
+    # resumes).  When the filename clearly suggests the opposite order
+    # (file_first matches body_last), create a swapped body candidate.
+    swapped_body: tuple[str, str] | None = None
+    b_fn_sw, b_ln_sw = (body_name[0] or "").strip(), (body_name[1] or "").strip()
+    f_fn_sw, f_ln_sw = (file_name_guess[0] or "").strip(), (file_name_guess[1] or "").strip()
+    if (b_fn_sw and b_ln_sw and f_fn_sw
+            and f_fn_sw.casefold() == b_ln_sw.casefold()
+            and (not f_ln_sw or f_ln_sw.casefold() == b_fn_sw.casefold()
+                 or _is_bad_token(f_ln_sw))):
+        swapped_body = (b_ln_sw, b_fn_sw)
+
     scored: list[tuple[int, tuple[str, str]]] = []
-    for origin, pair in (
+    candidates_to_score = [
         ("body", body_name),
         ("file", file_name_guess),
         ("email", email_guess),
-    ):
+    ]
+    if swapped_body:
+        candidates_to_score.append(("body_swap", swapped_body))
+    for origin, pair in candidates_to_score:
         s = score(pair)
         if origin == "body":
             s += 25
+        elif origin == "body_swap":
+            # Same tokens as body but reordered to match filename convention.
+            # Give a slight edge over body because filename-order evidence is
+            # a strong signal for "First Last" versus "Last First" ambiguity.
+            s += 27
         elif origin == "file":
             s += 15
         else:  # email
@@ -2198,6 +2238,8 @@ def _pick_best_name_pair(
             s -= 40
         if origin == "file" and bonus == 0 and (pair[0] or pair[1]):
             s -= 15 if looks_plausible_filename_pair(pair) else 40
+        if origin == "body_swap" and bonus == 0 and (pair[0] or pair[1]):
+            s -= 5  # mild penalty; swap should still beat body if confirmed
 
         scored.append((s, pair))
 
@@ -3041,15 +3083,20 @@ def extract_address(
         frag = re.sub(r"(?i)\b(linkedin|github)\b", " ", frag)
         frag = re.sub(r"\s+", " ", frag).strip()
 
-        # Normalize common "present/current" labels.
+        # Normalize common "present/current" labels — strip even mid-fragment.
+        # "Contact No: +91 9629693844 Current Location: Chennai, India." → "Chennai, India."
         frag = re.sub(
-            r"(?i)^\s*(?:present|current)\s+(?:address|location)\s*[:\-]\s*",
+            r"(?i).*(?:present|current)\s+(?:address|location)\s*[:\-]\s*",
+            "",
+            frag,
+        ).strip()
+        frag = re.sub(
+            r"(?i).*(?:location|address)\s*[:\-]\s*",
             "",
             frag,
         ).strip()
         frag = re.sub(r"(?i)^\s*(?:residing|based)\s+in\s+", "", frag).strip()
         frag = re.sub(r"(?i)^\s*(?:currently\s+)?(?:located|based|residing)\s+(?:in|at)\s+", "", frag).strip()
-        frag = re.sub(r"(?i)^\s*location\s*[:\-]\s*", "", frag).strip()
 
         # Drop common non-location qualifiers.
         frag = re.sub(r"(?i)\b(open\s+to\s+relocat(?:e|ion)|willing\s+to\s+relocat(?:e|ion)|relocat(?:e|ion)|remote)\b", " ", frag)
@@ -3137,10 +3184,22 @@ def extract_address(
             continue
 
         candidates: list[str] = []
-        # If the label is inline, take the tail after ':'/'-'.
-        m_inline = re.split(r"[:\-]", ln, maxsplit=1)
-        if len(m_inline) == 2:
-            candidates.append(m_inline[1].strip())
+        # Extract the tail after the *location* label rather than the first colon.
+        # "Contact No: +91 9629693844 Current Location: Chennai, India."
+        # → should yield "Chennai, India." not "+91 ... Chennai, India."
+        _loc_label_m = re.search(
+            r"(?i)(?:present|current)\s+(?:location|address)\s*[:\-]\s*"
+            r"|\blocation\s*[:\-]\s*"
+            r"|\baddress\s*[:\-]\s*",
+            ln,
+        )
+        if _loc_label_m:
+            candidates.append(ln[_loc_label_m.end():].strip())
+        else:
+            # Fallback: generic split on first colon/dash
+            m_inline = re.split(r"[:\-]", ln, maxsplit=1)
+            if len(m_inline) == 2:
+                candidates.append(m_inline[1].strip())
         candidates.append(ln)
         # Often the address follows on the next line.
         for j in range(i + 1, min(i + 6, len(top))):

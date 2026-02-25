@@ -429,8 +429,10 @@ def _try_parse_line(line: str) -> LocationResult | None:
     ln = re.sub(r"(?i)\b\S+@\S+\b", " ", line)
     ln = re.sub(r"(?i)https?://\S+|www\.\S+", " ", ln)
     ln = re.sub(r"(?i)\b(?:linkedin|github)\b\S*", " ", ln)
-    # Remove label prefixes: "Location: …", "Address: …", "Current Location: …"
-    ln = re.sub(r"(?i)^\s*(?:current\s+)?(?:location|address)\s*[:\-]\s*", "", ln)
+    # Remove label prefixes: "Current Location: …", "Location: …", "Address: …"
+    # Use greedy .* to strip even when the label appears mid-line after other
+    # contact tokens (e.g. "Contact No: +91 ... Current Location: Chennai, India").
+    ln = re.sub(r"(?i).*(?:current\s+)?(?:location|address)\s*[:\-]\s*", "", ln)
     # "Currently residing in …" / "Residing in …" / "Currently located in …"
     ln = re.sub(r"(?i)^\s*currently\s+(?:residing|located|based)\s+(?:in|at)\s+", "", ln)
     ln = re.sub(r"(?i)^\s*(?:residing|based|located)\s+(?:in|at)\s+", "", ln)
