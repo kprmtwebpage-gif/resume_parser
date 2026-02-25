@@ -383,10 +383,10 @@ _EDU_HEADING_RE = re.compile(
 
 # Stop-section headings (marks end of education section)
 _STOP_SECTION_RE = re.compile(
-    r"(?i)^\s*(?:experience|work\s+experience|employment|professional\s+experience|"
-    r"projects?|skills?\b|technical\s+skills?|certifications?|publications?|"
+    r"(?i)^\s*(?:experience|work\s+experience|total\s+work\s+experience|employment|professional\s+experience|"
+    r"projects?\s*(?:details?|overview)?|skills?\b|technical\s+skills?|certifications?|publications?|"
     r"awards?|achievements?|interests?|languages?|references?|summary|objective|"
-    r"profile|personal\s+details?)\s*[:\-–]?\s*$"
+    r"profile|personal\s+details?|key\s+responsibilities)\s*[:\-\u2013]?\s*$"
 )
 
 # Lines that should be ignored inside the education block
@@ -720,8 +720,16 @@ def _slice_education_section(lines: list[str]) -> list[str]:
 
     if start_idx is not None:
         block: list[str] = []
+        # Secondary stop: lines that begin with common non-education section
+        # headings followed by a colon and trailing content, e.g.:
+        # "Total Work Experience: 4.5+ years..."  or  "Projects Details: ..."
+        _INLINE_STOP_RE = re.compile(
+            r"(?i)^\s*(?:total\s+work\s+experience|work\s+experience|"
+            r"projects?\s*(?:details?|overview)?|key\s+responsibilities|"
+            r"professional\s+experience|employment\s+history)\s*:"
+        )
         for ln in lines[start_idx + 1:]:
-            if _STOP_SECTION_RE.match(ln):
+            if _STOP_SECTION_RE.match(ln) or _INLINE_STOP_RE.match(ln):
                 break
             block.append(ln)
         # Keep up to 60 lines from the section (avoid runaway)
@@ -819,7 +827,9 @@ def parse_education_section(resume_text: str) -> list[EducationEntry]:
     degree_signal_re = re.compile(
         r"(?i)\b(bachelors?'?|masters?'?|ph\.?\s*d|phd|doctorate|b\.?\s*tech|btech|b\.?e\b|"
         r"b\.?\s*sc\b|bsc\b|b\.?\s*s\b|\bbs\b|b\.?\s*com\b|bcom\b|b\.?\s*a\b|"
-        r"m\.?\s*s\b|\bms\b|m\.?\s*sc\b|\bmsc\b|m\.?\s*tech|mtech|"
+        r"m\.?\s*s(?![\-]?sql)(?![\-]?dos)(?![\-]?office)(?![\-]?access)(?![\-]?excel)(?![\-]?word)\b|"
+        r"\bms(?![\-]?sql)(?![\-]?dos)(?![\-]?office)(?![\-]?access)(?![\-]?excel)(?![\-]?word)\b|"
+        r"m\.?\s*sc\b|\bmsc\b|m\.?\s*tech|mtech|"
         r"mba|mca|mcom\b|m\.?\s*com\b|bca\b|bba\b|diploma|associate)\b"
     )
 

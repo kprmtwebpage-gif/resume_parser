@@ -1448,6 +1448,13 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         # "NIHARIKA A Phone: +1(469)301-6649"
         parts = [p.strip() for p in re.split(r"\s{3,}", ln) if p.strip()]
         if len(parts) <= 1:
+            # Split on pipe separators: "Ron Divina | Java Full Stack Developer"
+            parts = [p.strip() for p in re.split(r"\s*\|\s*", ln) if p.strip()]
+        if len(parts) <= 1:
+            # Split on en-dash / em-dash separators commonly used between
+            # name and role, e.g. "Praveen SS – Python/Java Developer"
+            parts = [p.strip() for p in re.split(r"\s*[\u2013\u2014]\s*", ln) if p.strip()]
+        if len(parts) <= 1:
             # Fallback: split on contact/title labels when spaces were collapsed
             # e.g. "NIHARIKA A Phone: +1(469)" → "NIHARIKA A"
             parts = [p.strip() for p in re.split(
@@ -1482,6 +1489,10 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "responsible",
         "worked",
         "working",
+        # Label/field tokens surviving contact stripping
+        "id",
+        "designation",
+        "role",
     }
 
     # Scan up to 50 lines: the first-page / header-block can be quite tall
@@ -1554,6 +1565,9 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         # Tokenize and drop common suffixes.
         tokens = [t for t in re.split(r"\s+", cleaned) if t]
         tokens = [t.strip(",.") for t in tokens]
+        # Drop tokens ending with ':' — they are field labels (e.g. "id:", "Designation:")
+        # that survived contact-info stripping, never person names.
+        tokens = [t for t in tokens if not t.endswith(":")]
         suffixes = {"jr", "sr", "ii", "iii", "iv",
                     "msc", "bsc", "mba", "phd", "btech", "mtech",
                     "be", "bca", "mca", "mca", "mca"}
@@ -5923,8 +5937,8 @@ def main() -> int:
                 RETURNING id
             """,
                 (
-                    first_name,
-                    last_name or None,
+                    first_name if first_name and str(first_name).lower() != "none" else None,
+                    last_name if last_name and str(last_name).lower() != "none" else None,
                     address,
                     phone_to_store,
                     email,
