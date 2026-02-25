@@ -9,6 +9,7 @@ import EditProfileModal from '../components/EditProfileModal.jsx'
 
 import { fetchCandidateById, fetchCandidates, updateCandidate } from '../services/api.js'
 import { onCandidateSelected } from '../chatbot/candidateEvents.js'
+import { apiUrl } from '../config'
 
 export default function SearchPeople() {
   const [filters, setFilters] = useState({
@@ -119,7 +120,7 @@ export default function SearchPeople() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 minute timeout
       
-      const response = await fetch('/gdrive/sync-and-parse', {
+      const response = await fetch(apiUrl('/gdrive/sync-and-parse'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

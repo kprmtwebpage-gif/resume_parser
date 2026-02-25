@@ -16,6 +16,9 @@ services:
 
   api:
     container_name: resume-api-dev
+    build:
+      args:
+        BASE_PATH: /dev
     ports:
       - "8002:8000"
     restart: unless-stopped

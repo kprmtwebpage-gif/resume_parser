@@ -8,6 +8,7 @@ import mammoth from 'mammoth'
 
 import ProfileTabs from './ProfileTabs.jsx'
 import { notifyModalOpened, notifyModalClosed, onChatbotOpened } from '../chatbot/modalEvents.js'
+import { apiUrl } from '../config'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -59,8 +60,8 @@ export default function ProfileModal({
 
   // Construct resume URL similar to ProfileCard
   const hasResume = candidate?.resume_filename
-  const baseResumeUrl = hasResume ? `/candidates/${candidate.id}/resume` : null
-  const viewResumeUrl = hasResume ? `/candidates/${candidate.id}/resume?inline=true` : null
+  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume`) : null
+  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume?inline=true`) : null
   const resumeIsDocx = hasResume && (candidate.resume_filename.toLowerCase().endsWith('.docx') || candidate.resume_filename.toLowerCase().endsWith('.doc'))
   const resumeIsPdf = hasResume && candidate.resume_filename.toLowerCase().endsWith('.pdf')
 
@@ -273,7 +274,7 @@ export default function ProfileModal({
                           <div className="flex flex-wrap gap-3">
                             <a
                               className="btn-primary"
-                              href={candidate.resume_filename ? `/candidates/${candidate.id}/resume` : undefined}
+                              href={candidate.resume_filename ? apiUrl(`/candidates/${candidate.id}/resume`) : undefined}
                               onClick={(e) => {
                                 if (!candidate.resume_filename) e.preventDefault()
                               }}

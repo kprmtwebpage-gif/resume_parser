@@ -7,12 +7,21 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/Frontend
 
+# Accept build arg for path-based routing (e.g. /dev, /uat, or empty for prod)
+ARG BASE_PATH=""
+
 # Install dependencies (clean install from lockfile)
 COPY Frontend/package*.json ./
 RUN npm ci
 
 # Copy source and build for production
 COPY Frontend/ ./
+
+# Inject base path into Vite build so assets & API calls use the correct prefix
+ENV VITE_BASE_PATH=${BASE_PATH}
+ENV VITE_API_BASE_URL=${BASE_PATH}
+ENV VITE_CHATBOT_API_BASE=${BASE_PATH}
+
 RUN npm run build
 
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiUrl } from '../config'
 
 export default function ServerStatus() {
   const [backendStatus, setBackendStatus] = useState('checking')
@@ -10,7 +11,7 @@ export default function ServerStatus() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 3000)
       
-      const response = await fetch('/', { 
+      const response = await fetch(apiUrl('/health'), { 
         method: 'GET',
         mode: 'cors',
         signal: controller.signal

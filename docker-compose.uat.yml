@@ -16,6 +16,9 @@ services:
 
   api:
     container_name: resume-api-uat
+    build:
+      args:
+        BASE_PATH: /uat
     ports:
       - "8001:8000"
     restart: unless-stopped

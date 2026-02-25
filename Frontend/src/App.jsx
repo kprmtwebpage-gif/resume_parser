@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BASE_PATH } from './config'
 import DashboardLayout from './layouts/DashboardLayout.jsx'
 import SearchPeople from './pages/SearchPeople.jsx'
 import Jobs from './pages/Jobs.jsx'
@@ -8,7 +9,7 @@ import ChatLauncher from './chatbot/ChatLauncher.jsx'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={BASE_PATH}>
       <ServerStatus />
       <DashboardLayout>
         <Routes>

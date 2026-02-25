@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline'
 import ResumeViewer from './ResumeViewer.jsx'
 import EmailProviderModal from './EmailProviderModal.jsx'
+import { apiUrl } from '../config'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -27,8 +28,8 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
   const location = row.location || row.address || '—'
   const hasResume = row.resume_filename
-  const baseResumeUrl = hasResume ? `/candidates/${row.id}/resume` : null
-  const viewResumeUrl = hasResume ? `/candidates/${row.id}/resume?inline=true` : null
+  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume`) : null
+  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume?inline=true`) : null
   const downloadResumeUrl = hasResume ? baseResumeUrl : null
 
   // Close dropdown when clicking outside (check both the trigger button area and the portal menu)

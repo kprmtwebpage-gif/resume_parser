@@ -53,6 +53,8 @@ _cors_origins = [
     "http://127.0.0.1:8000",
     "http://89.167.60.41:8000",
     "http://89.167.60.41",
+    "https://kprmtglobalsolutions.duckdns.org",
+    "http://kprmtglobalsolutions.duckdns.org",
 ] + _extra_origins
 
 app.add_middleware(
@@ -1421,6 +1423,15 @@ if os.path.exists(frontend_dist) and os.getenv("SERVE_FRONTEND", "0") == "1":
     
     print(f"✅ Serving built frontend from {frontend_dist}")
     print(f"   Access UI at: http://localhost:8000/")
+
+    # SPA catch-all: serve index.html for any non-API, non-asset path
+    # This supports React-Router client-side routing (page refresh on /jobs, /upload, etc.)
+    @app.get("/{full_path:path}")
+    async def spa_catch_all(full_path: str):
+        index_file_path = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_file_path):
+            return FileResponse(index_file_path)
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 if __name__ == "__main__":
