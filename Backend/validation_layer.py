@@ -337,14 +337,22 @@ def validate_name(
         return None, None
 
     # --- spaCy NER cross-check (soft gate) ---
+    # NOTE: spaCy en_core_web_sm frequently misclassifies South Asian /
+    # East Asian personal names as ORG (e.g. "Bhagya Lakshmi" → ORG).
+    # Short name strings (≤ 3 tokens) that already passed all pattern-based
+    # checks above are very likely real person names, so we only reject when
+    # the string is longer (more likely a sentence / company name) and spaCy
+    # confirms the ORG classification.
     if _SPACY_AVAILABLE and _NLP is not None:
         try:
             doc = _NLP(combined[:200])
             ents = [e for e in doc.ents]
             person_ents = [e for e in ents if e.label_ == "PERSON"]
             org_product_ents = [e for e in ents if e.label_ in ("ORG", "PRODUCT", "WORK_OF_ART")]
-            # If no PERSON entity found but ORG/PRODUCT found -> reject
-            if not person_ents and org_product_ents:
+            # If no PERSON entity found but ORG/PRODUCT found -> reject,
+            # BUT only for longer strings (> 3 tokens).  Short title-cased
+            # name strings pass through even if spaCy misclassifies them.
+            if not person_ents and org_product_ents and len(tokens) > 3:
                 return None, None
         except Exception:
             pass  # NER errors are non-fatal
