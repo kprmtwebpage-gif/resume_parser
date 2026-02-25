@@ -1591,10 +1591,21 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         first = tokens[0]
         last = tokens[-1] if len(tokens) >= 2 else ""
         last_alpha = re.sub(r"[^A-Za-z]", "", last)
-        # Keep last initials in early header lines (idx ≤ 5) regardless of case.
-        # In later lines, drop single-char tokens that are likely not a surname.
-        if len(last_alpha) <= 1:
-            if not (idx <= 5 and last_alpha):
+        # Drop empty/zero-alpha tokens.
+        # Keep uppercase single-letter last initials (e.g. "Harsha K", "YOGENDRA P")
+        # regardless of their line index — pdfplumber produces slightly different
+        # line counts on Linux (Docker) vs Windows, making any fixed idx threshold
+        # environment-dependent and the root cause of local/server result differences.
+        # Only drop if: no alpha content, or it's a lowercase single char
+        # (likely a stray letter), or it matches a US state abbreviation.
+        if len(last_alpha) == 0:
+            last = ""
+        elif len(last_alpha) == 1:
+            if last_alpha.isupper() and last_alpha not in US_STATE_ABBRS:
+                pass  # genuine last initial – keep it
+            elif idx <= 5:
+                pass  # within header zone – keep regardless
+            else:
                 last = ""
 
         first = first[:1].upper() + first[1:].lower() if first else ""
@@ -2003,8 +2014,12 @@ def _pick_best_name_pair(
             s -= 60
         if fn and len(re.sub(r"[^A-Za-z]", "", fn)) <= 1:
             s -= 30
-        if ln and len(re.sub(r"[^A-Za-z]", "", ln)) <= 1:
-            s -= 30
+        ln_alpha_s = re.sub(r"[^A-Za-z]", "", ln)
+        if ln and len(ln_alpha_s) <= 1:
+            # Penalise empty / lowercase stray chars, but NOT uppercase last initials
+            # (common in South/East Asian names: "Harsha K", "YOGENDRA P").
+            if not (ln_alpha_s and ln_alpha_s.isupper()):
+                s -= 30
         # Prefer matches to email inference when available
         fn_e, ln_e = email_guess
         if fn_e and fn and fn.casefold() == fn_e.casefold():
@@ -5314,7 +5329,12 @@ def main() -> int:
                 if not last_name:
                     last_name = f_ln
                 elif 1 <= len(ln_alpha) <= 3 and len(f_ln_alpha) >= 5:
-                    last_name = f_ln
+                    # Only expand a short initial to the filename's full last name when
+                    # the first letter matches — "K" → "Kumar" is correct, but
+                    # "K" → "Duddi" is not.  Without this guard the wrong surname
+                    # would silently overwrite a legitimate last initial.
+                    if f_ln_alpha[:1].casefold() == ln_alpha[:1].casefold():
+                        last_name = f_ln
 
             # If the email is a job-board relay (often anonymized), filename-based names are usually more reliable.
             if email and email.casefold().endswith("@indeedemail.com"):
