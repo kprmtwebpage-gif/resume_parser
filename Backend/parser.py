@@ -5882,6 +5882,32 @@ def main() -> int:
                 "mvc",
                 "visual",
                 "studio",
+                # Section headings / descriptive words from garbled PDFs.
+                "architecture",
+                "architectures",
+                "automation",
+                "product",
+                "owner",
+                "member",
+                "panel",
+                "interview",
+                "extensive",
+                "knowledge",
+                "design",
+                "implementation",
+                "applications",
+                "application",
+                "certifications",
+                "certification",
+                "methodologies",
+                "methodology",
+                "test",
+                "api",
+                "rest",
+                "xml",
+                "json",
+                "html",
+                "css",
             }
             us_state_names = {v.casefold() for v in US_STATE_ABBR_TO_FULL.values()}
             def _compact_token(s: str) -> str:
@@ -5912,6 +5938,14 @@ def main() -> int:
             f_fn, f_ln = file_name_guess
             if (not first_name) and f_fn:
                 first_name = f_fn
+
+            # When body extraction yielded only a first name (no last name) that
+            # doesn't match the filename first name, the body result is likely
+            # garbage from a garbled PDF.  Prefer the filename in that case.
+            if first_name and not last_name and f_fn:
+                if first_name.casefold() != f_fn.casefold():
+                    first_name = f_fn
+                    last_name = f_ln or ""
 
             # If last name is missing, or looks like initials, fill from filename when consistent.
             ln_alpha = re.sub(r"[^A-Za-z]", "", (last_name or ""))
