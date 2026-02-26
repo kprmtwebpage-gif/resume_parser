@@ -279,7 +279,7 @@ export default function ProfileModal({
                                 if (!candidate.resume_filename) e.preventDefault()
                               }}
                             >
-                              {resumeIsDocx ? 'Download Resume' : 'Export PDF'}
+                              Download Resume
                             </a>
                           </div>
                         </div>
@@ -462,7 +462,7 @@ export default function ProfileModal({
                               pdfError ? (
                                 <div className="flex flex-col items-center justify-center h-full p-8 text-center">
                                   <p className="text-lg font-medium text-slate-700 mb-2">Failed to load PDF</p>
-                                  <p className="text-sm text-slate-500">Could not display the file. Try the Export PDF button.</p>
+                                  <p className="text-sm text-slate-500">Could not display the file. Try the Download Resume button.</p>
                                 </div>
                               ) : viewResumeUrl ? (
                                 <iframe

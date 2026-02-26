@@ -838,6 +838,67 @@ def _skills_master_set() -> set[str]:
     return out
 
 
+_FIRST_NAMES_CACHE: set[str] | None = None
+
+
+def _first_names_set() -> set[str]:
+    """Load first_names.txt into a normalized set (cached after first call).
+
+    A comprehensive dictionary of common first names from multiple cultures.
+    Used as a *positive* scoring signal in name extraction — tokens matching
+    known first names get a score boost, dramatically improving accuracy
+    compared to relying solely on negative blocklists.
+    """
+    global _FIRST_NAMES_CACHE
+    if _FIRST_NAMES_CACHE is not None:
+        return _FIRST_NAMES_CACHE
+
+    path = Path(__file__).with_name("first_names.txt")
+    out: set[str] = set()
+    try:
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        _FIRST_NAMES_CACHE = out
+        return out
+    for ln in raw.splitlines():
+        t = ln.strip()
+        if not t or t.startswith("#"):
+            continue
+        out.add(t.casefold())
+    _FIRST_NAMES_CACHE = out
+    return out
+
+
+_JOB_TITLES_CACHE: set[str] | None = None
+
+
+def _job_titles_set() -> set[str]:
+    """Load job_titles.txt into a normalized set (cached after first call).
+
+    A taxonomy of common IT/tech job titles used to improve job title
+    detection — exact or fuzzy matches against this set are strong signals
+    that a line contains a genuine job title.
+    """
+    global _JOB_TITLES_CACHE
+    if _JOB_TITLES_CACHE is not None:
+        return _JOB_TITLES_CACHE
+
+    path = Path(__file__).with_name("job_titles.txt")
+    out: set[str] = set()
+    try:
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        _JOB_TITLES_CACHE = out
+        return out
+    for ln in raw.splitlines():
+        t = ln.strip()
+        if not t or t.startswith("#"):
+            continue
+        out.add(t.casefold())
+    _JOB_TITLES_CACHE = out
+    return out
+
+
 # ---------------- BASIC FIELDS ----------------
 def extract_email(text):
     """Extract best email address from text.
@@ -1439,6 +1500,7 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
 
     lines = [_segment_compact_line(ln) for ln in non_empty_lines(text)]
     skills_master = _skills_master_set()
+    known_first_names = _first_names_set()
     candidates: list[tuple[int, tuple[str, str]]] = []
 
     US_STATE_ABBRS = {
@@ -1760,6 +1822,18 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         if letters and letters.isupper():
             score += 10
 
+        # ── First-name dictionary bonus ──────────────────────────────
+        # A strong positive signal: if the first token matches a known
+        # first name from our multi-cultural dictionary, boost the score.
+        _fn_lower = tokens[0].casefold() if tokens else ""
+        if _fn_lower and _fn_lower in known_first_names:
+            score += 15
+        elif _fn_lower and known_first_names and _fn_lower not in known_first_names:
+            # Mild penalty when first token is NOT a known name — helps
+            # reject garbage tokens from garbled PDFs.
+            score -= 5
+        # ── end first-name bonus ─────────────────────────────────────
+
         # Penalty for odd punctuation.
         if re.search(r"[{}<>\\/]", cleaned):
             score -= 10
@@ -1823,8 +1897,13 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                     # Skip if either token is a role/contact/tech word.
                     if _sfn.casefold() in role_words or _sln.casefold() in role_words:
                         continue
-                    # Cap at 59 so heuristic line-0 (score 60) always beats NER.
-                    _ner_score = min(59, 57 + max(0, 5 - _ent.start))
+                    # NER score: cap at 65 so it can compete fairly with
+                    # heuristic candidates but still defers to high-confidence
+                    # heuristic matches (e.g. ALL-CAPS known-name at line 0 = 85).
+                    _ner_score = min(65, 57 + max(0, 5 - _ent.start))
+                    # Boost NER result when the first token is a known name.
+                    if _sfn.casefold() in known_first_names:
+                        _ner_score = min(70, _ner_score + 10)
                     candidates.append((_ner_score, (_sfn, _sln)))
         except Exception:
             pass
@@ -2276,6 +2355,14 @@ def _pick_best_name_pair(
             s -= 60
         if fn and len(re.sub(r"[^A-Za-z]", "", fn)) <= 1:
             s -= 30
+        # ── First-name dictionary signal ──────────────────────────────────
+        _known = _first_names_set()
+        if fn and _known:
+            if fn.casefold() in _known:
+                s += 12  # positive confirmation
+            else:
+                s -= 3   # mild penalty for unknown first names
+        # ── end first-name signal ─────────────────────────────────────────
         ln_alpha_s = re.sub(r"[^A-Za-z]", "", ln)
         if ln and len(ln_alpha_s) <= 1:
             # Penalise empty / lowercase stray chars, but NOT uppercase last initials
@@ -2881,6 +2968,26 @@ def extract_address(
         "spring", "hibernate", "maven", "gradle", "docker", "kubernetes",
         "microservices", "microservice",
         "product", "owner", "design", "architecture", "implementation",
+        # Cloud / infrastructure — can appear near state abbreviations
+        "ec2", "s3", "lambda", "ecs", "eks", "rds", "cloudformation",
+        "cloudwatch", "sagemaker", "glue", "athena", "kinesis",
+        "sqs", "sns", "iam", "cognito", "amplify",
+        # Data / analytics tokens
+        "tableau", "powerbi", "looker", "datastage", "informatica",
+        "talend", "pentaho", "ssis", "ssrs", "ssas", "etl",
+        # Programming language tokens that pair with commas
+        "golang", "ruby", "rust", "swift", "kotlin", "dart", "php",
+        "perl", "matlab", "sass", "less", "webpack", "vite",
+        # Methodology / process tokens
+        "waterfall", "sdlc", "itil", "togaf", "lean", "sixsigma",
+        # Misc tech terms mistaken for locations
+        "tableau", "jira", "confluence", "jenkins", "nexus",
+        "sonarqube", "grafana", "prometheus", "splunk", "datadog",
+        "sharepoint", "salesforce", "servicenow", "dynamics",
+        "sap", "peoplesoft", "workday", "concur",
+        # Common action/resume words
+        "client", "project", "developed", "implemented", "managed",
+        "responsible", "utilizing", "leveraging",
     }
 
     def _looks_like_sql_state_suffix(full_line: str, state_match_end: int) -> bool:
@@ -4943,10 +5050,22 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     quick_role_re = re.compile(
         r"(?i)\b("
         r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|devops|sre|manager|intern|"
-        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner"
-        r")\b|\b(data\s+engineer|data\s+scientist|full\s*stack|front\s*end|back\s*end|backend|frontend|"
+        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner|"
+        r"dba|trainer|recruiter|strategist|evangelist|officer|vp|cto|cio|cfo|comptroller|"
+        r"technician|operator|associate|fellow|researcher"
+        r")\b|\b(data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|systems?\s+analyst|"
+        r"full\s*stack|front\s*end|back\s*end|backend|frontend|"
         r"machine\s+learning|cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
-        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer)\b"
+        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer|"
+        r"database\s+administrator|network\s+engineer|security\s+engineer|infrastructure\s+engineer|"
+        r"release\s+engineer|build\s+engineer|test\s+engineer|automation\s+engineer|"
+        r"support\s+engineer|systems?\s+engineer|embedded\s+engineer|"
+        r"ux\s+designer|ui\s+designer|technical\s+writer|quality\s+analyst|"
+        r"scrum\s+master|delivery\s+manager|engagement\s+manager|account\s+manager|"
+        r"project\s+coordinator|program\s+coordinator|technical\s+architect|"
+        r"integration\s+developer|middleware\s+developer|salesforce\s+developer|"
+        r"sharepoint\s+developer|power\s+bi\s+developer|tableau\s+developer|"
+        r"peoplesoft\s+developer|sap\s+consultant|oracle\s+developer|oracle\s+dba)\b"
         r"|\b(etl\s+(?:developer|engineer|analyst))\b"
     )
 
@@ -4995,6 +5114,8 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         "project manager",
         "program manager",
         "business analyst",
+        "systems analyst",
+        "system analyst",
         "sde",
         "sdet",
         "etl developer",
@@ -5021,16 +5142,49 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         "machine learning",
         "big data engineer",
         "bi developer",
+        "dba",
+        "database administrator",
+        "network engineer",
+        "security engineer",
+        "infrastructure engineer",
+        "release engineer",
+        "automation engineer",
+        "test engineer",
+        "ux designer",
+        "ui designer",
+        "technical writer",
+        "quality analyst",
+        "delivery manager",
+        "engagement manager",
+        "salesforce developer",
+        "sharepoint developer",
+        "sap consultant",
+        "oracle developer",
+        "oracle dba",
+        "tableau developer",
+        "power bi developer",
     ]
 
     # Word-boundary role detection (avoids substring accidents like matching "architect" inside "architecture" when it's just a skill).
     role_re = re.compile(
         r"(?i)\b("
         r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|devops|sre|manager|intern|"
-        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner"
-        r")\b|\b(data\s+engineer|data\s+scientist|full\s*stack|front\s*end|back\s*end|backend|frontend|"
+        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner|"
+        r"dba|trainer|recruiter|strategist|evangelist|officer|vp|cto|cio|cfo|"
+        r"technician|operator|associate|fellow|researcher"
+        r")\b|\b(data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|systems?\s+analyst|"
+        r"full\s*stack|front\s*end|back\s*end|backend|frontend|"
         r"machine\s+learning|cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
-        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer)\b"
+        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer|"
+        r"database\s+administrator|network\s+engineer|security\s+engineer|infrastructure\s+engineer|"
+        r"release\s+engineer|build\s+engineer|test\s+engineer|automation\s+engineer|"
+        r"support\s+engineer|systems?\s+engineer|embedded\s+engineer|"
+        r"ux\s+designer|ui\s+designer|technical\s+writer|quality\s+analyst|"
+        r"scrum\s+master|delivery\s+manager|engagement\s+manager|account\s+manager|"
+        r"project\s+coordinator|program\s+coordinator|technical\s+architect|"
+        r"integration\s+developer|middleware\s+developer|salesforce\s+developer|"
+        r"sharepoint\s+developer|power\s+bi\s+developer|tableau\s+developer|"
+        r"peoplesoft\s+developer|sap\s+consultant|oracle\s+developer|oracle\s+dba)\b"
         r"|\b(etl\s+(?:developer|engineer|analyst))\b"
     )
 
@@ -5043,17 +5197,24 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         r"(?i)\b(?:experience\s+as\s+an?|worked\s+as\s+an?|working\s+as\s+an?|"
         r"experience\s+in|experience\s+as|"  # also match "experience in Data Engineer"
         r"as\s+an?|as\s+a)\s+"
-        r"(?:(senior|lead|principal|staff|junior)\s+)?"
-        r"(data\s+engineer|data\s+scientist|software\s+engineer|software\s+developer|java\s+developer|"
+        r"(?:(senior|lead|principal|staff|junior|associate)\s+)?"
+        r"(data\s+engineer|data\s+scientist|data\s+analyst|software\s+engineer|software\s+developer|"
+        r"java\s+developer|java\s+full\s*stack\s+developer|java\s+backend\s+developer|"
         r"python\s+developer|full\s*stack\s+developer|full\s*stack\s+engineer|"
         r"devops\s+engineer|cloud\s+engineer|\\.?net\s+developer|\\.?net\s+full\s*stack\s+developer|"
         r"front\s*end\s+developer|back\s*end\s+developer|react\s+developer|angular\s+developer|"
+        r"node(?:\.?js)?\s+developer|"
         r"machine\s+learning\s+engineer|ai\s+engineer|ml\s+engineer|"
-        r"business\s+analyst|data\s+analyst|qa\s+engineer|qa\s+analyst|"
-        r"solutions?\s+architect|technical\s+architect|systems?\s+architect|"
+        r"business\s+analyst|systems?\s+analyst|qa\s+engineer|qa\s+analyst|qa\s+lead|"
+        r"solutions?\s+architect|technical\s+architect|systems?\s+architect|enterprise\s+architect|"
         r"big\s+data\s+engineer|etl\s+developer|bi\s+developer|"
-        r"java\s+full\s*stack\s+developer|java\s+backend\s+developer|"
-        r"tester|sre|scrum\s*master|product\s+manager|project\s+manager)\b"
+        r"database\s+administrator|network\s+engineer|security\s+engineer|"
+        r"infrastructure\s+engineer|automation\s+engineer|test\s+engineer|"
+        r"ux\s+designer|ui\s+designer|technical\s+writer|"
+        r"salesforce\s+developer|sap\s+consultant|oracle\s+developer|"
+        r"delivery\s+manager|engagement\s+manager|program\s+manager|"
+        r"scrum\s+master|product\s+manager|project\s+manager|product\s+owner|"
+        r"tester|sre|programmer|administrator|specialist|coordinator|consultant)\b"
     )
     for ln in non_empty_lines(text)[:40]:
         if is_cert_or_exam_line(ln):

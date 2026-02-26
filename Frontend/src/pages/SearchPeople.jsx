@@ -9,17 +9,19 @@ import EditProfileModal from '../components/EditProfileModal.jsx'
 
 import { fetchCandidateById, fetchCandidates, updateCandidate } from '../services/api.js'
 import { onCandidateSelected } from '../chatbot/candidateEvents.js'
-import { apiUrl } from '../config'
 
 export default function SearchPeople() {
   const [filters, setFilters] = useState({
     name: '',
     location: '',
     jobTitle: '',
-    years: '',
     keywords: '',
+    experienceFrom: null,
+    experienceTo: null,
+    experienceStatus: 'current_and_past',
   })
 
+  const [validationError, setValidationError] = useState('')
   const [searchText, setSearchText] = useState('')
   const [allRows, setAllRows] = useState([])
   const [loading, setLoading] = useState(false)
@@ -82,6 +84,10 @@ export default function SearchPeople() {
         name: filters.name || undefined,
         location: filters.location || undefined,
         jobTitle: filters.jobTitle || undefined,
+        keywords: filters.keywords || undefined,
+        experienceFrom: filters.experienceFrom ?? undefined,
+        experienceTo: filters.experienceTo ?? undefined,
+        experienceStatus: filters.experienceStatus || undefined,
         limit: 1000, // Load more records for client-side filtering
         offset: 0 
       })
@@ -98,7 +104,7 @@ export default function SearchPeople() {
     } finally {
       setLoading(false)
     }
-  }, [filters.name, filters.location, filters.jobTitle, syncing])
+  }, [filters.name, filters.location, filters.jobTitle, filters.keywords, filters.experienceFrom, filters.experienceTo, filters.experienceStatus, syncing])
 
   useEffect(() => {
     load()
@@ -120,7 +126,7 @@ export default function SearchPeople() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 minute timeout
       
-      const response = await fetch(apiUrl('/gdrive/sync-and-parse'), {
+      const response = await fetch('/gdrive/sync-and-parse', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -290,7 +296,14 @@ export default function SearchPeople() {
 
   return (
     <div className="h-screen overflow-hidden">
-      <SidebarFilters filters={filters} onChange={setFilters} onSearch={onSearch} onSave={onSave} />
+      <SidebarFilters 
+        filters={filters} 
+        onChange={setFilters} 
+        onSearch={onSearch} 
+        onSave={onSave}
+        validationError={validationError}
+        setValidationError={setValidationError}
+      />
 
       <main className="ml-64 h-screen overflow-y-auto overflow-x-hidden bg-neutral-50">
           {error ? (
