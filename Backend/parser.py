@@ -452,8 +452,15 @@ def extract_text_and_first_page_from_pdf(path: str) -> tuple[str, str]:
                         else:
                             text_parts.append(ocr_txt_any)
 
-            # OCR fallback (opt-in): scan first N pages until we see contact signals.
-            if ocr_enabled and i < ocr_pages and not found_contact:
+            # OCR fallback: scan first N pages until we see contact signals.
+            # Auto-trigger on page 1 when contact info is missing and tesseract
+            # is available, even without ENABLE_PDF_OCR — catches graphical-header
+            # PDFs where name/email/phone are vector art, not font characters.
+            try_ocr_here = ocr_enabled and i < ocr_pages and not found_contact
+            if not try_ocr_here and i == 0 and not found_contact:
+                if _pdf_should_try_ocr_first_page(first_page_text) and shutil.which("tesseract"):
+                    try_ocr_here = True
+            if try_ocr_here:
                 # Decide whether OCR could help.
                 should = True
                 if i == 0:

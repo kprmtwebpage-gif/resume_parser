@@ -48,6 +48,7 @@ services:
       GDRIVE_FOLDER_ID: ${GDRIVE_FOLDER_ID:-}
       GDRIVE_DOWNLOAD_DIR: resumes_cache
       RESUME_INPUT_DIR: resumes_cache
+      ENABLE_PDF_OCR: "true"
     volumes:
       - resume_cache:/app/Backend/resumes_cache
       - ./Backend/drive_service_account.json:/app/Backend/drive_service_account.json:ro
