@@ -1242,6 +1242,47 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "united",
         "hive",
         "spark",
+        # Programming languages / frameworks / tools that appear in garbled PDF text.
+        "java",
+        "python",
+        "selenium",
+        "appium",
+        "maven",
+        "gradle",
+        "angular",
+        "react",
+        "typescript",
+        "javascript",
+        "ruby",
+        "scala",
+        "kotlin",
+        "swift",
+        "terraform",
+        "docker",
+        "kubernetes",
+        "jenkins",
+        "jira",
+        "confluence",
+        "postman",
+        "cucumber",
+        "testng",
+        "junit",
+        "rest",
+        "api",
+        "sql",
+        "mysql",
+        "postgres",
+        "mongodb",
+        "redis",
+        "aws",
+        "azure",
+        "gcp",
+        "linux",
+        "git",
+        "html",
+        "css",
+        "xml",
+        "json",
         # Management / training / process tokens misclassified as names.
         "training",
         "management",
@@ -1637,6 +1678,10 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         # Drop tokens ending with ':' — they are field labels (e.g. "id:", "Designation:")
         # that survived contact-info stripping, never person names.
         tokens = [t for t in tokens if not t.endswith(":")]
+        # Reject tokens that contain parentheses, brackets, or other
+        # characters that never appear in person names — these are
+        # code/tech fragments from garbled PDF text.
+        tokens = [t for t in tokens if not re.search(r'[(){}\[\]<>]', t)]
         suffixes = {"jr", "sr", "ii", "iii", "iv",
                     "msc", "bsc", "mba", "phd", "btech", "mtech",
                     "be", "bca", "mca", "mca", "mca"}
