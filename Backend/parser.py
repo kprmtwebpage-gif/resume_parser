@@ -1284,6 +1284,15 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "css",
         "xml",
         "json",
+        # Section/heading words that appear in garbled PDF lines.
+        "applications",
+        "application",
+        "technologies",
+        "technology",
+        "methodologies",
+        "methodology",
+        "certifications",
+        "certification",
         # Management / training / process tokens misclassified as names.
         "training",
         "management",
@@ -1685,6 +1694,10 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         tokens = [t for t in tokens if not re.search(r'[(){}\[\]<>]', t)]
         # Reject tokens containing internal commas (e.g. "Ng,maven").
         tokens = [t for t in tokens if ',' not in t.strip(',')]
+        # Reject implausibly long tokens — real name tokens are rarely >20 chars.
+        # Garbled PDF text often produces concatenated words like
+        # "Istqb®Certifiedprofessionalrecognizedfor" which are clearly not names.
+        tokens = [t for t in tokens if len(t) <= 20]
         suffixes = {"jr", "sr", "ii", "iii", "iv",
                     "msc", "bsc", "mba", "phd", "btech", "mtech",
                     "be", "bca", "mca", "mca", "mca"}
