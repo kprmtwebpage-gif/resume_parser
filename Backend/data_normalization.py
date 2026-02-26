@@ -234,10 +234,17 @@ def canonicalize_job_title(title: str) -> str:
                 continue
 
             # Short all-caps abbreviations (2–5 chars, alpha only)
+            # BUT do NOT preserve case for known role words that happened to be
+            # typed in ALL-CAPS in the resume (e.g. "OWNER", "LEAD", "ADMIN").
+            _role_words_lower = {
+                "owner", "admin", "lead", "chief", "clerk", "agent", "coach",
+                "tutor", "nurse", "buyer", "audit",
+            }
             tok_alpha = re.sub(r"[^A-Za-z]", "", tok)
             if tok_alpha and tok_alpha == tok_alpha.upper() and 2 <= len(tok_alpha) <= 5:
-                tokens.append(tok)  # preserve existing case
-                continue
+                if tok_alpha.lower() not in _role_words_lower:
+                    tokens.append(tok)  # preserve existing case (abbreviation)
+                    continue
 
             # Connector words → lowercase (except at start of title)
             tok_cf = tok.casefold()
