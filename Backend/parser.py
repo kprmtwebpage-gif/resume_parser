@@ -472,15 +472,24 @@ def extract_text_and_first_page_from_pdf(path: str) -> tuple[str, str]:
                     ocr_txt = _pdf_ocr_page_text(page)
                     if ocr_txt:
                         # Merge OCR output into page text and first-page (for i==0).
+                        # Header-mode OCR text comes from the TOP of the page, so
+                        # prepend it so downstream extractors see contact/name first.
+                        is_header_ocr = (_pdf_ocr_mode() == "header")
                         if i == 0:
                             if first_page_text:
-                                first_page_text = (first_page_text + "\n" + ocr_txt).strip()
+                                if is_header_ocr:
+                                    first_page_text = (ocr_txt + "\n" + first_page_text).strip()
+                                else:
+                                    first_page_text = (first_page_text + "\n" + ocr_txt).strip()
                             else:
                                 first_page_text = ocr_txt
 
                         # Update the corresponding page slot in text_parts (best-effort).
                         if extracted and len(text_parts) >= 1:
-                            text_parts[-1] = (text_parts[-1] + "\n" + ocr_txt).strip()
+                            if is_header_ocr:
+                                text_parts[-1] = (ocr_txt + "\n" + text_parts[-1]).strip()
+                            else:
+                                text_parts[-1] = (text_parts[-1] + "\n" + ocr_txt).strip()
                         else:
                             text_parts.append(ocr_txt)
 
