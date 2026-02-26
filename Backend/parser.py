@@ -1337,6 +1337,16 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "associate",
         "strategic",
         "staff",
+        # Organizational / interview tokens misread as names.
+        "member",
+        "panel",
+        "interview",
+        "committee",
+        "received",
+        "award",
+        "certified",
+        "certification",
+        "infosys",
     }
     section_words = {
         "professional summary",
@@ -1530,6 +1540,21 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "solution",
         "automation",
         "product",
+        "member",
+        "received",
+        "delivered",
+        "managed",
+        "implemented",
+        "architected",
+        "led",
+        "designed",
+        "coordinated",
+        "maintained",
+        "controlled",
+        "performed",
+        "executed",
+        "validated",
+        "pioneered",
     }
 
     # Scan up to 50 lines: the first-page / header-block can be quite tall
@@ -1587,10 +1612,14 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                 continue
         if any(k in lnl for k in section_words):
             continue
-        # Strip phone-like patterns before counting digits so lines like
-        # "Manickam Chithambaram +1 904 525 7389" are not rejected.
-        _line_no_phones = re.sub(r"\+?\d[\d ()\-]{6,}\d", "", line)
-        if sum(ch.isdigit() for ch in _line_no_phones) >= 2:
+        # Strip phone-like patterns from the line itself so tokens like
+        # "+1 904 525 7389" don't inflate the token count or digit count.
+        line = re.sub(r"\+?\d[\d ()\-]{6,}\d", " ", line)
+        line = re.sub(r"\s+", " ", line).strip()
+        lnl = line.lower().strip()
+        if not lnl:
+            continue
+        if sum(ch.isdigit() for ch in line) >= 2:
             continue
 
         # Avoid city/state header lines being treated as names (e.g., "Fort Mill, SC" or "Fairfield, Iowa").
@@ -1619,7 +1648,9 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             continue
         # Suffixes that, when present at the end of any token, mark it as a role word.
         _role_suffixes = ("developer", "engineer", "analyst", "architect",
-                          "consultant", "specialist", "administrator")
+                          "consultant", "specialist", "administrator",
+                          "testing", "automation", "management", "owner",
+                          "manager", "lead", "director", "coordinator")
 
         def is_role_token(tok: str) -> bool:
             t = tok.lower().strip(".,")
@@ -2141,6 +2172,8 @@ def _pick_best_name_pair(
     _bad_token_suffixes = (
         "developer", "engineer", "analyst", "architect",
         "consultant", "specialist", "administrator",
+        "testing", "automation", "management", "owner",
+        "manager", "lead", "director", "coordinator",
     )
 
     def _is_bad_token(tok: str) -> bool:
