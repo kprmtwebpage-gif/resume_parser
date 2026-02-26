@@ -1321,6 +1321,22 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "mvc",
         "visual",
         "studio",
+        # Job-title / role words that appear as ALL-CAPS header lines.
+        "product",
+        "owner",
+        "automation",
+        "extensive",
+        "knowledge",
+        "design",
+        "implementation",
+        "architecture",
+        "program",
+        "principal",
+        "director",
+        "coordinator",
+        "associate",
+        "strategic",
+        "staff",
     }
     section_words = {
         "professional summary",
@@ -1493,6 +1509,27 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "id",
         "designation",
         "role",
+        # Words that start descriptive bullet points, never person first names.
+        "extensive",
+        "knowledge",
+        "dedicated",
+        "experienced",
+        "proficient",
+        "strategic",
+        "passionate",
+        "proven",
+        "dynamic",
+        "accomplished",
+        "results",
+        "highly",
+        "motivated",
+        "innovative",
+        "creative",
+        "detail",
+        "driven",
+        "solution",
+        "automation",
+        "product",
     }
 
     # Scan up to 50 lines: the first-page / header-block can be quite tall
@@ -1550,7 +1587,10 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                 continue
         if any(k in lnl for k in section_words):
             continue
-        if sum(ch.isdigit() for ch in line) >= 2:
+        # Strip phone-like patterns before counting digits so lines like
+        # "Manickam Chithambaram +1 904 525 7389" are not rejected.
+        _line_no_phones = re.sub(r"\+?\d[\d ()\-]{6,}\d", "", line)
+        if sum(ch.isdigit() for ch in _line_no_phones) >= 2:
             continue
 
         # Avoid city/state header lines being treated as names (e.g., "Fort Mill, SC" or "Fairfield, Iowa").
@@ -2079,6 +2119,23 @@ def _pick_best_name_pair(
         "mvc",
         "visual",
         "studio",
+        # Job-title / role words that get misclassified as names.
+        "product",
+        "owner",
+        "automation",
+        "extensive",
+        "knowledge",
+        "design",
+        "implementation",
+        "architecture",
+        "program",
+        "principal",
+        "director",
+        "coordinator",
+        "associate",
+        "strategic",
+        "staff",
+        "data",
     }
     # Role-suffix patterns: any token ending with these is also a bad token.
     _bad_token_suffixes = (
@@ -2720,6 +2777,15 @@ def extract_address(
         "typescript", "nodejs",
         # DevOps / process tokens
         "terraform", "ansible", "devops", "cicd", "agile", "scrum", "kanban",
+        # .NET ecosystem tokens that form false "City, MS" matches
+        # (e.g. ".NET Framework, MS VS.NET" → "Net Framework, Mississippi").
+        "net", "framework", "asp", "ado", "wcf", "entity", "vs",
+        "dotnet", "mvc", "visual", "studio",
+        # Additional tech tokens that pair with state abbreviations
+        "api", "rest", "soap", "xml", "json", "html", "css",
+        "spring", "hibernate", "maven", "gradle", "docker", "kubernetes",
+        "microservices", "microservice",
+        "product", "owner", "design", "architecture", "implementation",
     }
 
     def _looks_like_sql_state_suffix(full_line: str, state_match_end: int) -> bool:
