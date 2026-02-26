@@ -1242,6 +1242,7 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "united",
         "hive",
         "spark",
+        "test",
         # Programming languages / frameworks / tools that appear in garbled PDF text.
         "java",
         "python",
@@ -1682,6 +1683,8 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         # characters that never appear in person names — these are
         # code/tech fragments from garbled PDF text.
         tokens = [t for t in tokens if not re.search(r'[(){}\[\]<>]', t)]
+        # Reject tokens containing internal commas (e.g. "Ng,maven").
+        tokens = [t for t in tokens if ',' not in t.strip(',')]
         suffixes = {"jr", "sr", "ii", "iii", "iv",
                     "msc", "bsc", "mba", "phd", "btech", "mtech",
                     "be", "bca", "mca", "mca", "mca"}
@@ -2147,6 +2150,7 @@ def _pick_best_name_pair(
         "skills",
         "developer",
         "engineer",
+        "test",
         # Common section-heading words that sometimes get extracted as names.
         "expertise",
         "snapshot",
