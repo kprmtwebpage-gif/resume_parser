@@ -102,6 +102,27 @@ def canonicalize_job_title(title: str) -> str:
     def norm_part(p: str) -> str:
         p = normalize_spaces(p)
 
+        # ── Fix common mixed-case typos BEFORE CamelCase splitting ──
+        # Resumes sometimes have "ENGINeer", "DEVeloper", etc. from bad formatting.
+        # Normalize these to proper case first so CamelCase splitting doesn't mangle them.
+        _mixed_case_fixes = [
+            (re.compile(r"(?i)\bengineer\b"), "Engineer"),
+            (re.compile(r"(?i)\bdeveloper\b"), "Developer"),
+            (re.compile(r"(?i)\barchitect\b"), "Architect"),
+            (re.compile(r"(?i)\banalyst\b"), "Analyst"),
+            (re.compile(r"(?i)\bconsultant\b"), "Consultant"),
+            (re.compile(r"(?i)\bspecialist\b"), "Specialist"),
+            (re.compile(r"(?i)\bmanager\b"), "Manager"),
+            (re.compile(r"(?i)\bdesigner\b"), "Designer"),
+            (re.compile(r"(?i)\bdirector\b"), "Director"),
+            (re.compile(r"(?i)\bcoordinator\b"), "Coordinator"),
+            (re.compile(r"(?i)\badministrator\b"), "Administrator"),
+            (re.compile(r"(?i)\bprogrammer\b"), "Programmer"),
+            (re.compile(r"(?i)\bscientist\b"), "Scientist"),
+        ]
+        for pat, replacement in _mixed_case_fixes:
+            p = pat.sub(replacement, p)
+
         # ── Protect compound tech terms from CamelCase splitting ──
         # Replace with ALL-CAPS placeholders (no [a-z] chars = no CamelCase splits).
         _compound_protect = [
@@ -137,7 +158,7 @@ def canonicalize_job_title(title: str) -> str:
         p = re.sub(r"(?i)\bdot\s*net\b", ".NET", p)
         p = re.sub(r"(?i)\bdotnet\b", ".NET", p)
         # Bare "Net" before a role word — but NOT if already preceded by a dot
-        p = re.sub(r"(?i)(?<!\.)(?<!\w)Net\s+(?=(?:Full Stack|Developer|Engineer|Architect|Consultant))", ".NET ", p)
+        p = re.sub(r"(?i)(?<!\.)(?<!\w)Net\s+(?=(?:Full Stack|Developer|Engineer|Architect|Consultant|Lead|Manager|Specialist|Administrator))", ".NET ", p)
 
         # Re-protect in case the expansions created new compound words (e.g. "SeniorDevOps").
         for pat, placeholder in _compound_protect:
@@ -162,7 +183,7 @@ def canonicalize_job_title(title: str) -> str:
         p = re.sub(r"(?i)(?<!\.)(?<!\w)Dotnet(?=\b)", ".NET", p)
         # Ensure lone "Net" before role keywords becomes ".NET" — skip if already ".NET"
         p = re.sub(
-            r"(?i)(?<!\.)(?<!\w)Net\b(?=\s+(?:Full Stack|Developer|Engineer|Architect|Consultant|Programmer))",
+            r"(?i)(?<!\.)(?<!\w)Net\b(?=\s+(?:Full Stack|Developer|Engineer|Architect|Consultant|Programmer|Lead|Manager|Specialist|Administrator))",
             ".NET", p
         )
 

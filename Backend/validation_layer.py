@@ -179,9 +179,14 @@ _ROLE_SIGNAL: re.Pattern = re.compile(
     r"data\s+scientist|data\s+engineer|full\s*stack|frontend|backend|"
     r"front\s+end|back\s+end|product\s+manager|project\s+manager|"
     r"program\s+manager|business\s+analyst|etl\s+developer|etl\s+engineer|"
-    r"scrum\s+master|qa\s+engineer|qa\s+tester|lead|director|head\s+of|"
+    r"scrum\s+master|product\s+owner|qa\s+engineer|qa\s+tester|qa\s+lead|"
+    r"lead|director|head\s+of|coordinator|owner|"
     r"principal\s+engineer|staff\s+engineer|cloud\s+engineer|"
-    r"data\s+architect|solutions\s+architect|security\s+engineer)\b",
+    r"data\s+architect|solutions\s+architect|security\s+engineer|"
+    r"technical\s+lead|team\s+lead|tech\s+lead|delivery\s+manager|"
+    r"dba|database\s+administrator|network\s+engineer|"
+    r"automation\s+engineer|test\s+engineer|infrastructure\s+engineer|"
+    r"ux\s+designer|ui\s+designer|technical\s+writer)\b",
     re.IGNORECASE,
 )
 

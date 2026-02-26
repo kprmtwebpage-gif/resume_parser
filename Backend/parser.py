@@ -2216,6 +2216,144 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
     return first, last
 
 
+# ── filename-based job title fallback ─────────────────────────────────────
+
+# Lightweight role-signal regex (mirrors role_re inside extract_job_title).
+_FN_ROLE_RE = re.compile(
+    r"(?i)\b("
+    r"developer|engineer|analyst|architect|consultant|tester|administrator|"
+    r"specialist|devops|sre|manager|intern|sde|sdet|programmer|designer|"
+    r"director|scientist|lead|coordinator|scrum\s*master|product\s*owner|"
+    r"dba|trainer|recruiter|strategist|officer|owner"
+    r")\b|\b("
+    r"data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|"
+    r"full\s*stack|front\s*end|back\s*end|"
+    r"qa\s+(?:engineer|analyst|lead|tester)|"
+    r"solutions?\s+architect|technical\s+(?:architect|lead)|"
+    r"team\s+lead|tech\s+lead|product\s+owner|scrum\s+master|"
+    r"project\s+(?:manager|coordinator)|program\s+(?:manager|coordinator)|"
+    r"delivery\s+manager"
+    r")\b"
+)
+
+# Tokens that are noise in filenames (not part of name or role).
+_FN_NOISE = {
+    "resume", "cv", "profile", "final", "latest", "updated", "update",
+    "new", "copy", "draft", "version", "data", "docx", "pdf", "doc",
+}
+
+# Organisation / company tokens to strip.
+_FN_ORG = {
+    "kprmt", "inc", "corp", "llc", "ltd", "pvt", "tcs", "wipro", "hcl",
+    "infosys", "accenture", "cognizant", "capgemini", "ibm", "microsoft",
+    "google", "amazon", "meta", "oracle", "deloitte",
+}
+
+# Seniority prefixes that belong with the role, not the name.
+_FN_SENIORITY = {"senior", "sr", "junior", "jr", "lead", "principal", "staff", "associate"}
+
+# Tech-stack tokens that can prefix a role word in a filename.
+_FN_TECH = {
+    "net", "dotnet", ".net", "java", "python", "react", "angular", "node",
+    "aws", "azure", "cloud", "sql", "sap", "oracle", "salesforce",
+    "sharepoint", "tableau", "power", "bi", "etl", "big", "ai", "ml",
+    "devops", "fullstack", "full", "stack", "front", "end", "back",
+    "frontend", "backend", "qa", "ui", "ux",
+}
+
+
+def infer_title_from_filename(
+    file_name: str,
+    *,
+    first_name: str = "",
+    last_name: str = "",
+) -> str | None:
+    """Extract a job-title hint from the filename when body extraction fails.
+
+    Filenames like "Manickam C_QA lead.docx" or "Vidya Raman Resume - Product Owner_data.docx"
+    or "KPRMT _ Raghuram_Bhagawatula _ .Net architect.docx" encode the role after the name.
+
+    Returns a canonicalised title string, or *None* if no reliable role can be inferred.
+    """
+    stem = Path(file_name).stem
+    stem = unicodedata.normalize("NFKC", stem)
+
+    # Replace separators with spaces.
+    stem = re.sub(r"[_\-]+", " ", stem)
+
+    # Preserve ".net" / ".Net" before we strip dots.
+    stem = re.sub(r"(?i)\.net\b", " dotnet ", stem)
+
+    stem = re.sub(r"[.]+", " ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip()
+
+    tokens = stem.split()
+    if not tokens:
+        return None
+
+    fn_cf = first_name.casefold() if first_name else ""
+    ln_cf = last_name.casefold() if last_name else ""
+
+    # Walk tokens: skip name / noise / org tokens, collect the role tail.
+    role_tokens: list[str] = []
+    found_name = False
+    for tok in tokens:
+        tok_cf = tok.casefold()
+        tok_compact = re.sub(r"[^a-z0-9]", "", tok_cf)
+
+        # Skip noise / org tokens anywhere.
+        if tok_cf in _FN_NOISE or tok_compact in _FN_NOISE:
+            continue
+        if tok_cf in _FN_ORG or tok_compact in _FN_ORG:
+            continue
+
+        # Skip candidate's own name tokens (first/last, including initials).
+        if fn_cf and (tok_cf == fn_cf or tok_compact == fn_cf):
+            found_name = True
+            continue
+        if ln_cf and (tok_cf == ln_cf or tok_compact == ln_cf):
+            found_name = True
+            continue
+        # Skip single-char initials (e.g. "C" in "Manickam C_QA lead").
+        if len(tok_compact) == 1 and tok_compact.isalpha():
+            continue
+
+        # Once we've passed name tokens, everything after is potential role.
+        # But also accept tokens that are clearly role/tech even before name confirmation.
+        if tok_cf in _FN_SENIORITY or tok_cf in _FN_TECH or _FN_ROLE_RE.search(tok):
+            role_tokens.append(tok)
+            found_name = True  # role tokens imply we're past the name
+            continue
+
+        # If we haven't encountered name or role yet, assume this is still name.
+        if not found_name and not role_tokens:
+            continue
+
+        # Unknown token after we've started collecting role; keep it.
+        if role_tokens:
+            role_tokens.append(tok)
+
+    if not role_tokens:
+        return None
+
+    # Rebuild raw role phrase.
+    raw_role = " ".join(role_tokens)
+
+    # Normalise "dotnet" back to ".NET".
+    raw_role = re.sub(r"(?i)\bdotnet\b", ".NET", raw_role)
+
+    # Quick canonicalisation.
+    title = canonicalize_job_title(raw_role)
+    if not title or len(title) < 3:
+        return None
+
+    # Validate: must contain at least one recognisable role word.
+    if not _FN_ROLE_RE.search(title):
+        return None
+
+    return title
+
+
 def _pick_best_name_pair(
     *,
     body_name: tuple[str, str],
@@ -4879,7 +5017,7 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         t = re.sub(r"(?i)\bdot\s*net\b", ".NET", t)
         t = re.sub(r"(?i)\bdotnet\b", ".NET", t)
         # Bare "Net" before role words → ".NET"
-        t = re.sub(r"(?i)(?<!\.)Net\b(?=\s+(?:Full Stack|Developer|Engineer|Architect))", ".NET", t)
+        t = re.sub(r"(?i)(?<!\.)Net\b(?=\s+(?:Full Stack|Developer|Engineer|Architect|Lead|Manager|Specialist|Administrator|Consultant|Programmer))", ".NET", t)
         return t
 
     def shrink_to_role_phrase(title: str) -> str:
@@ -5195,18 +5333,21 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     # states the role in a sentence near the top (e.g., "experience as a Data Engineer").
     as_role_re = re.compile(
         r"(?i)\b(?:experience\s+as\s+an?|worked\s+as\s+an?|working\s+as\s+an?|"
-        r"experience\s+in|experience\s+as|"  # also match "experience in Data Engineer"
+        r"worked\s+as\s+|working\s+as\s+|"  # also match without article: "worked as Senior QA Engineer"
+        r"experience\s+in|experience\s+as|"
         r"as\s+an?|as\s+a)\s+"
         r"(?:(senior|lead|principal|staff|junior|associate)\s+)?"
         r"(data\s+engineer|data\s+scientist|data\s+analyst|software\s+engineer|software\s+developer|"
         r"java\s+developer|java\s+full\s*stack\s+developer|java\s+backend\s+developer|"
         r"python\s+developer|full\s*stack\s+developer|full\s*stack\s+engineer|"
         r"devops\s+engineer|cloud\s+engineer|\\.?net\s+developer|\\.?net\s+full\s*stack\s+developer|"
+        r"\\.?net\s+(?:technology\s+)?(?:lead|architect)|"
         r"front\s*end\s+developer|back\s*end\s+developer|react\s+developer|angular\s+developer|"
         r"node(?:\.?js)?\s+developer|"
         r"machine\s+learning\s+engineer|ai\s+engineer|ml\s+engineer|"
         r"business\s+analyst|systems?\s+analyst|qa\s+engineer|qa\s+analyst|qa\s+lead|"
         r"solutions?\s+architect|technical\s+architect|systems?\s+architect|enterprise\s+architect|"
+        r"technology\s+lead|technical\s+lead|team\s+lead|"
         r"big\s+data\s+engineer|etl\s+developer|bi\s+developer|"
         r"database\s+administrator|network\s+engineer|security\s+engineer|"
         r"infrastructure\s+engineer|automation\s+engineer|test\s+engineer|"
@@ -6238,6 +6379,7 @@ def main() -> int:
             # Tier 1: header/first-page block (title is almost always here)
             # Tier 2: full priority_source_text (wider first-page slice)
             # Tier 3: entire resume text (deepest fallback)
+            # Tier 4: filename hint (e.g. "Manickam C_QA lead.docx")
             job_title = (
                 extract_job_title(header_text, first_name=first_name, last_name=last_name)
                 or (
@@ -6246,6 +6388,7 @@ def main() -> int:
                     else None
                 )
                 or extract_job_title(resume_text, first_name=first_name, last_name=last_name)
+                or infer_title_from_filename(file, first_name=first_name, last_name=last_name)
             )
             skills = canonicalize_skill_list(extract_skills(resume_text) or "") or None
             experience_years = extract_role_experience_years(resume_text_norm, job_title) or extract_experience_years(resume_text_norm)
