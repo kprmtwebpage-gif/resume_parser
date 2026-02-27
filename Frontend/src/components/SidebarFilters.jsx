@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { ChevronDownIcon, ChevronUpIcon, XMarkIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
-import {useTheme } from '../contexts/ThemeContext'
+import { useTheme } from '../contexts/ThemeContext'
+import { apiUrl } from '../config.js'
 
 // Highlight matching substring in suggestion text
 function HighlightMatch({ text, query, isDark }) {
@@ -81,7 +82,7 @@ function JobTitleMultiSelect({ selectedTitles, onChange, onValidSelect }) {
     const fetchAllTitles = async () => {
       setLoading(true)
       try {
-        const response = await fetch('/job-titles/all')
+        const response = await fetch(apiUrl('/job-titles/all'))
         if (response.ok) {
           const data = await response.json()
           setAllJobTitles(data.results || [])
@@ -594,7 +595,7 @@ export default function SidebarFilters({ filters, onChange, onSearch, onSave, va
   // Fetch all skills from DB for suggestions (instead of just from loaded rows)
   const [dbSkills, setDbSkills] = useState([])
   useEffect(() => {
-    fetch('/skills/all')
+    fetch(apiUrl('/skills/all'))
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.results) setDbSkills(data.results) })
       .catch(() => {})
@@ -632,7 +633,7 @@ export default function SidebarFilters({ filters, onChange, onSearch, onSave, va
   // Fetch all locations from DB for suggestions (instead of just from loaded rows)
   const [dbLocations, setDbLocations] = useState([])
   useEffect(() => {
-    fetch('/locations/all')
+    fetch(apiUrl('/locations/all'))
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.results) setDbLocations(data.results) })
       .catch(() => {})

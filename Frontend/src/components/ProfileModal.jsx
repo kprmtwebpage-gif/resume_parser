@@ -6,6 +6,7 @@ import ProfileTabs from './ProfileTabs.jsx'
 import PdfScrollViewer from './PdfScrollViewer.jsx'
 import { notifyModalOpened, notifyModalClosed, onChatbotOpened } from '../chatbot/modalEvents.js'
 import { useTheme } from '../contexts/ThemeContext'
+import { apiUrl } from '../config.js'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -60,8 +61,8 @@ export default function ProfileModal({
 
   // Construct resume URL similar to ProfileCard
   const hasResume = candidate?.resume_filename
-  const baseResumeUrl = hasResume ? `/candidates/${candidate.id}/resume` : null
-  const viewResumeUrl = hasResume ? `/candidates/${candidate.id}/resume?inline=true` : null
+  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume`) : null
+  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume?inline=true`) : null
   const resumeIsDocx = hasResume && (candidate.resume_filename.toLowerCase().endsWith('.docx') || candidate.resume_filename.toLowerCase().endsWith('.doc'))
   const resumeIsPdf = hasResume && candidate.resume_filename.toLowerCase().endsWith('.pdf')
   const resumeIsImage = hasResume && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(candidate.resume_filename)

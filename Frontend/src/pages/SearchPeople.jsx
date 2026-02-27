@@ -9,6 +9,7 @@ import ProfileModal from '../components/ProfileModal.jsx'
 import EditProfileModal from '../components/EditProfileModal.jsx'
 
 import { fetchCandidateById, fetchCandidates, updateCandidate } from '../services/api.js'
+import { apiUrl } from '../config.js'
 import { onCandidateSelected } from '../chatbot/candidateEvents.js'
 
 export default function SearchPeople() {
@@ -198,7 +199,7 @@ export default function SearchPeople() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 minute timeout
       
-      const response = await fetch('/gdrive/sync-and-parse', {
+      const response = await fetch(apiUrl('/gdrive/sync-and-parse'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -261,7 +262,7 @@ export default function SearchPeople() {
 
     const ids = Array.from(selectedIds).join(',')
     // Trigger download of ZIP from backend
-    const url = `/candidates/export?ids=${encodeURIComponent(ids)}`
+    const url = apiUrl(`/candidates/export?ids=${encodeURIComponent(ids)}`)
     const a = document.createElement('a')
     a.href = url
     a.download = 'resumes_export.zip'
