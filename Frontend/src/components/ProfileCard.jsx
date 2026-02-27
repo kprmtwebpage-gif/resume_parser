@@ -1,13 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
 import {
   EnvelopeIcon,
   MapPinIcon,
   PhoneIcon,
 } from '@heroicons/react/24/outline'
+import { useTheme } from '../contexts/ThemeContext'
 import ResumeViewer from './ResumeViewer.jsx'
 import EmailProviderModal from './EmailProviderModal.jsx'
-import { apiUrl } from '../config'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -15,30 +14,43 @@ function initials(first, last) {
   return (a + b).toUpperCase() || '—'
 }
 
+// Ensure LinkedIn URLs always have https:// and are well-formed
+function sanitizeLinkedInUrl(url) {
+  if (!url) return null
+  url = url.trim()
+  // Strip trailing slashes
+  url = url.replace(/\/+$/, '')
+  // Add https:// if missing
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'https://' + url
+  }
+  // Upgrade http to https
+  if (url.startsWith('http://')) {
+    url = url.replace('http://', 'https://')
+  }
+  return url
+}
+
 export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit }) {
+  const { colors, isDark } = useTheme()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
   const [isGenerated, setIsGenerated] = useState(false)
   const [isDownloaded, setIsDownloaded] = useState(false)
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, direction: 'down' })
   const dropdownRef = useRef(null)
-  const buttonRef = useRef(null)
 
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
   const location = row.location || row.address || '—'
   const hasResume = row.resume_filename
-  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume`) : null
-  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume?inline=true`) : null
+  const baseResumeUrl = hasResume ? `/candidates/${row.id}/resume` : null
+  const viewResumeUrl = hasResume ? `/candidates/${row.id}/resume?inline=true` : null
   const downloadResumeUrl = hasResume ? baseResumeUrl : null
 
-  // Close dropdown when clicking outside (check both the trigger button area and the portal menu)
-  const portalMenuRef = useRef(null)
+  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
-      const inButton = dropdownRef.current && dropdownRef.current.contains(event.target)
-      const inMenu = portalMenuRef.current && portalMenuRef.current.contains(event.target)
-      if (!inButton && !inMenu) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsDropdownOpen(false)
       }
     }
@@ -144,7 +156,12 @@ Availability: ${row.availability || 'N/A'}`
   }, [onEdit])
 
   return (
-    <div className="bg-white hover:bg-neutral-50/50 transition-colors duration-150">
+    <div 
+      className="transition-all duration-300"
+      style={{ backgroundColor: colors.background }}
+      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = colors.background}
+    >
       <div className="grid items-center py-4" style={{ gridTemplateColumns: '5% 27% 26% 32% 10%', width: '100%' }}>
         <div className="flex justify-center px-4">
           <input
@@ -176,22 +193,45 @@ Availability: ${row.availability || 'N/A'}`
             <div className="min-w-0">
               <button
                 type="button"
-                className="block truncate text-left text-sm font-semibold text-neutral-900 hover:text-brand-500 transition-colors"
+                className="block truncate text-left text-sm font-semibold hover:text-brand-500 transition-colors duration-300"
+                style={{ color: colors.text }}
                 onClick={onOpen}
                 title={fullName}
               >
                 {fullName}
               </button>
-              <div className="truncate text-xs text-neutral-600" title={row.job_title || ''}>
+              <div 
+                className="truncate text-xs transition-colors duration-300" 
+                style={{ color: isDark ? '#94a3b8' : '#6b7280' }}
+                title={row.job_title || ''}
+              >
                 {row.job_title || '—'}
               </div>
+              {/* LinkedIn logo */}
+              {row.linkedin && (
+                <a
+                  href={sanitizeLinkedInUrl(row.linkedin)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-block mt-0.5 transition-opacity hover:opacity-80"
+                  title="View LinkedIn Profile"
+                >
+                  <svg className="w-[18px] h-[18px]" fill="#0A66C2" viewBox="0 0 24 24">
+                    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                  </svg>
+                </a>
+              )}
             </div>
           </div>
         </div>
 
         <div className="overflow-hidden px-6">
-          <div className="flex items-center gap-1.5 text-sm text-neutral-800">
-            <MapPinIcon className="h-4 w-4 text-neutral-500 flex-shrink-0" />
+          <div 
+            className="flex items-center gap-1.5 text-sm transition-colors duration-300"
+            style={{ color: colors.text }}
+          >
+            <MapPinIcon className="h-4 w-4 flex-shrink-0" style={{ color: isDark ? '#94a3b8' : '#6b7280' }} />
             <span className="truncate" title={location}>{location}</span>
           </div>
         </div>
@@ -199,23 +239,29 @@ Availability: ${row.availability || 'N/A'}`
         <div className="overflow-hidden px-6">
           <div className="space-y-1">
             {row.email && (
-              <div className="flex items-center gap-1.5 text-sm text-neutral-800 overflow-hidden">
-                <EnvelopeIcon className="h-4 w-4 text-neutral-500 flex-shrink-0" />
+              <div 
+                className="flex items-center gap-1.5 text-sm overflow-hidden transition-colors duration-300"
+                style={{ color: colors.text }}
+              >
+                <EnvelopeIcon className="h-4 w-4 flex-shrink-0" style={{ color: isDark ? '#94a3b8' : '#6b7280' }} />
                 <a href={`mailto:${row.email}`} className="hover:text-brand-500 truncate" title={row.email}>
                   {row.email}
                 </a>
               </div>
             )}
             {row.phone && (
-              <div className="flex items-center gap-1.5 text-sm text-neutral-800">
-                <PhoneIcon className="h-4 w-4 text-neutral-500 flex-shrink-0" />
+              <div 
+                className="flex items-center gap-1.5 text-sm transition-colors duration-300"
+                style={{ color: colors.text }}
+              >
+                <PhoneIcon className="h-4 w-4 flex-shrink-0" style={{ color: isDark ? '#94a3b8' : '#6b7280' }} />
                 <a href={`tel:${row.phone}`} className="hover:text-brand-500 truncate" title={row.phone}>
                   {row.phone}
                 </a>
               </div>
             )}
             {!row.email && !row.phone && (
-              <span className="text-neutral-400 text-sm">—</span>
+              <span className="text-sm" style={{ color: isDark ? '#64748b' : '#cbd5e1' }}>—</span>
             )}
           </div>
         </div>
@@ -225,20 +271,8 @@ Availability: ${row.availability || 'N/A'}`
           <div className="relative">
             <button
               type="button"
-              ref={buttonRef}
               onClick={(e) => {
                 e.stopPropagation()
-                if (!isDropdownOpen && buttonRef.current) {
-                  const rect = buttonRef.current.getBoundingClientRect()
-                  const spaceBelow = window.innerHeight - rect.bottom
-                  const menuW = 176 // w-44 = 11rem = 176px
-                  const openUp = spaceBelow < 200
-                  setDropdownPos({
-                    top: openUp ? rect.top : rect.bottom + 4,
-                    left: rect.right - menuW,
-                    direction: openUp ? 'up' : 'down',
-                  })
-                }
                 setIsDropdownOpen(!isDropdownOpen)
               }}
               className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
@@ -247,29 +281,33 @@ Availability: ${row.availability || 'N/A'}`
               <span className="text-neutral-400">⋮</span>
             </button>
 
-            {/* Dropdown Menu — rendered via portal to escape overflow-hidden parents */}
-            {isDropdownOpen && createPortal(
-              <div
-                ref={portalMenuRef}
-                className="fixed w-44 bg-white rounded-md shadow-lg border border-neutral-200 py-1 z-[9999]"
-                style={{
-                  top: dropdownPos.direction === 'up' ? undefined : dropdownPos.top,
-                  bottom: dropdownPos.direction === 'up' ? (window.innerHeight - dropdownPos.top + 4) : undefined,
-                  left: dropdownPos.left,
+            {/* Dropdown Menu */}
+            {isDropdownOpen && (
+              <div 
+                className="absolute right-0 top-full mt-1 w-44 rounded-md shadow-lg py-1 z-50 transition-colors duration-300"
+                style={{ 
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                  backgroundColor: colors.background,
+                  border: `1px solid ${colors.border}`
                 }}
               >
                 <button
                   type="button"
                   onClick={handleEditClick}
-                  className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                  className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                  style={{ color: colors.text }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
                   Edit
                 </button>
                 <button
                   type="button"
                   onClick={handleGenerateClick}
-                  className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                  className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                  style={{ color: colors.text }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
                   Send Mail
                 </button>
@@ -278,30 +316,41 @@ Availability: ${row.availability || 'N/A'}`
                     <button
                       type="button"
                       onClick={handleViewResume}
-                      className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                      className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                      style={{ color: colors.text }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
                       View Resume
                     </button>
                     <button
                       type="button"
                       onClick={handleDownloadResume}
-                      className="w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+                      className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                      style={{ color: colors.text }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
                       Download Resume
                     </button>
                   </>
                 ) : (
                   <>
-                    <div className="px-4 py-2 text-sm text-neutral-400 cursor-not-allowed">
+                    <div 
+                      className="px-4 py-2 text-sm cursor-not-allowed"
+                      style={{ color: isDark ? '#64748b' : '#cbd5e1' }}
+                    >
                       View Resume
                     </div>
-                    <div className="px-4 py-2 text-sm text-neutral-400 cursor-not-allowed">
+                    <div 
+                      className="px-4 py-2 text-sm cursor-not-allowed"
+                      style={{ color: isDark ? '#64748b' : '#cbd5e1' }}
+                    >
                       Download Resume
                     </div>
                   </>
                 )}
-              </div>,
-              document.body
+              </div>
             )}
           </div>
         </div>

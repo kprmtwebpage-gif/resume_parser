@@ -1,86 +1,823 @@
+# ═══════════════════════════════════════════════════════════════════════
+# skills_master.txt — Comprehensive tech skills dictionary
+# Used by parser.py for skill detection & name/address disambiguation
+# Lines starting with # are comments. One skill per line.
+# ═══════════════════════════════════════════════════════════════════════
 
+# ─── Programming Languages ────────────────────────────────────────────
 Python
 Java
 JavaScript
 TypeScript
+C
+C++
+C#
+Go
+Golang
+Ruby
+PHP
+R
+Scala
+Kotlin
+Rust
+Swift
+Perl
+Lua
+Dart
+Groovy
+MATLAB
+SAS
+Haskell
+Erlang
+Elixir
+Clojure
+F#
+Visual Basic
+VB.NET
+COBOL
+Fortran
+Assembly
+Objective-C
+Shell Scripting
+Bash
+PowerShell
+Apex
+
+# ─── Web Frontend Frameworks & Libraries ──────────────────────────────
 React
+React.js
+ReactJS
 Angular
-Node
+AngularJS
+Vue
+Vue.js
+Svelte
+Next.js
+Nuxt.js
+Gatsby
+Ember.js
+Backbone.js
+jQuery
+Redux
+MobX
+Zustand
+Tailwind CSS
+Bootstrap
+Material UI
+Ant Design
+Chakra UI
+Styled Components
+SASS
+SCSS
+LESS
+HTML
+CSS
+Storybook
+Webpack
+Vite
+Babel
+ESLint
+Prettier
+Rollup
+Parcel
+
+# ─── Backend Frameworks ──────────────────────────────────────────────
 Node.js
+NodeJS
 Express
+Express.js
 Django
 Flask
 FastAPI
 Spring
 Spring Boot
+Spring MVC
+Spring Cloud
+Spring Security
+Spring Data
+Spring Batch
+Hibernate
+ASP.NET
+ASP.NET Core
+ASP.NET MVC
+ASP.NET Web API
+.NET
+.NET Core
+.NET Framework
+Entity Framework
+Entity Framework Core
+Ruby on Rails
+Rails
+Laravel
+Symfony
+CodeIgniter
+Gin
+Echo
+Fiber
+Phoenix
+Actix
+Rocket
+Ktor
+Micronaut
+Quarkus
+Struts
+JSP
+Servlets
+JAX-RS
+JAX-WS
+gRPC
+GraphQL
+REST
+RESTful
+SOAP
+WCF
+SignalR
+WebSocket
+Blazor
+
+# ─── Cloud Platforms & Services ───────────────────────────────────────
 AWS
+Amazon Web Services
 Azure
+Microsoft Azure
 GCP
+Google Cloud Platform
+Google Cloud
+IBM Cloud
+Oracle Cloud
+Alibaba Cloud
+DigitalOcean
+Heroku
+Netlify
+Vercel
+Cloudflare
+AWS Lambda
+AWS S3
+AWS EC2
+AWS ECS
+AWS EKS
+AWS RDS
+AWS DynamoDB
+AWS SQS
+AWS SNS
+AWS CloudFormation
+AWS CloudWatch
+AWS IAM
+AWS VPC
+AWS API Gateway
+AWS Fargate
+AWS Step Functions
+AWS Glue
+AWS Kinesis
+AWS Redshift
+AWS Athena
+AWS EMR
+AWS SageMaker
+AWS CodePipeline
+AWS CodeBuild
+AWS CodeDeploy
+AWS Elastic Beanstalk
+Azure Functions
+Azure DevOps
+Azure AD
+Azure Active Directory
+Azure Blob Storage
+Azure SQL
+Azure Cosmos DB
+Azure Service Bus
+Azure Event Hub
+Azure Data Factory
+Azure Databricks
+Azure Kubernetes Service
+Azure Logic Apps
+Azure App Service
+Azure Key Vault
+Azure Monitor
+Azure Pipelines
+Azure OpenAI
+Google BigQuery
+Google Dataflow
+Google Dataproc
+Google Pub/Sub
+Google Cloud Functions
+Google App Engine
+Google Cloud Storage
+Google Cloud Run
+Google Kubernetes Engine
+Firebase
+
+# ─── Databases ────────────────────────────────────────────────────────
 SQL
 PostgreSQL
 MySQL
+MariaDB
+Oracle
+Oracle Database
+SQL Server
+MS SQL Server
+MSSQL
+SQLite
+IBM DB2
+DB2
+Teradata
+Sybase
+NoSQL
 MongoDB
+Cassandra
+DynamoDB
+CouchDB
+Couchbase
+Neo4j
+ArangoDB
+HBase
+InfluxDB
+TimescaleDB
+Amazon Redshift
+Snowflake
+BigQuery
+Azure SQL Database
+CosmosDB
+Cosmos DB
+Firebase Realtime Database
+Firestore
+Memcached
 Redis
+ElastiCache
+PL/SQL
+T-SQL
+Stored Procedures
+ADO.NET
+JDBC
+ODBC
+Sequelize
+Prisma
+TypeORM
+SQLAlchemy
+Mongoose
+Knex.js
+Drizzle
+
+# ─── DevOps & CI/CD ──────────────────────────────────────────────────
 Docker
 Kubernetes
-Git
-Jenkins
+K8s
+Helm
+Istio
 Terraform
-HTML
-CSS
-REST
-GraphQL
+Ansible
+Puppet
+Chef
+Vagrant
+Packer
+Jenkins
+GitHub Actions
+GitLab CI
+GitLab CI/CD
+CircleCI
+Travis CI
+Azure Pipelines
+Bamboo
+TeamCity
+ArgoCD
+Argo CD
+FluxCD
+Spinnaker
+CI/CD
+Continuous Integration
+Continuous Deployment
+Infrastructure as Code
+IaC
+CloudFormation
+Pulumi
+Octopus Deploy
+Nexus
+Artifactory
+SonarQube
+SonarCloud
+Nginx
+Apache
+HAProxy
+Envoy
+Traefik
 
-# Testing frameworks (added to prevent false-positive location extraction)
-XUnit
-NUnit
-JUnit
+# ─── Version Control ─────────────────────────────────────────────────
+Git
+GitHub
+GitLab
+Bitbucket
+SVN
+Subversion
+Mercurial
+Perforce
+Azure Repos
+TFS
+TFVC
+
+# ─── Containers & Orchestration ──────────────────────────────────────
+Docker Compose
+Docker Swarm
+Kubernetes
+Amazon ECS
+Amazon EKS
+Google Kubernetes Engine
+Azure Kubernetes Service
+OpenShift
+Rancher
+Podman
+Containerd
+
+# ─── Monitoring & Observability ──────────────────────────────────────
+Prometheus
+Grafana
+Datadog
+New Relic
+Splunk
+ELK Stack
+Elasticsearch
+Logstash
+Kibana
+Fluentd
+Jaeger
+Zipkin
+OpenTelemetry
+PagerDuty
+CloudWatch
+Azure Monitor
+AppDynamics
+Dynatrace
+Nagios
+Zabbix
+Sumo Logic
+
+# ─── Data Engineering & Big Data ──────────────────────────────────────
+Spark
+Apache Spark
+PySpark
+Hadoop
+MapReduce
+HDFS
+Hive
+Pig
+Presto
+Trino
+Flink
+Apache Flink
+Apache Beam
+Kafka
+Apache Kafka
+Confluent Kafka
+RabbitMQ
+ActiveMQ
+Celery
+Airflow
+Apache Airflow
+Luigi
+Prefect
+Dagster
+dbt
+NiFi
+Apache NiFi
+Talend
+Informatica
+SSIS
+SSRS
+SSAS
+ETL
+ELT
+Data Pipeline
+Data Lake
+Data Warehouse
+Data Modeling
+Databricks
+Snowflake
+Redshift
+BigQuery
+Delta Lake
+Apache Iceberg
+Parquet
+Avro
+ORC
+Star Schema
+Dimensional Modeling
+
+# ─── Data Science & Machine Learning ─────────────────────────────────
+Machine Learning
+Deep Learning
+Neural Networks
+NLP
+Natural Language Processing
+Computer Vision
+TensorFlow
+PyTorch
+Keras
+scikit-learn
+Scikit Learn
+XGBoost
+LightGBM
+CatBoost
+NumPy
+Pandas
+Matplotlib
+Seaborn
+Plotly
+SciPy
+NLTK
+spaCy
+Hugging Face
+Transformers
+BERT
+GPT
+LLM
+Large Language Models
+RAG
+LangChain
+LlamaIndex
+OpenAI
+ChatGPT
+OpenCV
+YOLO
+Random Forest
+Gradient Boosting
+Logistic Regression
+Linear Regression
+Decision Trees
+SVM
+Support Vector Machine
+Clustering
+KNN
+K-Means
+PCA
+Reinforcement Learning
+Transfer Learning
+Feature Engineering
+Model Training
+Model Deployment
+MLflow
+Kubeflow
+MLOps
+AutoML
+Jupyter
+Jupyter Notebook
+Google Colab
+Anaconda
+Conda
+R Studio
+SPSS
+Stata
+
+# ─── Data Visualization & BI ─────────────────────────────────────────
+Tableau
+Power BI
+Looker
+Qlik
+QlikView
+QlikSense
+D3.js
+Highcharts
+Chart.js
+Grafana
+MicroStrategy
+Cognos
+Crystal Reports
+SSRS
+Google Data Studio
+Apache Superset
+Metabase
+Sisense
+
+# ─── Testing & QA ────────────────────────────────────────────────────
+Selenium
+Cypress
+Playwright
+Puppeteer
+Appium
 TestNG
+JUnit
+NUnit
+XUnit
 MSTest
 SpecFlow
 Cucumber
-Selenium
-Playwright
-Cypress
-Puppeteer
-Moq
-Mockito
-Jest
-Jasmine
-Karma
-Pytest
-TDD
+Behavior Driven Development
 BDD
+TDD
+Test Driven Development
+Jest
+Mocha
+Chai
+Karma
+Jasmine
+Robot Framework
+Gatling
+JMeter
+LoadRunner
+Postman
+REST Assured
+SoapUI
+Mockito
+Moq
+WireMock
+PyTest
+Pytest
+TestRail
+Zephyr
+qTest
+Manual Testing
+Automation Testing
+Regression Testing
+Integration Testing
+Unit Testing
+Performance Testing
+Load Testing
+Stress Testing
+API Testing
+End-to-End Testing
+UAT
+Karate
+Protractor
+Tosca
 
-# Windows / .NET UI tech
+# ─── Security ────────────────────────────────────────────────────────
+OAuth
+OAuth2
+JWT
+SAML
+LDAP
+Active Directory
+SSO
+Single Sign-On
+OWASP
+Penetration Testing
+Vulnerability Assessment
+Encryption
+SSL
+TLS
+HTTPS
+PKI
+IAM
+RBAC
+Keycloak
+Okta
+Auth0
+CyberArk
+HashiCorp Vault
+Snyk
+Fortify
+Veracode
+Burp Suite
+Nessus
+Qualys
+SIEM
+SOC
+Firewall
+WAF
+DLP
+
+# ─── Mobile Development ──────────────────────────────────────────────
+Android
+iOS
+React Native
+Flutter
+Xamarin
+MAUI
+Swift
+SwiftUI
+Kotlin
+Objective-C
+Xcode
+Android Studio
+Gradle
+CocoaPods
+Ionic
+Cordova
+Expo
+Mobile Testing
+Appium
+
+# ─── Messaging & Event Streaming ─────────────────────────────────────
+Kafka
+RabbitMQ
+ActiveMQ
+AWS SQS
+AWS SNS
+Azure Service Bus
+Azure Event Hub
+Google Pub/Sub
+MQTT
+ZeroMQ
+NATS
+Apache Pulsar
+
+# ─── API & Integration ───────────────────────────────────────────────
+REST
+RESTful API
+GraphQL
+gRPC
+SOAP
+WebSocket
+API Gateway
+Swagger
+OpenAPI
+Postman
+Insomnia
+MuleSoft
+Apigee
+Kong
+Zuul
+API Management
+Microservices
+Service Mesh
+
+# ─── Project Management & Collaboration ───────────────────────────────
+Jira
+Confluence
+Trello
+Asana
+Monday.com
+ServiceNow
+Slack
+Microsoft Teams
+Notion
+Azure Boards
+Rally
+VersionOne
+Agile
+Scrum
+Kanban
+SAFe
+Waterfall
+Lean
+Six Sigma
+Prince2
+PMP
+SDLC
+Sharepoint
+
+# ─── Windows / .NET Ecosystem ────────────────────────────────────────
 XAML
 WPF
 WinForms
-Blazor
 Silverlight
 UWP
 MAUI
 Razor
+Razor Pages
+LINQ
+SignalR
+NuGet
+MSBuild
+IIS
+Windows Server
+Active Directory
+Visual Studio
+VS Code
 
-# Additional web / JS tools
-Redux
-Svelte
-jQuery
-TypeScript
-NodeJS
-Webpack
-Babel
+# ─── Design & UX ─────────────────────────────────────────────────────
+Figma
+Sketch
+Adobe XD
+InVision
+Zeplin
+Axure
+Balsamiq
+Wireframing
+Prototyping
+User Research
+Usability Testing
+Design Thinking
+Responsive Design
+Accessibility
+WCAG
 
-# DevOps / process
-Terraform
-Ansible
-DevOps
-CI/CD
-Agile
-Scrum
-Kanban
+# ─── CRM & ERP ───────────────────────────────────────────────────────
+Salesforce
+SAP
+Oracle ERP
+Dynamics 365
+HubSpot
+ServiceNow
+Zendesk
+Freshdesk
+Workday
+NetSuite
+PeopleSoft
+Siebel
+Salesforce Lightning
+Visualforce
+SOQL
+SOSL
 
-# Misc that can appear before state names in skill bullets
-Integration Testing
-Unit Testing
-Automation Testing
+# ─── Networking & Infrastructure ──────────────────────────────────────
+TCP/IP
+DNS
+DHCP
+HTTP
+HTTPS
+FTP
+SSH
+VPN
+Load Balancer
+CDN
+Proxy
+Reverse Proxy
+VLAN
+Subnetting
+OSI Model
+Cisco
+Juniper
+VMware
+Hyper-V
+ESXi
+vSphere
+Active Directory
+Group Policy
+
+# ─── Configuration & Build Tools ─────────────────────────────────────
+Maven
+Gradle
+Ant
+npm
+Yarn
+pnpm
+pip
+Poetry
+Cargo
+CMake
+Make
+MSBuild
+
+# ─── Logging & Search ────────────────────────────────────────────────
+Log4j
+Logback
+SLF4J
+NLog
+Serilog
+Elasticsearch
+Solr
+Lucene
+OpenSearch
+
+# ─── Caching ─────────────────────────────────────────────────────────
+Redis
+Memcached
+Hazelcast
+Ehcache
+Varnish
+CDN
+CloudFront
+
+# ─── Blockchain ──────────────────────────────────────────────────────
+Blockchain
+Ethereum
+Solidity
+Smart Contracts
+Web3
+Hyperledger
+Truffle
+Hardhat
+MetaMask
+
+# ─── RPA & Automation ────────────────────────────────────────────────
+Selenium
+UiPath
+Blue Prism
+Automation Anywhere
+Power Automate
+Zapier
+
+# ─── Office & Productivity ───────────────────────────────────────────
+Excel
+MS Excel
+VBA
+Macros
+Google Sheets
+Microsoft Office
+MS Office
+Word
+PowerPoint
+Outlook
+Google Workspace
+SharePoint
+
+# ─── Architecture & Design Patterns ──────────────────────────────────
+Microservices
+Monolithic
+Serverless
+Event Driven Architecture
+CQRS
+Event Sourcing
+Domain Driven Design
+DDD
+SOA
+Service Oriented Architecture
+MVC
+MVVM
+MVP
+Clean Architecture
+Hexagonal Architecture
+Design Patterns
+SOLID
+Gang of Four
+RESTful Architecture
+API First
+Twelve-Factor App

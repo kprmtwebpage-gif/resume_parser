@@ -4179,9 +4179,53 @@ def extract_linkedin(text):
 
 # ---------------- SKILLS ----------------
 def extract_skills(text):
+    # Compound tokens that must NOT be split by the camelCase splitter.
+    _NOSPLIT_COMPOUNDS = {
+        w.casefold(): w.casefold()
+        for w in [
+            "VMware", "ESXi", "vSphere", "MySQL", "MariaDB", "MongoDB",
+            "PostgreSQL", "GraphQL", "NoSQL", "CosmosDB", "CouchDB",
+            "DynamoDB", "HBase", "InfluxDB", "TimescaleDB", "ElastiCache",
+            "CloudWatch", "CloudFormation", "CloudFront", "CloudFlare",
+            "DevOps", "MLOps", "DataOps", "GitOps", "AIOps",
+            "GitHub", "GitLab", "BitBucket", "PowerShell", "PowerBI",
+            "TypeScript", "JavaScript", "NodeJS", "ReactJS", "AngularJS",
+            "VueJS", "ExpressJS", "NestJS", "NextJS", "NuxtJS",
+            "OpenAI", "OpenCV", "OpenAPI", "OpenShift", "OpenSearch",
+            "OpenTelemetry", "ChatGPT", "AutoML", "LangChain", "LlamaIndex",
+            "IntelliJ", "PyCharm", "WebStorm", "DataGrip",
+            "InVision", "HubSpot", "NetSuite", "PeopleSoft",
+            "ServiceNow", "SharePoint", "ActiveMQ", "RabbitMQ", "ZeroMQ",
+            "FastAPI", "SignalR", "WinForms", "SwiftUI",
+            "JUnit", "TestNG", "NUnit", "XUnit", "MSTest",
+            "MSBuild", "NuGet", "CocoaPods",
+            "BigQuery", "PySpark", "MapReduce",
+            "MetaMask", "HyperLedger",
+            "UiPath", "CircleCI", "ArgoCD", "FluxCD",
+            "SonarQube", "SonarCloud", "AppDynamics", "Dynatrace",
+            "HAProxy", "WebSocket", "MuleSoft",
+            "QlikView", "QlikSense", "MicroStrategy",
+            "WireMock",
+            # Single-word compounds commonly mis-split by camelCase regex
+            "NumPy", "SciPy", "TensorFlow", "PyTorch", "Matplotlib",
+            "RESTful", "jQuery", "TestRail", "Logback",
+            "Grafana", "Selenium", "PostCSS", "SageMaker",
+            "CatBoost", "LightGBM", "XGBoost",
+            "Mockito", "Firebase", "Firestore",
+            "SLF4J", "Log4j",
+        ]
+    }
+
     def _normalize_for_skills(s: str) -> str:
         # Keep characters used in common skill tokens: c#, c++, node.js, .net, ci/cd, end-to-end
         s = (s or "")
+        # Protect known compound tokens before camelCase splitting.
+        s_lower = s.casefold()
+        for compound, replacement in _NOSPLIT_COMPOUNDS.items():
+            if compound in s_lower:
+                # Build a case-insensitive replacement that preserves surrounding text.
+                s = re.sub(re.escape(compound), replacement, s, flags=re.IGNORECASE)
+                s_lower = s.casefold()
         # Split common glued/camel-case forms: AzureDatabricks -> Azure Databricks
         s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s)
         s = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", s)

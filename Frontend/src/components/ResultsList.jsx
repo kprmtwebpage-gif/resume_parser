@@ -1,9 +1,21 @@
+import { useTheme } from '../contexts/ThemeContext'
 import ProfileCard from './ProfileCard.jsx'
 
 export default function ResultsList({ rows, selectedIds, downloadedIds, onToggle, onOpen, onDownload, onEdit }) {
+  const { colors, isDark } = useTheme()
+  
   return (
     <div className="space-y-0">
-      <div className="grid items-center py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500 bg-neutral-50 border-b border-neutral-200" style={{ gridTemplateColumns: '5% 27% 26% 32% 10%', width: '100%' }}>
+      <div 
+        className="grid items-center py-3 text-xs font-semibold uppercase tracking-wide border-b transition-colors duration-300" 
+        style={{ 
+          gridTemplateColumns: '5% 27% 26% 32% 10%', 
+          width: '100%',
+          color: isDark ? '#94a3b8' : '#6b7280',
+          backgroundColor: colors.card,
+          borderColor: colors.border
+        }}
+      >
         <div className="flex justify-center px-4">
           <input
             type="checkbox"
@@ -21,7 +33,7 @@ export default function ResultsList({ rows, selectedIds, downloadedIds, onToggle
         <div className="flex justify-end px-4">Actions</div>
       </div>
 
-      <div className="divide-y divide-neutral-100">
+      <div className="divide-y transition-colors duration-300" style={{ borderColor: colors.border }}>
         {rows.map((row) => (
           <ProfileCard
             key={row.id}
@@ -36,7 +48,12 @@ export default function ResultsList({ rows, selectedIds, downloadedIds, onToggle
         ))}
 
         {rows.length === 0 && (
-          <div className="px-6 py-10 text-center text-sm text-neutral-500">No results</div>
+          <div 
+            className="px-6 py-10 text-center text-sm transition-colors duration-300"
+            style={{ color: isDark ? '#94a3b8' : '#6b7280' }}
+          >
+            No results
+          </div>
         )}
       </div>
     </div>

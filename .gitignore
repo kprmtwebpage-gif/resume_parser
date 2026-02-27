@@ -1,3 +1,6 @@
+# Secrets — NEVER commit
+.secrets
+
 # Environment Files - NEVER commit real credentials
 # Commit only the .env.*.example template files instead
 .env

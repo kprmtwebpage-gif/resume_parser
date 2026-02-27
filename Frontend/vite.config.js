@@ -19,6 +19,7 @@ export default defineConfig({
       '/stats': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/search': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/skills': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/locations': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/gdrive': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/chatbot': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/chat': { target: 'http://127.0.0.1:8000', changeOrigin: true },

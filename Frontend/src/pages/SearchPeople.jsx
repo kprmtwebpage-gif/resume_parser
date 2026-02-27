@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useTheme } from '../contexts/ThemeContext'
 
 import SidebarFilters from '../components/SidebarFilters.jsx'
 import SearchBar from '../components/SearchBar.jsx'
@@ -11,6 +12,7 @@ import { fetchCandidateById, fetchCandidates, updateCandidate } from '../service
 import { onCandidateSelected } from '../chatbot/candidateEvents.js'
 
 export default function SearchPeople() {
+  const { colors, isDark } = useTheme()
   const [filters, setFilters] = useState({
     name: '',
     location: '',
@@ -18,14 +20,17 @@ export default function SearchPeople() {
     keywords: '',
     experienceFrom: null,
     experienceTo: null,
-    experienceStatus: 'current_and_past',
   })
 
   const [validationError, setValidationError] = useState('')
   const [searchText, setSearchText] = useState('')
   const [allRows, setAllRows] = useState([])
+  const [allProfilesCache, setAllProfilesCache] = useState([]) // Cache all profiles for suggestions
+  const cachePopulatedRef = useRef(false) // Track if cache has been populated
+  const [totalProfilesCount, setTotalProfilesCount] = useState(0) // Absolute total count
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [uniqueProfiles, setUniqueProfiles] = useState(false)
 
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(25)
@@ -46,15 +51,68 @@ export default function SearchPeople() {
   const [editCandidate, setEditCandidate] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  // Client-side filtering based on search text
+  // Client-side filtering based on search text, unique profiles, job titles, names, and locations (OR logic)
   const filteredRows = useMemo(() => {
+    let rows = allRows
+
+    // Filter by job titles using OR logic (frontend filtering)
+    const jobTitleTags = filters.jobTitle ? filters.jobTitle.split(',').map(t => t.trim()).filter(Boolean) : []
+    if (jobTitleTags.length > 0) {
+      rows = rows.filter(candidate => {
+        const candidateJobTitle = (candidate.job_title || candidate.jobTitle || '').toLowerCase()
+        // OR logic: match if ANY selected job title is found in candidate's job title
+        return jobTitleTags.some(tag => 
+          candidateJobTitle.includes(tag.toLowerCase())
+        )
+      })
+    }
+
+    // Filter by names using OR logic (frontend filtering)
+    const nameTags = filters.name ? filters.name.split(',').map(n => n.trim()).filter(Boolean) : []
+    if (nameTags.length > 0) {
+      rows = rows.filter(candidate => {
+        // Build full name from various possible fields
+        let candidateName = ''
+        if (candidate.name && typeof candidate.name === 'string') {
+          candidateName = candidate.name.toLowerCase()
+        } else {
+          candidateName = [candidate.first_name, candidate.last_name].filter(Boolean).join(' ').toLowerCase()
+        }
+        // OR logic: match if ANY selected name is found in candidate's name
+        return nameTags.some(tag => 
+          candidateName.includes(tag.toLowerCase())
+        )
+      })
+    }
+
+    // Filter by locations using OR logic (frontend filtering)
+    const locationTags = filters.location ? filters.location.split(',').map(l => l.trim()).filter(Boolean) : []
+    if (locationTags.length > 0) {
+      rows = rows.filter(candidate => {
+        const candidateLocation = (candidate.location || candidate.address || '').toLowerCase()
+        // OR logic: match if ANY selected location is found in candidate's location
+        return locationTags.some(tag => 
+          candidateLocation.includes(tag.toLowerCase())
+        )
+      })
+    }
+
+    // Filter by unique profiles (no LinkedIn)
+    if (uniqueProfiles) {
+      rows = rows.filter(candidate => {
+        const hasLinkedIn = candidate.linkedin || candidate.linkedin_url
+        return !hasLinkedIn || (typeof hasLinkedIn === 'string' && hasLinkedIn.trim() === '')
+      })
+    }
+
+    // Filter by search text
     if (!searchText.trim()) {
-      return allRows
+      return rows
     }
 
     const query = searchText.toLowerCase().trim()
 
-    return allRows.filter(candidate => {
+    return rows.filter(candidate => {
       const fullName = [candidate.first_name, candidate.last_name].filter(Boolean).join(' ').toLowerCase()
       const email = (candidate.email || '').toLowerCase()
       const phone = (candidate.phone || '').toLowerCase()
@@ -67,7 +125,7 @@ export default function SearchPeople() {
         location.includes(query)
       )
     })
-  }, [allRows, searchText])
+  }, [allRows, searchText, uniqueProfiles, filters.jobTitle, filters.name, filters.location])
 
   // Paginated rows from filtered results
   const paginatedRows = useMemo(() => {
@@ -80,20 +138,34 @@ export default function SearchPeople() {
     setLoading(true)
     setError('')
     try {
+      // Don't send name, location to backend - we filter client-side with OR logic
+      // BUT: send jobTitle + experience to backend for DB-level range filtering
+      const hasExperience = filters.experienceFrom != null || filters.experienceTo != null
       const data = await fetchCandidates({ 
-        name: filters.name || undefined,
-        location: filters.location || undefined,
-        jobTitle: filters.jobTitle || undefined,
+        // Send jobTitle to backend when experience filters are active (backend needs both for join query)
+        jobTitle: (hasExperience && filters.jobTitle) ? filters.jobTitle : undefined,
         keywords: filters.keywords || undefined,
         experienceFrom: filters.experienceFrom ?? undefined,
         experienceTo: filters.experienceTo ?? undefined,
-        experienceStatus: filters.experienceStatus || undefined,
         limit: 1000, // Load more records for client-side filtering
         offset: 0 
       })
       const nextRows = Array.isArray(data) ? data : Array.isArray(data?.candidates) ? data.candidates : []
       setAllRows(nextRows)
       setSelectedIds(new Set())
+      
+      // Update profiles cache for suggestions (only when loading without heavy filters)
+      const hasBackendFilters = filters.keywords || filters.experienceFrom !== null || 
+                                 filters.experienceTo !== null
+      if (!hasBackendFilters) {
+        setAllProfilesCache(nextRows)
+        setTotalProfilesCount(nextRows.length)
+        cachePopulatedRef.current = true
+      } else if (!cachePopulatedRef.current) {
+        // If cache hasn't been populated yet, populate it with current results
+        setAllProfilesCache(nextRows)
+        cachePopulatedRef.current = true
+      }
     } catch (e) {
       console.error('Load candidates error:', e)
       // Don't show error during sync operations, just log it
@@ -104,7 +176,7 @@ export default function SearchPeople() {
     } finally {
       setLoading(false)
     }
-  }, [filters.name, filters.location, filters.jobTitle, filters.keywords, filters.experienceFrom, filters.experienceTo, filters.experienceStatus, syncing])
+  }, [filters.name, filters.location, filters.jobTitle, filters.keywords, filters.experienceFrom, filters.experienceTo, syncing])
 
   useEffect(() => {
     load()
@@ -179,6 +251,23 @@ export default function SearchPeople() {
   const onSave = () => {
     // No backend endpoint for saved searches yet; keep this UI-only.
     window.alert('Save search is not wired yet.')
+  }
+
+  const exportSelected = () => {
+    if (!selectedIds || selectedIds.size === 0) {
+      alert('Please select at least one profile to export.')
+      return
+    }
+
+    const ids = Array.from(selectedIds).join(',')
+    // Trigger download of ZIP from backend
+    const url = `/candidates/export?ids=${encodeURIComponent(ids)}`
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'resumes_export.zip'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
   }
 
   const onToggle = (id, checked) => {
@@ -303,17 +392,43 @@ export default function SearchPeople() {
         onSave={onSave}
         validationError={validationError}
         setValidationError={setValidationError}
+        uniqueProfiles={uniqueProfiles}
+        setUniqueProfiles={setUniqueProfiles}
+        totalCount={totalProfilesCount || allProfilesCache.length}
+        filteredCount={filteredRows.length}
+        allRows={allProfilesCache.length > 0 ? allProfilesCache : allRows}
       />
 
-      <main className="ml-64 h-screen overflow-y-auto overflow-x-hidden bg-neutral-50">
+      <main 
+        className="ml-64 h-screen overflow-y-auto overflow-x-hidden transition-colors duration-300"
+        style={{ backgroundColor: colors.card }}
+      >
           {error ? (
-            <div className="mx-6 mt-4 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md">{error}</div>
+            <div 
+              className="mx-6 mt-4 px-4 py-3 text-sm rounded-md"
+              style={{
+                color: isDark ? '#fca5a5' : '#b91c1c',
+                backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2',
+                border: `1px solid ${isDark ? 'rgba(239,68,68,0.3)' : '#fecaca'}`,
+              }}
+            >{error}</div>
           ) : null}
 
           {/* Top Search Section */}
-          <div className="bg-white border-b border-neutral-200 px-6 py-4">
+          <div 
+            className="border-b px-6 py-4 transition-colors duration-300"
+            style={{
+              backgroundColor: colors.background,
+              borderColor: colors.border
+            }}
+          >
             <div className="flex items-center gap-6">
-              <h1 className="text-lg font-semibold text-neutral-900 whitespace-nowrap">Search Profiles</h1>
+              <h1 
+                className="text-lg font-semibold whitespace-nowrap transition-colors duration-300"
+                style={{ color: colors.text }}
+              >
+                Search Profiles
+              </h1>
               <div className="w-full max-w-md">
                 <input
                   type="text"
@@ -323,18 +438,44 @@ export default function SearchPeople() {
                     setSearchText(e.target.value)
                     setPage(1) // Reset to first page on search
                   }}
-                  className="w-full px-4 py-2.5 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors duration-300"
+                  style={{
+                    backgroundColor: colors.background,
+                    border: `1px solid ${colors.border}`,
+                    color: colors.text
+                  }}
                 />
               </div>
               {syncMessage && (
                 <span className="text-xs text-green-600 whitespace-nowrap">{syncMessage}</span>
               )}
+              <div className="ml-auto flex items-center gap-3">
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-button px-4 py-2.5 text-sm font-semibold transition-all duration-200"
+                  style={{
+                    backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                    color: isDark ? '#e2e8f0' : '#374151',
+                    border: `1px solid ${isDark ? '#334155' : '#d1d5db'}`,
+                  }}
+                  onClick={exportSelected}
+                  title="Export selected resumes as ZIP"
+                >
+                  Export Selected
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Results Section */}
           <div className="px-6 py-4">
-            <div className="bg-white rounded-lg border border-neutral-200 overflow-hidden">
+            <div 
+              className="rounded-lg overflow-hidden transition-colors duration-300"
+              style={{
+                backgroundColor: colors.background,
+                border: `1px solid ${colors.border}`
+              }}
+            >
               <ResultsList 
             rows={paginatedRows} 
             selectedIds={selectedIds} 
@@ -345,7 +486,10 @@ export default function SearchPeople() {
             onEdit={openEditProfile}
           />
 
-          <div className="px-4 py-3 border-t border-neutral-200">
+          <div 
+            className="px-4 py-3 border-t transition-colors duration-300"
+            style={{ borderColor: colors.border }}
+          >
             <Pagination
               page={page}
               rowsPerPage={rowsPerPage}

@@ -2,13 +2,15 @@ import { XMarkIcon } from '@heroicons/react/24/outline'
 import { useEffect, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import mammoth from 'mammoth'
+import PdfScrollViewer from './PdfScrollViewer.jsx'
+import { useTheme } from '../contexts/ThemeContext'
 
 export default function ResumeViewer({ isOpen, onClose, resumeUrl, fileName }) {
   const [loadError, setLoadError] = useState(false)
   const [docxHtml, setDocxHtml] = useState(null)
   const [docxLoading, setDocxLoading] = useState(false)
   const [docxError, setDocxError] = useState(false)
-  const [pdfError, setPdfError] = useState(false)
+  const { isDark, colors } = useTheme()
 
   // Lock body scroll when modal opens
   useEffect(() => {
@@ -38,7 +40,6 @@ export default function ResumeViewer({ isOpen, onClose, resumeUrl, fileName }) {
     setLoadError(false)
     setDocxHtml(null)
     setDocxError(false)
-    setPdfError(false)
 
     return () => {
       // Restore scroll
@@ -197,20 +198,11 @@ export default function ResumeViewer({ isOpen, onClose, resumeUrl, fileName }) {
           ) : (
             <>
               {isPdf ? (
-                pdfError ? (
-                  <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-                    <p className="text-lg font-medium text-neutral-700 mb-2">Failed to load PDF</p>
-                    <p className="text-sm text-neutral-500">Could not display the file. Use the Download button.</p>
-                  </div>
-                ) : (
-                  <iframe
-                    src={resumeUrl}
-                    title="Resume PDF"
-                    className="w-full h-full"
-                    style={{ border: 'none', minHeight: '100%', display: 'block' }}
-                    onError={() => setPdfError(true)}
-                  />
-                )
+                <PdfScrollViewer
+                  url={resumeUrl}
+                  isDark={isDark}
+                  colors={colors}
+                />
               ) : (
                 <iframe
                   src={resumeUrl}

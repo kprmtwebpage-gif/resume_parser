@@ -269,7 +269,11 @@ async def get_candidates(
     q: Optional[str] = Query(None, description="General search query"),
     name: Optional[str] = Query(None, description="Search by name"),
     location: Optional[str] = Query(None, description="Search by location"),
-    jobTitle: Optional[str] = Query(None, description="Search by job title"),
+    jobTitle: Optional[str] = Query(None, description="Search by job title (comma-separated for multiple)"),
+    keywords: Optional[str] = Query(None, description="Search by skills/keywords (comma-separated)"),
+    experienceYears: Optional[float] = Query(None, description="Minimum years of experience (joint with jobTitle, legacy)"),
+    experienceFrom: Optional[float] = Query(None, description="Minimum years of experience (joint with jobTitle)"),
+    experienceTo: Optional[float] = Query(None, description="Maximum years of experience (joint with jobTitle)"),
     limit: int = Query(10, ge=1, le=1000, description="Number of results per page"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
@@ -279,8 +283,12 @@ async def get_candidates(
     - **q**: General search query (searches across all fields)
     - **name**: Search by candidate name
     - **location**: Search by location/address
-    - **jobTitle**: Search by job title
-    - **limit**: Number of results per page (1-100)
+    - **jobTitle**: Search by job title (comma-separated for multiple)
+    - **keywords**: Search by skills/keywords (comma-separated, matches tech_skills)
+    - **experienceFrom**: Minimum years of experience (used jointly with jobTitle)
+    - **experienceTo**: Maximum years of experience (used jointly with jobTitle)
+    - **experienceYears**: Legacy minimum years of experience param (joint with jobTitle)
+    - **limit**: Number of results per page (1-1000)
     - **offset**: Offset for pagination
     """
     with get_db() as conn:
@@ -309,13 +317,40 @@ async def get_candidates(
                     where_conditions.append("c.address ILIKE %s")
                     search_params.append(pattern)
             
-            # Job title search - search in job_title field only
+            # Job title search - supports multiple comma-separated titles
             if jobTitle:
-                job_words = [w.strip() for w in jobTitle.strip().split() if w.strip()]
-                for word in job_words:
-                    pattern = f"%{word}%"
-                    where_conditions.append("s.job_title ILIKE %s")
-                    search_params.append(pattern)
+                titles = [t.strip() for t in jobTitle.split(",") if t.strip()]
+                if len(titles) == 1:
+                    job_words = [w.strip() for w in titles[0].split() if w.strip()]
+                    for word in job_words:
+                        pattern = f"%{word}%"
+                        where_conditions.append("s.job_title ILIKE %s")
+                        search_params.append(pattern)
+                else:
+                    # Multiple titles: match any of them
+                    title_conditions = []
+                    for t in titles:
+                        title_conditions.append("s.job_title ILIKE %s")
+                        search_params.append(f"%{t}%")
+                    where_conditions.append(f"({' OR '.join(title_conditions)})")
+            
+            # Experience years filter (joint condition with jobTitle)
+            # Support both legacy experienceYears and new experienceFrom/experienceTo
+            exp_min = experienceFrom if experienceFrom is not None else experienceYears
+            exp_max = experienceTo
+            if exp_min is not None and jobTitle:
+                where_conditions.append("s.years_of_experience >= %s")
+                search_params.append(exp_min)
+            if exp_max is not None and jobTitle:
+                where_conditions.append("s.years_of_experience <= %s")
+                search_params.append(exp_max)
+            
+            # Skills / keywords search - matches against tech_skills column
+            if keywords:
+                kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+                for kw in kw_list:
+                    where_conditions.append("s.tech_skills ILIKE %s")
+                    search_params.append(f"%{kw}%")
             
             # General search (fallback to old behavior if using q parameter)
             if q and not (name or location or jobTitle):
@@ -501,6 +536,109 @@ async def get_stats():
                 "with_phone": with_phone,
                 "top_job_titles": top_jobs
             }
+
+
+# ------------------------------------------------------------------
+# Job-titles & skills lookup endpoints
+# ------------------------------------------------------------------
+
+@app.get("/job-titles/all")
+async def get_all_job_titles():
+    """Return every distinct job title from the job_titles reference table.
+
+    Only returns *real* job titles that actually exist in the
+    candidate_skills_profile table so the dropdown never suggests
+    titles no candidate currently holds.  Titles are de-duplicated
+    case-insensitively (the most common capitalisation is kept).
+    Obvious parser-noise entries are filtered out.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            # Pull titles that candidates actually have
+            cursor.execute(f"""
+                SELECT job_title, COUNT(*) AS cnt
+                FROM {SKILLS_TABLE}
+                WHERE job_title IS NOT NULL AND job_title != ''
+                GROUP BY job_title
+                ORDER BY cnt DESC
+            """)
+            raw = cursor.fetchall()
+
+            # --- noise filter -------------------------------------------------
+            import re as _re
+            _NOISE = _re.compile(
+                r"(^.{0,3}$"                         # too short
+                r"|^.{80,}$"                          # too long
+                r"|[(){}\[\]]"                        # contains brackets
+                r"|\bsuch as\b|\bwithin\b|\bframework like\b"
+                r"|\bexperienced? with\b"
+                r"|\band backend\b|\band frontend\b"
+                r"|\bservices\)"                       # fragment
+                r")",
+                _re.IGNORECASE,
+            )
+
+            # Case-insensitive de-duplication: keep the variant with highest count
+            seen: dict[str, str] = {}  # lower -> best-variant
+            for row in raw:
+                title = row["job_title"].strip()
+                if _NOISE.search(title):
+                    continue
+                key = title.lower()
+                if key not in seen:
+                    seen[key] = title
+
+            titles = sorted(seen.values(), key=str.lower)
+            return {"results": titles, "count": len(titles)}
+
+
+@app.get("/skills/all")
+async def get_all_skills():
+    """Return every distinct skill found across all candidates.
+
+    Skills are stored as comma-separated values in the tech_skills column
+    of the skills table; this endpoint splits, deduplicates (case-insensitively)
+    and sorts them.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(f"""
+                SELECT DISTINCT tech_skills
+                FROM {SKILLS_TABLE}
+                WHERE tech_skills IS NOT NULL AND tech_skills != ''
+            """)
+            # Case-insensitive dedup: keep the most-common capitalisation
+            from collections import Counter as _Counter
+            _counts: _Counter = _Counter()
+            _best: dict[str, str] = {}   # lower -> best variant
+            for row in cursor.fetchall():
+                raw = row["tech_skills"]
+                if raw:
+                    for s in raw.split(","):
+                        s = s.strip()
+                        if not s or len(s) < 2:
+                            continue
+                        key = s.lower()
+                        _counts[key] += 1
+                        if key not in _best or _counts[key] > _counts.get(key, 0):
+                            _best[key] = s
+            sorted_skills = sorted(_best.values(), key=str.lower)
+            return {"results": sorted_skills, "count": len(sorted_skills)}
+
+
+@app.get("/locations/all")
+async def get_all_locations():
+    """Return every distinct location/address from candidate profiles."""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(f"""
+                SELECT DISTINCT address
+                FROM {CANDIDATES_TABLE}
+                WHERE address IS NOT NULL AND address != ''
+                ORDER BY address
+            """)
+            locations = [row["address"] for row in cursor.fetchall()]
+            return {"results": locations, "count": len(locations)}
 
 
 @app.get("/job-titles/search")

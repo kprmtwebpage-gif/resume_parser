@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  XMarkIcon,
-} from '@heroicons/react/24/outline'
+import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import mammoth from 'mammoth'
 
 import ProfileTabs from './ProfileTabs.jsx'
+import PdfScrollViewer from './PdfScrollViewer.jsx'
 import { notifyModalOpened, notifyModalClosed, onChatbotOpened } from '../chatbot/modalEvents.js'
-import { apiUrl } from '../config'
+import { useTheme } from '../contexts/ThemeContext'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -57,13 +54,17 @@ export default function ProfileModal({
   const [docxLoading, setDocxLoading] = useState(false)
   const [docxError, setDocxError] = useState(false)
   const [pdfError, setPdfError] = useState(false)
+  
+  // Use global theme context
+  const { isDark, colors } = useTheme()
 
   // Construct resume URL similar to ProfileCard
   const hasResume = candidate?.resume_filename
-  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume`) : null
-  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume?inline=true`) : null
+  const baseResumeUrl = hasResume ? `/candidates/${candidate.id}/resume` : null
+  const viewResumeUrl = hasResume ? `/candidates/${candidate.id}/resume?inline=true` : null
   const resumeIsDocx = hasResume && (candidate.resume_filename.toLowerCase().endsWith('.docx') || candidate.resume_filename.toLowerCase().endsWith('.doc'))
   const resumeIsPdf = hasResume && candidate.resume_filename.toLowerCase().endsWith('.pdf')
+  const resumeIsImage = hasResume && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(candidate.resume_filename)
 
   useEffect(() => setShow(open), [open])
 
@@ -75,6 +76,8 @@ export default function ProfileModal({
       setPdfError(false)
     }
   }, [open, candidate])
+
+
 
   // Convert DOCX/DOC to HTML via mammoth when modal opens
   useEffect(() => {
@@ -144,17 +147,24 @@ export default function ProfileModal({
 
       {/* Right-side Drawer - 82vw width to match SignalHire size */}
       <div
-        className="fixed top-0 right-0 h-screen bg-white shadow-2xl z-50"
+        className="fixed top-0 right-0 h-screen shadow-2xl z-50 transition-all duration-300"
         style={{
           width: '82vw',
           height: '100vh',
           transform: show ? 'translateX(0)' : 'translateX(100%)',
-          transition: 'transform 300ms ease-in-out',
+          backgroundColor: colors.background,
         }}
       >
         <div className="flex h-full flex-col">
           {/* Header */}
-          <div className="bg-white flex-shrink-0 border-b border-neutral-200" style={{ width: '100%' }}>
+          <div 
+            className="flex-shrink-0 transition-all duration-300" 
+            style={{ 
+              width: '100%',
+              backgroundColor: colors.background,
+              borderBottom: `1px solid ${colors.border}`
+            }}
+          >
             <div 
               className="flex items-center justify-between"
               style={{
@@ -164,33 +174,62 @@ export default function ProfileModal({
               <div className="flex items-center gap-4">
                 <button
                   type="button"
-                  className="rounded-full p-2 text-neutral-500 hover:bg-neutral-100 transition-all"
+                  className="rounded-full p-2 transition-all duration-300"
+                  style={{
+                    color: isDark ? '#94a3b8' : '#64748b',
+                    backgroundColor: isDark ? 'transparent' : 'transparent'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f1f5f9'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   onClick={onClose}
                   title="Close"
                 >
                   <XMarkIcon className="h-5 w-5" />
                 </button>
-                <div className="text-lg font-medium text-neutral-900">Profile Details</div>
+                <div 
+                  className="text-lg font-medium transition-colors duration-300"
+                  style={{ color: colors.text }}
+                >
+                  Profile Details
+                </div>
               </div>
-
-              <div className="flex items-center gap-3">
+              {/* Navigation arrows */}
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="btn-secondary"
                   onClick={onPrev}
                   disabled={!hasPrev}
+                  className="flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300"
+                  style={{
+                    color: hasPrev ? colors.text : (isDark ? '#475569' : '#cbd5e1'),
+                    cursor: hasPrev ? 'pointer' : 'not-allowed',
+                    opacity: hasPrev ? 1 : 0.5
+                  }}
+                  onMouseEnter={(e) => {
+                    if (hasPrev) e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f1f5f9'
+                  }}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   title="Previous"
                 >
-                  <ArrowLeftIcon className="h-5 w-5" />
+                  <ChevronLeftIcon className="h-5 w-5" />
                 </button>
                 <button
                   type="button"
-                  className="btn-secondary"
                   onClick={onNext}
                   disabled={!hasNext}
+                  className="flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300"
+                  style={{
+                    color: hasNext ? colors.text : (isDark ? '#475569' : '#cbd5e1'),
+                    cursor: hasNext ? 'pointer' : 'not-allowed',
+                    opacity: hasNext ? 1 : 0.5
+                  }}
+                  onMouseEnter={(e) => {
+                    if (hasNext) e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f1f5f9'
+                  }}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   title="Next"
                 >
-                  <ArrowRightIcon className="h-5 w-5" />
+                  <ChevronRightIcon className="h-5 w-5" />
                 </button>
               </div>
             </div>
@@ -269,18 +308,6 @@ export default function ProfileModal({
                                 </div>
                               )}
                             </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-3">
-                            <a
-                              className="btn-primary"
-                              href={candidate.resume_filename ? apiUrl(`/candidates/${candidate.id}/resume`) : undefined}
-                              onClick={(e) => {
-                                if (!candidate.resume_filename) e.preventDefault()
-                              }}
-                            >
-                              Download Resume
-                            </a>
                           </div>
                         </div>
 
@@ -410,76 +437,129 @@ export default function ProfileModal({
                       </div>
 
                       {/* RIGHT SIDE - Resume Viewer */}
-                      <div className="w-full lg:w-[58%] border-l border-neutral-200 pl-6 overflow-y-auto" style={{ maxHeight: '100%' }}>
-                        <div className="h-full flex flex-col">
-                          <div className="flex-shrink-0 mb-4">
-                            <h3 className="text-lg font-semibold text-neutral-900">
+                      <div 
+                        className="w-full lg:w-[58%] pl-6 transition-all duration-300" 
+                        style={{ 
+                          height: '80vh', 
+                          display: 'flex', 
+                          flexDirection: 'column',
+                          borderLeft: `1px solid ${colors.border}`
+                        }}
+                      >
+                        {/* Resume Preview Header with Export Button */}
+                        <div className="flex-shrink-0 mb-4 flex items-center justify-between">
+                          <div>
+                            <h3 
+                              className="text-lg font-semibold transition-colors duration-300"
+                              style={{ color: colors.text }}
+                            >
                               Resume Preview
                             </h3>
                             {candidate.resume_filename && (
-                              <p className="text-sm text-neutral-600 mt-1 truncate">
+                              <p 
+                                className="text-sm mt-1 truncate transition-colors duration-300"
+                                style={{ color: isDark ? '#94a3b8' : '#64748b' }}
+                              >
                                 {candidate.resume_filename}
                               </p>
                             )}
                           </div>
-                          <div className="flex-1 bg-neutral-50 rounded-lg overflow-hidden border border-neutral-200" style={{ minHeight: '500px' }}>
+                          {/* Export Button in Header */}
+                          {hasResume && (
+                            <a
+                              href={`/candidates/${candidate.id}/resume`}
+                              download
+                              className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300"
+                              style={{
+                                backgroundColor: '#2563eb',
+                                color: '#ffffff',
+                              }}
+                              onMouseEnter={(e) => e.target.style.backgroundColor = '#1d4ed8'}
+                              onMouseLeave={(e) => e.target.style.backgroundColor = '#2563eb'}
+                              title="Export Resume"
+                            >
+                              Export
+                            </a>
+                          )}
+                        </div>
+                        <div 
+                          className="relative flex-1 rounded-lg overflow-hidden shadow-sm transition-all duration-300" 
+                          style={{ 
+                            minHeight: 0,
+                            backgroundColor: colors.background,
+                            border: `1px solid ${colors.border}`,
+                          }}
+                        >
                             {!hasResume ? (
                               <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-                                <div className="text-slate-400 mb-4">
+                                <div className="mb-4" style={{ color: '#94a3b8' }}>
                                   <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                   </svg>
                                 </div>
-                                <p className="text-lg font-medium text-slate-700">No resume available</p>
-                                <p className="text-sm text-slate-500 mt-2">This candidate hasn't uploaded a resume yet</p>
+                                <p className="text-lg font-medium transition-colors duration-300" style={{ color: colors.text }}>No resume available</p>
+                                <p className="text-sm mt-2 transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>This candidate hasn't uploaded a resume yet</p>
                               </div>
                             ) : (resumeLoadError || resumeIsDocx) ? (
                               docxLoading ? (
                                 <div className="flex items-center justify-center h-full">
                                   <div className="flex flex-col items-center gap-3">
                                     <div className="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" />
-                                    <p className="text-sm text-neutral-500">Rendering document...</p>
+                                    <p className="text-sm transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Rendering document...</p>
                                   </div>
                                 </div>
                               ) : (docxError || resumeLoadError) ? (
                                 <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-                                  <div className="text-slate-400 mb-4">
+                                  <div className="mb-4" style={{ color: '#94a3b8' }}>
                                     <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                     </svg>
                                   </div>
-                                  <p className="text-lg font-medium text-slate-700 mb-2">Failed to load document</p>
-                                  <p className="text-sm text-slate-500">Use the Download Resume button above to open this file.</p>
+                                  <p className="text-lg font-medium mb-2 transition-colors duration-300" style={{ color: colors.text }}>Failed to load document</p>
+                                  <p className="text-sm transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Use the Export button to download this file.</p>
                                 </div>
                               ) : docxHtml ? (
                                 <div
-                                  className="p-8 max-w-4xl mx-auto w-full overflow-y-auto prose prose-neutral"
-                                  style={{ fontFamily: 'Georgia, serif', fontSize: '14px', lineHeight: '1.7', color: '#1a1a1a', height: '100%' }}
+                                  className="p-8 max-w-full w-full h-full overflow-y-auto prose prose-neutral"
+                                  style={{ 
+                                    fontFamily: 'Georgia, serif', 
+                                    fontSize: '14px', 
+                                    lineHeight: '1.7', 
+                                    color: colors.text,
+                                    transition: 'color 0.3s ease'
+                                  }}
                                   dangerouslySetInnerHTML={{ __html: docxHtml }}
                                 />
                               ) : null
-                            ) : resumeIsPdf ? (
-                              pdfError ? (
-                                <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-                                  <p className="text-lg font-medium text-slate-700 mb-2">Failed to load PDF</p>
-                                  <p className="text-sm text-slate-500">Could not display the file. Try the Download Resume button.</p>
-                                </div>
-                              ) : viewResumeUrl ? (
-                                <iframe
+                            ) : resumeIsImage ? (
+                              <div 
+                                className="w-full h-full overflow-auto flex items-start justify-center p-6 transition-all duration-300" 
+                                style={{ 
+                                  backgroundColor: colors.card,
+                                }}
+                              >
+                                <img
                                   src={viewResumeUrl}
-                                  title="Resume PDF"
-                                  className="w-full h-full"
-                                  style={{ border: 'none', minHeight: '100%', display: 'block' }}
-                                  onError={() => setPdfError(true)}
+                                  alt="Resume"
+                                  className="max-w-full h-auto object-contain"
+                                  style={{ maxHeight: '100%' }}
+                                  onError={() => setResumeLoadError(true)}
+                                />
+                              </div>
+                            ) : resumeIsPdf ? (
+                              viewResumeUrl ? (
+                                <PdfScrollViewer
+                                  url={viewResumeUrl}
+                                  isDark={isDark}
+                                  colors={colors}
                                 />
                               ) : null
                             ) : (
                               <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-                                <p className="text-lg font-medium text-slate-700 mb-2">Preview not available</p>
-                                <p className="text-sm text-slate-500">Use the Download Resume button above to open this file.</p>
+                                <p className="text-lg font-medium mb-2 transition-colors duration-300" style={{ color: colors.text }}>Preview not available</p>
+                                <p className="text-sm transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Use the Export button to download this file.</p>
                               </div>
                             )}
-                          </div>
                         </div>
                       </div>
                     </div>

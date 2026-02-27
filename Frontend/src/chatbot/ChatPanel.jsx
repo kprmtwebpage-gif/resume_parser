@@ -111,17 +111,7 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
       // Otherwise try to load from database
       const hasHistory = await loadChatHistory(sid);
 
-      if (!hasHistory) {
-        const greeting = getGreetingMessage();
-        const greetingMsg = {
-          type: 'bot',
-          text: greeting,
-          timestamp: new Date(),
-        };
-        setMessages([greetingMsg]);
-        await saveMessageToDb(greetingMsg);
-      }
-
+      // Skip welcome message - just load job titles directly
       loadAvailableJobTitles();
     };
 
@@ -156,7 +146,8 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setAvailableJobTitles(parsed);
-          // Show in chat if not already there (don't also set suggestions — the in-chat grid is sufficient)
+          setSuggestions(parsed);
+          // Show in chat if not already there
           setMessages(prev => {
             const alreadyShown = prev.some(m => m.type === 'jobtitles');
             if (alreadyShown) return prev;
@@ -175,9 +166,10 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
       if (response.data && Array.isArray(response.data) && response.data.length > 0) {
         const jobTitles = response.data;
         setAvailableJobTitles(jobTitles);
+        setSuggestions(jobTitles);
         localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(jobTitles));
 
-        // Show job titles as a clickable list inside the chat (don't also set suggestions — avoids duplicate display)
+        // Show job titles as a clickable list inside the chat
         setMessages(prev => {
           const alreadyShown = prev.some(m => m.type === 'jobtitles');
           if (alreadyShown) return prev;
@@ -242,7 +234,8 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
     }
 
     if (availableJobTitles.length > 0) {
-      // Re-show job titles list in the fresh chat (don't also set suggestions — avoids duplicate display)
+      setSuggestions(availableJobTitles);
+      // Re-show job titles list in the fresh chat
       setMessages(prev => [...prev, { type: 'jobtitles', titles: availableJobTitles, timestamp: new Date() }]);
     } else {
       setSuggestions([]);
@@ -465,7 +458,6 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
           if (msg.type === 'jobtitles') {
             return (
               <div key={idx} className="chatbot-jobtitles-msg">
-                <div className="chatbot-jobtitles-label">Available Job Roles — click to search candidates:</div>
                 <div className="chatbot-jobtitles-grid">
                   {(msg.titles || []).map((title, ti) => (
                     <button
@@ -509,25 +501,6 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
             />
           );
         })}
-
-        {/* Suggestions chips (shown only when no candidates in view) */}
-        {suggestions.length > 0 && !showCandidates && (
-          <div className="chatbot-suggestions">
-            {suggestions.map((suggestion, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className="chatbot-suggestion-chip"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleSuggestionClick(suggestion, e);
-                }}
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        )}
 
         {loading && <div className="chatbot-typing">Searching...</div>}
 
