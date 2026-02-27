@@ -17,6 +17,10 @@ RUN npm ci
 # Copy source and build for production
 COPY Frontend/ ./
 
+# Remove any local .env files that got copied from the host (they override the
+# Docker-set values — .env.local takes priority over .env in Vite)
+RUN rm -f .env .env.local .env.production .env.production.local .env.development .env.development.local
+
 # Write env vars to .env file so Vite picks them up at build time (for import.meta.env)
 # And set actual ENV vars for vite.config.js which reads process.env
 RUN echo "VITE_API_BASE_URL=${BASE_PATH}" > .env && \

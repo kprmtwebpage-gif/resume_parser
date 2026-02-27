@@ -1,3 +1,0 @@
-('Harsha', 'K')
-('Akhil', 'D')
-('John', 'Doe')

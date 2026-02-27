@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   EnvelopeIcon,
   MapPinIcon,
@@ -39,7 +40,9 @@ export default function ProfileCard({ row, downloaded, onOpen, onDownload, onEdi
   const [isDownloaded, setIsDownloaded] = useState(false)
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, openUp: false })
   const dropdownRef = useRef(null)
+  const actionsBtnRef = useRef(null)
 
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
   const location = row.location || row.address || '—'
@@ -48,20 +51,23 @@ export default function ProfileCard({ row, downloaded, onOpen, onDownload, onEdi
   const viewResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume?inline=true`) : null
   const downloadResumeUrl = hasResume ? baseResumeUrl : null
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside or scrolling
   useEffect(() => {
+    if (!isDropdownOpen) return
+
     const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target) &&
+          actionsBtnRef.current && !actionsBtnRef.current.contains(event.target)) {
         setIsDropdownOpen(false)
       }
     }
-    
-    if (isDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-    
+    const handleScroll = () => setIsDropdownOpen(false)
+
+    document.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('scroll', handleScroll, true)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('scroll', handleScroll, true)
     }
   }, [isDropdownOpen])
 
@@ -260,92 +266,109 @@ Availability: ${row.availability || 'N/A'}`
         </div>
 
         {/* Actions Dropdown */}
-        <div className="flex justify-end px-4" ref={dropdownRef}>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                setIsDropdownOpen(!isDropdownOpen)
-              }}
-              className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
-            >
-              Actions
-              <span className="text-neutral-400">⋮</span>
-            </button>
+        <div className="flex justify-end px-4">
+          <button
+            ref={actionsBtnRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (!isDropdownOpen) {
+                const rect = e.currentTarget.getBoundingClientRect()
+                const dropdownHeight = 180 // approx height of 4 menu items
+                const spaceBelow = window.innerHeight - rect.bottom
+                const openUp = spaceBelow < dropdownHeight
+                setDropdownPos({
+                  top: openUp ? rect.top : rect.bottom + 4,
+                  left: rect.right - 176, // 176 = w-44 = 11rem
+                  openUp
+                })
+              }
+              setIsDropdownOpen(!isDropdownOpen)
+            }}
+            className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
+          >
+            Actions
+            <span className="text-neutral-400">⋮</span>
+          </button>
 
-            {/* Dropdown Menu */}
-            {isDropdownOpen && (
-              <div 
-                className="absolute right-0 top-full mt-1 w-44 rounded-md shadow-lg py-1 z-50 transition-colors duration-300"
-                style={{ 
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-                  backgroundColor: colors.background,
-                  border: `1px solid ${colors.border}`
-                }}
+          {/* Dropdown Menu — rendered via portal to escape overflow clipping */}
+          {isDropdownOpen && createPortal(
+            <div
+              ref={dropdownRef}
+              className="w-44 rounded-md shadow-lg py-1 transition-colors duration-300"
+              style={{
+                position: 'fixed',
+                top: dropdownPos.openUp ? undefined : `${dropdownPos.top}px`,
+                bottom: dropdownPos.openUp ? `${window.innerHeight - dropdownPos.top + 4}px` : undefined,
+                left: `${Math.max(8, dropdownPos.left)}px`,
+                zIndex: 99990,
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                backgroundColor: colors.background,
+                border: `1px solid ${colors.border}`
+              }}
+            >
+              <button
+                type="button"
+                onClick={handleEditClick}
+                className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                style={{ color: colors.text }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
-                <button
-                  type="button"
-                  onClick={handleEditClick}
-                  className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
-                  style={{ color: colors.text }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={handleGenerateClick}
-                  className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
-                  style={{ color: colors.text }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  Send Mail
-                </button>
-                {hasResume ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleViewResume}
-                      className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
-                      style={{ color: colors.text }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      View Resume
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownloadResume}
-                      className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
-                      style={{ color: colors.text }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      Download Resume
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div 
-                      className="px-4 py-2 text-sm cursor-not-allowed"
-                      style={{ color: isDark ? '#64748b' : '#cbd5e1' }}
-                    >
-                      View Resume
-                    </div>
-                    <div 
-                      className="px-4 py-2 text-sm cursor-not-allowed"
-                      style={{ color: isDark ? '#64748b' : '#cbd5e1' }}
-                    >
-                      Download Resume
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateClick}
+                className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                style={{ color: colors.text }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                Send Mail
+              </button>
+              {hasResume ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleViewResume}
+                    className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                    style={{ color: colors.text }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    View Resume
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadResume}
+                    className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                    style={{ color: colors.text }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    Download Resume
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div
+                    className="px-4 py-2 text-sm cursor-not-allowed"
+                    style={{ color: isDark ? '#64748b' : '#cbd5e1' }}
+                  >
+                    View Resume
+                  </div>
+                  <div
+                    className="px-4 py-2 text-sm cursor-not-allowed"
+                    style={{ color: isDark ? '#64748b' : '#cbd5e1' }}
+                  >
+                    Download Resume
+                  </div>
+                </>
+              )}
+            </div>,
+            document.body
+          )}
         </div>
       </div>
 

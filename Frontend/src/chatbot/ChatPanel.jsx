@@ -11,6 +11,21 @@ const API_BASE = import.meta.env.VITE_CHATBOT_API_BASE || '';
 const ROLES_CACHE_KEY = 'chatbot_roles_cache';
 const SESSION_KEY = 'chatbot_session_id';
 const MESSAGES_CACHE_KEY = 'chatbot_messages_cache';
+const CACHE_VERSION_KEY = 'chatbot_cache_version';
+const CURRENT_CACHE_VERSION = '2';  // bump this to invalidate all chatbot caches
+
+// Clear stale caches from previous builds
+(function clearStaleCaches() {
+  try {
+    if (localStorage.getItem(CACHE_VERSION_KEY) !== CURRENT_CACHE_VERSION) {
+      localStorage.removeItem(ROLES_CACHE_KEY);
+      localStorage.removeItem(MESSAGES_CACHE_KEY);
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem('chatbot_conversations');
+      localStorage.setItem(CACHE_VERSION_KEY, CURRENT_CACHE_VERSION);
+    }
+  } catch (_) { /* ignore */ }
+})();
 
 export default function ChatPanel({ onClose, onMinimize, isVisible }) {
   const { isDark } = useTheme();
@@ -142,19 +157,36 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
     if (rolesLoadedRef.current) return;
     rolesLoadedRef.current = true;
 
+    const applyRoles = (titles) => {
+      setAvailableJobTitles(titles);
+      setSuggestions(titles);
+      setMessages(prev => {
+        const alreadyShown = prev.some(m => m.type === 'jobtitles');
+        if (alreadyShown) return prev;
+        return [...prev, { type: 'jobtitles', titles, timestamp: new Date() }];
+      });
+    };
+
+    try {
+      // Always try fetching fresh roles first
+      const response = await axios.get(`${API_BASE}/chatbot/roles`);
+      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+        const jobTitles = response.data;
+        localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(jobTitles));
+        applyRoles(jobTitles);
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to load job roles from API, trying cache:', error);
+    }
+
+    // Fallback: use cached roles if API call failed
     const cached = localStorage.getItem(ROLES_CACHE_KEY);
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setAvailableJobTitles(parsed);
-          setSuggestions(parsed);
-          // Show in chat if not already there
-          setMessages(prev => {
-            const alreadyShown = prev.some(m => m.type === 'jobtitles');
-            if (alreadyShown) return prev;
-            return [...prev, { type: 'jobtitles', titles: parsed, timestamp: new Date() }];
-          });
+          applyRoles(parsed);
           return;
         }
       } catch (error) {
@@ -162,30 +194,8 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
       }
     }
 
-    try {
-      // Fetch ALL job roles from chatbot/roles endpoint
-      const response = await axios.get(`${API_BASE}/chatbot/roles`);
-      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-        const jobTitles = response.data;
-        setAvailableJobTitles(jobTitles);
-        setSuggestions(jobTitles);
-        localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(jobTitles));
-
-        // Show job titles as a clickable list inside the chat
-        setMessages(prev => {
-          const alreadyShown = prev.some(m => m.type === 'jobtitles');
-          if (alreadyShown) return prev;
-          return [...prev, { type: 'jobtitles', titles: jobTitles, timestamp: new Date() }];
-        });
-      } else {
-        setAvailableJobTitles([]);
-        setSuggestions([]);
-      }
-    } catch (error) {
-      console.error('Failed to load job roles:', error);
-      setAvailableJobTitles([]);
-      setSuggestions([]);
-    }
+    setAvailableJobTitles([]);
+    setSuggestions([]);
   };
 
   const initializeChat = async () => {

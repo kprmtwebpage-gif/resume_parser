@@ -432,7 +432,7 @@ export default function SearchPeople() {
           {/* Results Section */}
           <div className="px-6 py-4">
             <div 
-              className="rounded-lg overflow-hidden transition-colors duration-300"
+              className="rounded-lg transition-colors duration-300"
               style={{
                 backgroundColor: colors.background,
                 border: `1px solid ${colors.border}`

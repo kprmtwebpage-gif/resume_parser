@@ -468,7 +468,7 @@ export default function ProfileModal({
                           {/* Export Button in Header */}
                           {hasResume && (
                             <a
-                              href={`/candidates/${candidate.id}/resume`}
+                              href={apiUrl(`/candidates/${candidate.id}/resume`)}
                               download
                               className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300"
                               style={{

@@ -99,6 +99,20 @@ _tmp*.txt
 # Test outputs
 Backend/_*.txt
 
+# Debug/temp scripts - do not commit
+Backend/debug_*.py
+Backend/check_*.py
+Backend/test_*.py
+Backend/verify_*.py
+Backend/compare_*.py
+Backend/fix_*_*.py
+Backend/reparse_*.py
+Backend/trace_*.py
+Backend/find_*.py
+Backend/*.csv
+Backend/*.xlsx
+Frontend/UI_Search/
+
 # SSL Certificates - NEVER commit these
 certbot/
 nginx/nginx-temp.conf
