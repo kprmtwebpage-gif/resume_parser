@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ChatPanel from './ChatPanel';
 import { onModalOpened, notifyChatbotOpened, notifyChatbotClosed } from './modalEvents';
+import { useTheme } from '../contexts/ThemeContext';
 import './chatbot.css';
 
 export default function ChatLauncher() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  const { isDark } = useTheme();
 
   // Refs to always read the latest state inside event callbacks (prevents stale closure)
   const isOpenRef = useRef(isOpen);
@@ -90,7 +92,7 @@ export default function ChatLauncher() {
         }}
       >
         <div
-          className="chatbot-panel-wrapper"
+          className={`chatbot-panel-wrapper${isDark ? ' chatbot-dark' : ''}`}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();

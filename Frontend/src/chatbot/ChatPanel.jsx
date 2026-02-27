@@ -3,6 +3,7 @@ import MessageBubble from './MessageBubble';
 import ChatHistory from './ChatHistory';
 import { selectCandidate } from './candidateEvents';
 import { parseCandidateResponse, getGreetingMessage } from './rules';
+import { useTheme } from '../contexts/ThemeContext';
 import axios from 'axios';
 import companyLogo from '../assets/company-logo.png';
 
@@ -12,6 +13,7 @@ const SESSION_KEY = 'chatbot_session_id';
 const MESSAGES_CACHE_KEY = 'chatbot_messages_cache';
 
 export default function ChatPanel({ onClose, onMinimize, isVisible }) {
+  const { isDark } = useTheme();
   // Initialize messages from localStorage to persist across visibility changes
   const [messages, setMessages] = useState(() => {
     const saved = localStorage.getItem(MESSAGES_CACHE_KEY);
@@ -401,7 +403,7 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
   }
 
   return (
-    <div className="chatbot-panel">
+    <div className={`chatbot-panel${isDark ? ' chatbot-dark' : ''}`}>
       {/* Header */}
       <div className="chatbot-header">
         <div className="chatbot-header-left">

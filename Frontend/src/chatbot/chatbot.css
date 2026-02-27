@@ -647,3 +647,232 @@
   border-color: #1F4FD8;
 }
 
+
+/* ====================================================================
+   DARK MODE  –  activated when .chatbot-dark is on the wrapper or panel
+   ==================================================================== */
+
+/* Panel wrapper background */
+.chatbot-dark.chatbot-panel-wrapper {
+  background-color: #0f172a;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Panel itself */
+.chatbot-dark.chatbot-panel,
+.chatbot-dark .chatbot-panel {
+  background-color: transparent;
+}
+
+/* Background image overlay — darken in dark mode */
+.chatbot-dark.chatbot-panel::before,
+.chatbot-dark .chatbot-panel::before {
+  filter: brightness(0.25) saturate(0.6);
+}
+
+/* Header */
+.chatbot-dark .chatbot-header,
+.chatbot-dark.chatbot-panel .chatbot-header {
+  background: #1e293b;
+  border-bottom-color: #334155;
+}
+
+.chatbot-dark .chatbot-company-title,
+.chatbot-dark.chatbot-panel .chatbot-company-title {
+  color: #e2e8f0;
+}
+
+.chatbot-dark .chatbot-online,
+.chatbot-dark.chatbot-panel .chatbot-online {
+  color: #94a3b8;
+}
+
+.chatbot-dark .chatbot-history-icon:hover,
+.chatbot-dark .chatbot-minimize-btn:hover,
+.chatbot-dark .chatbot-close-btn:hover {
+  background: #334155;
+}
+
+.chatbot-dark .chatbot-history-icon,
+.chatbot-dark .chatbot-minimize-btn,
+.chatbot-dark .chatbot-close-btn {
+  color: #94a3b8;
+}
+
+/* Messages area scrollbar */
+.chatbot-dark .chatbot-messages::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+.chatbot-dark .chatbot-messages::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Bot bubble */
+.chatbot-dark .chatbot-bubble.bot-bubble {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+/* User bubble stays branded */
+.chatbot-dark .chatbot-bubble.user-bubble {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+/* Timestamp */
+.chatbot-dark .chatbot-timestamp {
+  color: #64748b;
+}
+
+/* Typing indicator */
+.chatbot-dark .chatbot-typing {
+  color: #64748b;
+}
+
+/* Suggestions */
+.chatbot-dark .chatbot-suggestion-chip {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+}
+
+.chatbot-dark .chatbot-suggestion-chip:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #3b82f6;
+}
+
+/* Candidates list */
+.chatbot-dark .chatbot-candidate-item {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.chatbot-dark .chatbot-candidate-item:hover {
+  background: #334155;
+  border-color: #3b82f6;
+}
+
+.chatbot-dark .chatbot-candidate-name {
+  color: #e2e8f0;
+}
+
+.chatbot-dark .chatbot-candidate-role {
+  color: #94a3b8;
+}
+
+.chatbot-dark .chatbot-candidate-location {
+  color: #64748b;
+}
+
+/* Input area */
+.chatbot-dark .chatbot-input-area {
+  background: #1e293b;
+  border-top-color: #334155;
+}
+
+.chatbot-dark .chatbot-input {
+  background: #0f172a;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+.chatbot-dark .chatbot-input::placeholder {
+  color: #64748b;
+}
+
+.chatbot-dark .chatbot-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.chatbot-dark .chatbot-input:disabled {
+  background: #1e293b;
+  color: #475569;
+}
+
+.chatbot-dark .chatbot-send-btn {
+  background: #3b82f6;
+}
+
+.chatbot-dark .chatbot-send-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+/* Footer */
+.chatbot-dark .chatbot-footer {
+  background: #1e293b;
+  border-top-color: #334155;
+}
+
+.chatbot-dark .chatbot-end-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.chatbot-dark .chatbot-end-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+/* Job title buttons */
+.chatbot-dark .chatbot-jobtitle-btn {
+  background: #1e293b;
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+}
+
+.chatbot-dark .chatbot-jobtitle-btn:hover {
+  background: #3b82f6;
+  color: #ffffff;
+  border-color: #3b82f6;
+}
+
+/* History view */
+.chatbot-dark .chatbot-history {
+  background: #0f172a;
+}
+
+.chatbot-dark .chatbot-history-header {
+  background: #1e293b;
+  border-bottom-color: #334155;
+}
+
+.chatbot-dark .chatbot-history-header h3 {
+  color: #e2e8f0;
+}
+
+.chatbot-dark .chatbot-back-btn {
+  color: #94a3b8;
+}
+
+.chatbot-dark .chatbot-back-btn:hover {
+  background: #334155;
+}
+
+.chatbot-dark .chatbot-history-item {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.chatbot-dark .chatbot-history-item:hover {
+  background: #334155;
+  border-color: #3b82f6;
+}
+
+.chatbot-dark .chatbot-history-item-title {
+  color: #e2e8f0;
+}
+
+.chatbot-dark .chatbot-history-item-preview {
+  color: #94a3b8;
+}
+
+.chatbot-dark .chatbot-history-item-date {
+  color: #64748b;
+}
+
+.chatbot-dark .chatbot-empty-history {
+  color: #64748b;
+}
+

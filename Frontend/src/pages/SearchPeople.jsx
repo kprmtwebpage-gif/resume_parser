@@ -36,7 +36,6 @@ export default function SearchPeople() {
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(25)
 
-  const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [downloadedIds, setDownloadedIds] = useState(() => new Set())
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -153,7 +152,7 @@ export default function SearchPeople() {
       })
       const nextRows = Array.isArray(data) ? data : Array.isArray(data?.candidates) ? data.candidates : []
       setAllRows(nextRows)
-      setSelectedIds(new Set())
+
       
       // Update profiles cache for suggestions (only when loading without heavy filters)
       const hasBackendFilters = filters.keywords || filters.experienceFrom !== null || 
@@ -254,31 +253,7 @@ export default function SearchPeople() {
     window.alert('Save search is not wired yet.')
   }
 
-  const exportSelected = () => {
-    if (!selectedIds || selectedIds.size === 0) {
-      alert('Please select at least one profile to export.')
-      return
-    }
 
-    const ids = Array.from(selectedIds).join(',')
-    // Trigger download of ZIP from backend
-    const url = apiUrl(`/candidates/export?ids=${encodeURIComponent(ids)}`)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'resumes_export.zip'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-  }
-
-  const onToggle = (id, checked) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (checked) next.add(id)
-      else next.delete(id)
-      return next
-    })
-  }
 
   const markAsDownloaded = useCallback((id) => {
     setDownloadedIds((prev) => {
@@ -450,21 +425,7 @@ export default function SearchPeople() {
               {syncMessage && (
                 <span className="text-xs text-green-600 whitespace-nowrap">{syncMessage}</span>
               )}
-              <div className="ml-auto flex items-center gap-3">
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center rounded-button px-4 py-2.5 text-sm font-semibold transition-all duration-200"
-                  style={{
-                    backgroundColor: isDark ? '#1e293b' : '#ffffff',
-                    color: isDark ? '#e2e8f0' : '#374151',
-                    border: `1px solid ${isDark ? '#334155' : '#d1d5db'}`,
-                  }}
-                  onClick={exportSelected}
-                  title="Export selected resumes as ZIP"
-                >
-                  Export Selected
-                </button>
-              </div>
+
             </div>
           </div>
 
@@ -479,9 +440,7 @@ export default function SearchPeople() {
             >
               <ResultsList 
             rows={paginatedRows} 
-            selectedIds={selectedIds} 
             downloadedIds={downloadedIds}
-            onToggle={onToggle} 
             onOpen={openProfile}
             onDownload={markAsDownloaded}
             onEdit={openEditProfile}

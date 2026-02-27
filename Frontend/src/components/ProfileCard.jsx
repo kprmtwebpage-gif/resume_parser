@@ -5,6 +5,7 @@ import {
   PhoneIcon,
 } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
+import { apiUrl } from '../config.js'
 import ResumeViewer from './ResumeViewer.jsx'
 import EmailProviderModal from './EmailProviderModal.jsx'
 
@@ -31,7 +32,7 @@ function sanitizeLinkedInUrl(url) {
   return url
 }
 
-export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit }) {
+export default function ProfileCard({ row, downloaded, onOpen, onDownload, onEdit }) {
   const { colors, isDark } = useTheme()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
   const [isGenerated, setIsGenerated] = useState(false)
@@ -43,8 +44,8 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
   const location = row.location || row.address || '—'
   const hasResume = row.resume_filename
-  const baseResumeUrl = hasResume ? `/candidates/${row.id}/resume` : null
-  const viewResumeUrl = hasResume ? `/candidates/${row.id}/resume?inline=true` : null
+  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume`) : null
+  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume?inline=true`) : null
   const downloadResumeUrl = hasResume ? baseResumeUrl : null
 
   // Close dropdown when clicking outside
@@ -162,15 +163,7 @@ Availability: ${row.availability || 'N/A'}`
       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = colors.background}
     >
-      <div className="grid items-center py-4" style={{ gridTemplateColumns: '5% 27% 26% 32% 10%', width: '100%' }}>
-        <div className="flex justify-center px-4">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border border-neutral-300 text-brand-500 focus:ring-brand-200 focus:ring-2 transition-all hover:border-brand-400 cursor-pointer"
-            checked={checked}
-            onChange={(e) => onToggle(e.target.checked)}
-          />
-        </div>
+      <div className="grid items-center py-4" style={{ gridTemplateColumns: '30% 26% 32% 12%', width: '100%' }}>
 
         <div className="overflow-hidden px-6">
           <div className="flex items-center gap-2">
