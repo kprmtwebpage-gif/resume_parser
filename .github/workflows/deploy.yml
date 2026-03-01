@@ -5,6 +5,7 @@ on:
     branches:
       - dev      # auto-deploy on push to dev
       - uat      # auto-deploy on push to uat
+      - prod     # auto-deploy on push to prod
   workflow_dispatch:
     inputs:
       environment:
