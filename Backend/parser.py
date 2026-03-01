@@ -6437,6 +6437,19 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
                 if len(shrunk) >= 2:
                     return " / ".join(shrunk)
 
+        # Handle "and" conjunction between two role phrases.
+        # e.g. "UX/UI Designer and UX Researcher" → "UX/UI Designer | UX Researcher"
+        # Only split when BOTH sides contain a role signal word.
+        _and_match = re.search(r'(?i)\b\s+and\s+', t)
+        if _and_match:
+            left_part = t[:_and_match.start()].strip()
+            right_part = t[_and_match.end():].strip()
+            if left_part and right_part and has_role_signal(left_part.casefold()) and has_role_signal(right_part.casefold()):
+                left_shrunk = shrink_to_role_phrase(left_part)
+                right_shrunk = shrink_to_role_phrase(right_part)
+                if left_shrunk and right_shrunk:
+                    return left_shrunk + " | " + right_shrunk
+
         role_words_single = {
             "developer",
             "engineer",
@@ -7607,10 +7620,11 @@ def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = 
         r"(?i)\b("
         r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|"
         r"devops|sre|manager|intern|sde|sdet|programmer|designer|director|scientist|lead|"
-        r"coordinator|scrum\s*master|product\s*owner|dba|trainer|recruiter|officer|"
+        r"coordinator|scrum\s*master|product\s*owner|dba|trainer|recruiter|officer|researcher|"
         r"data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|"
         r"full\s*stack|front\s*end|back\s*end|solutions?\s+architect|"
-        r"technical\s+lead|team\s+lead|tech\s+lead"
+        r"technical\s+lead|team\s+lead|tech\s+lead|"
+        r"ux\s+designer|ui\s+designer|ux\s+researcher|ux/ui\s+designer"
         r")\b"
     )
     _section_words = {"summary", "objective", "profile", "skills", "experience",
@@ -7631,7 +7645,7 @@ def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = 
         if "@" in lnl or "http" in lnl or "www." in lnl:
             continue
 
-        # Must contain at least one separator (pipe, slash, dash, en-dash, em-dash)
+        # Must contain at least one separator (pipe, slash, dash, en-dash, em-dash, "and")
         # AND at least 2 distinct role signals
         segments: list[str] = []
         # Try pipe first (most explicit)
@@ -7643,6 +7657,13 @@ def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = 
             segments = [s.strip() for s in re.split(r"\s+[\u2013\u2014]\s+", ln_stripped) if s.strip()]
         elif " - " in ln_stripped:
             segments = [s.strip() for s in ln_stripped.split(" - ") if s.strip()]
+        # Handle "and" conjunction between two role titles
+        # e.g. "UX/UI Designer and UX Researcher", "Data Engineer and Data Analyst"
+        elif re.search(r'(?i)\band\b', ln_stripped):
+            _and_segs = [s.strip() for s in re.split(r'(?i)\band\b', ln_stripped) if s.strip()]
+            # Only treat as multi-role if both sides have role signals
+            if len(_and_segs) >= 2 and all(_role_signal_re.search(s) for s in _and_segs):
+                segments = _and_segs
 
         if len(segments) < 2:
             continue
@@ -7671,9 +7692,41 @@ def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = 
                 continue
             if ln_cf and seg_cf == ln_cf:
                 continue
-            # Strip leading name tokens
+            # Strip leading name tokens (first_name, then middle names + last_name)
             if fn_cf and seg_cf.startswith(fn_cf + " "):
                 seg = seg[len(fn_cf) + 1:].strip()
+            # After stripping first_name, also strip remaining leading name-like words
+            # until we hit a role keyword. This handles middle names + last names
+            # e.g. "Krishna Paritala UX/UI Designer" → "UX/UI Designer"
+            _NOT_NAME = {
+                "senior", "junior", "lead", "principal", "staff", "associate",
+                "developer", "engineer", "analyst", "architect", "consultant",
+                "tester", "specialist", "manager", "designer", "director",
+                "scientist", "programmer", "coordinator", "administrator",
+                "researcher", "recruiter", "officer", "intern",
+                "java", "python", "net", "angular", "react", "node",
+                "full", "stack", "frontend", "backend", "data", "cloud", "devops",
+                "software", "web", "mobile", "aws", "azure", "ux", "ui", "ux/ui",
+                "qa", "sql", "etl", "bi", "ai", "ml", "sre", "scrum", "product",
+                "business", "project", "program", "technical", "team", "it", "hr",
+            }
+            _seg_toks = seg.split()
+            _strip_count = 0
+            for _st in _seg_toks:
+                _st_cf = _st.casefold().rstrip(".,;:")
+                if _st_cf in _NOT_NAME:
+                    break
+                # Also stop if it matches last_name (strip it) or looks like a role token
+                if ln_cf and _st_cf == ln_cf:
+                    _strip_count += 1
+                    continue
+                # Name-like: Title-Case alpha word that's not a known role/tech word
+                if _st[:1].isupper() and _st[1:].islower() and _st.isalpha() and len(_st) >= 2:
+                    _strip_count += 1
+                else:
+                    break
+            if _strip_count > 0 and _strip_count < len(_seg_toks):
+                seg = " ".join(_seg_toks[_strip_count:]).strip()
             if not seg or len(seg) < 3 or len(seg) > 80:
                 continue
             # Reject certification lines (e.g. "AWS Certified Solution Architect")

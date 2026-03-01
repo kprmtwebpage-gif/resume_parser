@@ -71,6 +71,16 @@ def canonicalize_job_title(title: str) -> str:
     title = re.sub(r"\s*\|\s*", " / ", title)
     title = normalize_spaces(title)
 
+    # Protect compound slash terms (UX/UI, UI/UX, etc.) from being split on "/"
+    _COMPOUND_SLASH_TERMS = {
+        "UX/UI": "ZUXUIZ", "UI/UX": "ZUIUXZ",
+        "ux/ui": "ZUXUIZ", "ui/ux": "ZUIUXZ",
+        "Ux/Ui": "ZUXUIZ", "Ui/Ux": "ZUIUXZ",
+    }
+    _COMPOUND_RESTORE = {"ZUXUIZ": "UX/UI", "ZUIUXZ": "UI/UX"}
+    for term, placeholder in _COMPOUND_SLASH_TERMS.items():
+        title = title.replace(term, placeholder)
+
     raw_parts = [normalize_spaces(p) for p in re.split(r"\s*/\s*", title) if normalize_spaces(p)]
     if not raw_parts:
         raw_parts = [title]
@@ -287,7 +297,14 @@ def canonicalize_job_title(title: str) -> str:
 
     normalized_parts = [norm_part(p) for p in raw_parts]
     normalized_parts = _dedupe_preserve_order(normalized_parts)
-    return " / ".join(normalized_parts)
+    result = " / ".join(normalized_parts)
+
+    # Restore protected compound slash terms (UX/UI, UI/UX, etc.)
+    # Use case-insensitive replacement since norm_part may title-case placeholders
+    for placeholder, original in _COMPOUND_RESTORE.items():
+        result = re.sub(re.escape(placeholder), original, result, flags=re.IGNORECASE)
+
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
