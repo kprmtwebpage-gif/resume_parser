@@ -273,6 +273,19 @@ _BAD_CITY_TOKENS: frozenset[str] = frozenset({
     "developing", "developed", "development", "designing", "building",
     "managing", "leading", "implementing", "maintaining",
     "proficient", "experienced", "skilled",
+    # Common English words that leak into city slot via "Word, State, Country"
+    "remote", "settle", "metal", "analysis", "ms",
+    "objective", "summary", "seeking", "looking", "responsible",
+    "visa", "sponsorship", "authorization",
+})
+
+# Single tokens that are valid city *prefixes* (part of multi-word names) but never
+# standalone city names.  "New York" is fine, but just "New" is not a city.
+_CITY_PREFIX_ONLY: frozenset[str] = frozenset({
+    "new", "old", "east", "west", "north", "south",
+    "upper", "lower", "great", "little", "grand", "big",
+    "port", "fort", "mount", "saint", "san", "santa",
+    "los", "las", "el", "la",
 })
 
 
@@ -291,6 +304,16 @@ def _is_plausible_city(raw: str) -> bool:
     normed = {_norm_tok(t) for t in tokens}
     if normed & _BAD_CITY_TOKENS:
         return False
+    # Single-token directional/adjective prefixes are never standalone cities.
+    if len(tokens) == 1 and (normed & _CITY_PREFIX_ONLY):
+        return False
+    # Reject tokens containing institution keywords as substrings — catches
+    # concatenated forms like "Universityof", "CollegePark" that slip past
+    # the exact-token check above (where only "university" is blocked).
+    for t in tokens:
+        t_lower = t.lower()
+        if any(kw in t_lower for kw in ("university", "college", "institute", "polytechnic")):
+            return False
     # Single token that is a known skill/tech → reject
     if len(tokens) == 1 and _is_skill_token(tokens[0]):
         return False

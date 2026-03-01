@@ -100,6 +100,7 @@ _tmp*.txt
 Backend/_*.txt
 
 # Debug/temp scripts - do not commit
+Backend/_*.py
 Backend/debug_*.py
 Backend/check_*.py
 Backend/test_*.py
@@ -109,6 +110,13 @@ Backend/fix_*_*.py
 Backend/reparse_*.py
 Backend/trace_*.py
 Backend/find_*.py
+Backend/audit_*.py
+Backend/inspect_*.py
+Backend/load_*.py
+Backend/normalize_*.py
+Backend/backfill_*.py
+Backend/scan_*.py
+Backend/reset_*.py
 Backend/*.csv
 Backend/*.xlsx
 Frontend/UI_Search/

@@ -28,7 +28,9 @@ load_dotenv()
 
 
 def check_database_connection():
-    """Verify database is accessible before starting server"""
+    """Verify database is accessible before starting server.
+    Auto-creates tables if they don't exist yet (fresh DB scenario).
+    """
     import psycopg2
     
     try:
@@ -40,12 +42,57 @@ def check_database_connection():
             port=os.getenv("DB_PORT"),
         )
         
-        with conn.cursor() as cur:
-            candidates_table = os.getenv("NEW_CANDIDATES_TABLE", "candidate_profile")
-            cur.execute(f"SELECT COUNT(*) FROM {candidates_table}")
-            count = cur.fetchone()[0]
-            print(f"✅ Connected to PostgreSQL database")
-            print(f"📊 Found {count} candidates in database")
+        candidates_table = os.getenv("NEW_CANDIDATES_TABLE", "candidate_profile")
+        skills_table = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
+
+        with conn:
+            with conn.cursor() as cur:
+                # Auto-create tables if they don't exist (idempotent)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS public.job_titles (
+                        id SERIAL PRIMARY KEY,
+                        job_title TEXT UNIQUE NOT NULL,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {candidates_table} (
+                        id SERIAL PRIMARY KEY,
+                        first_name TEXT,
+                        last_name TEXT,
+                        address TEXT,
+                        phone TEXT,
+                        email TEXT,
+                        qualification TEXT,
+                        visa_support BOOLEAN,
+                        work_authorization_type TEXT,
+                        linkedin TEXT,
+                        profile_picture_url TEXT,
+                        resume_filename TEXT,
+                        resume_sha256 TEXT UNIQUE,
+                        parsed_at TIMESTAMP,
+                        education_structured JSONB
+                    )
+                """)
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {skills_table} (
+                        candidate_id INTEGER PRIMARY KEY
+                            REFERENCES {candidates_table}(id) ON DELETE CASCADE,
+                        job_id INTEGER REFERENCES public.job_titles(id),
+                        job_title TEXT,
+                        tech_skills TEXT,
+                        years_of_experience NUMERIC,
+                        certifications TEXT,
+                        parsed_at TIMESTAMP
+                    )
+                """)
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{skills_table}_candidate_id ON {skills_table}(candidate_id)")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{skills_table}_job_id ON {skills_table}(job_id)")
+
+                cur.execute(f"SELECT COUNT(*) FROM {candidates_table}")
+                count = cur.fetchone()[0]
+                print(f"✅ Connected to PostgreSQL database")
+                print(f"📊 Found {count} candidates in database")
             
         conn.close()
         return True

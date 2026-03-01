@@ -617,6 +617,33 @@ def extract_university(text: str, *, use_spacy: bool = True) -> str | None:
         return None
     t = _deglue(text)
 
+    # ── 0. Well-known abbreviated Indian / US university names ─────────────
+    _ABBR_UNI_MAP = {
+        r"\bJNTU[-\s]?H\b": "JNTU Hyderabad",
+        r"\bJNTU[-\s]?K\b": "JNTU Kakinada",
+        r"\bJNTU[-\s]?A\b": "JNTU Anantapur",
+        r"\bJNTUH\b": "JNTU Hyderabad",
+        r"\bJNTUK\b": "JNTU Kakinada",
+        r"\bJNTUA\b": "JNTU Anantapur",
+        r"\bJNTU\b": "JNTU",
+        r"\bVTU\b": "Visvesvaraya Technological University",
+        r"\bOSU\b": "Ohio State University",
+        r"\bMIT\b": "MIT",
+        r"\bCMU\b": "Carnegie Mellon University",
+        r"\bUCLA\b": "UCLA",
+        r"\bNYU\b": "New York University",
+        r"\bUSC\b": "University of Southern California",
+        r"\bGTU\b": "Gujarat Technological University",
+        r"\bAPJ\s+Abdul\s+Kalam": "APJ Abdul Kalam Technological University",
+        r"\bSVU\b": "Sri Venkateswara University",
+        r"\bOU\b": "Osmania University",
+        r"\bRGPV\b": "Rajiv Gandhi Proudyogiki Vishwavidyalaya",
+        r"\bAKTU\b": "Dr. A.P.J. Abdul Kalam Technical University",
+    }
+    for pat, full_name in _ABBR_UNI_MAP.items():
+        if re.search(pat, t, re.IGNORECASE):
+            return full_name
+
     # ── 1. Regex structural patterns ─────────────────────────────────────────
     for m in _UNI_PATTERN_RE.finditer(t):
         candidate = _clean_uni(m.group(0))
@@ -764,13 +791,17 @@ def _slice_education_section(lines: list[str]) -> list[str]:
     # Quick-exit terms that are unambiguous without regex
     _QUICK_EDU = {"education", "graduation", "graduated", "b.tech", "btech",
                   "m.tech", "mtech", "mba", "mca", "phd", "diploma", "bachelor's",
-                  "master's", "masters degree", "bachelors degree"}
+                  "master's", "masters degree", "bachelors degree",
+                  "bachelor degree", "bachelor's degree", "associate degree"}
 
     def _has_edu_term(ln: str) -> bool:
-        ll = ln.lower()
+        # Normalize Unicode quotes so "Bachelor\u2019s" matches "bachelor's"
+        # but do NOT call _deglue (which strips possessives entirely).
+        ln_n = ln.replace("\u2019", "'").replace("\u2018", "'")
+        ll = ln_n.lower()
         if any(t in ll for t in _QUICK_EDU):
             return True
-        return bool(_STRONG_DEGREE_RE.search(ln))
+        return bool(_STRONG_DEGREE_RE.search(ln_n))
 
     return [ln for ln in lines[:350] if len(ln) <= 200 and _has_edu_term(ln)]
 
@@ -779,10 +810,12 @@ def _slice_education_section(lines: list[str]) -> list[str]:
 # Merging context — look-ahead for multi-line entries
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_context_windows(lines: list[str]) -> list[tuple[str, str | None]]:
-    """Return (line, next_line|None) pairs for all lines in the block."""
+def _build_context_windows(lines: list[str]) -> list[tuple[str, str | None, str | None]]:
+    """Return (line, prev_line|None, next_line|None) triples for all lines."""
     return [
-        (lines[i], lines[i + 1] if i + 1 < len(lines) else None)
+        (lines[i],
+         lines[i - 1] if i > 0 else None,
+         lines[i + 1] if i + 1 < len(lines) else None)
         for i in range(len(lines))
     ]
 
@@ -846,7 +879,7 @@ def parse_education_section(resume_text: str) -> list[EducationEntry]:
         seen.add(key)
         entries.append(entry)
 
-    for ln, next_ln in contexts:
+    for ln, prev_ln, next_ln in contexts:
         # Normalise the line before degree detection to handle Unicode ligatures
         # like "BachelorÆs" and variants like "Masters in..."
         ln_norm = _deglue(ln)
@@ -864,18 +897,44 @@ def parse_education_section(resume_text: str) -> list[EducationEntry]:
                 entries[-1]["university"] = uni
             continue
 
-        # ── A line has a degree signal → extract fields ───────────────────
-        # Combine with next line for multi-line education entries
-        combined = ln + " | " + next_ln if next_ln else ln
+        # ── Guard: false-positive "master" contexts ───────────────────────
+        # "Scrum Master", "Master Data Management", "Mastercard", etc.
+        if re.search(
+            r"(?i)\b(scrum\s+master|master\s+data|mastercard|master\s*class|"
+            r"webmaster|postmaster|taskmaster|grand\s*master|game\s*master)\b",
+            ln_norm,
+        ) and not re.search(
+            r"(?i)\b(university|college|institute|education|degree|"
+            r"bachelor|b\.?\s*tech|diploma)\b",
+            ln_norm,
+        ):
+            continue
 
+        # ── A line has a degree signal → extract fields ───────────────────
         degree_level = detect_degree_level(ln)
         degree_name  = normalize_degree(ln)
-        spec         = extract_specialization(combined)
-        uni          = extract_university(combined)
+        # Combine with next line for specialization extraction (but NOT
+        # university — next_ln often belongs to the next education entry
+        # and causes cross-contamination).
+        combined_for_spec = ln + " | " + next_ln if next_ln else ln
+        spec = extract_specialization(combined_for_spec)
 
-        # Try next line alone for university if not found in combined
+        # University: try same line first, then previous line, then next line.
+        # Many resumes put the institution name on the line BEFORE the degree:
+        #   "University of X"
+        #   "Bachelor of Science in CS"
+        uni = extract_university(ln)
+        if uni is None and prev_ln:
+            # Only use prev_ln if it does NOT contain a degree signal itself
+            # (otherwise it belongs to a different education entry)
+            prev_norm = _deglue(prev_ln)
+            if not degree_signal_re.search(prev_norm):
+                uni = extract_university(prev_ln)
         if uni is None and next_ln:
-            uni = extract_university(next_ln)
+            # Only use next_ln if it does NOT contain a degree signal itself
+            next_norm = _deglue(next_ln)
+            if not degree_signal_re.search(next_norm):
+                uni = extract_university(next_ln)
 
         # Guard: if spec looks like a company line → discard
         # (but preserve known academic field words even if they contain
@@ -901,18 +960,29 @@ def parse_education_section(resume_text: str) -> list[EducationEntry]:
         _add(entry)
 
     # ── Post-process: fill missing universities via context scan ─────────
-    # Sometimes the institution name sits on a separate line just below the degree
+    # Sometimes the institution name sits on a separate line above OR below the degree
     for i, entry in enumerate(entries):
         if entry.get("university") is not None:
             continue
-        # Scan the 3 lines following the degree line in the original edu_lines
         try:
             raw_idx = edu_lines.index(entry["raw_line"])
         except ValueError:
             continue
+        # Scan the 3 lines BEFORE the degree line (university often appears above)
+        for j in range(raw_idx - 1, max(raw_idx - 4, -1), -1):
+            candidate_ln = edu_lines[j]
+            if degree_signal_re.search(_deglue(candidate_ln)):
+                break   # hit previous degree line
+            uni = extract_university(candidate_ln)
+            if uni:
+                entries[i]["university"] = uni
+                break
+        if entries[i].get("university") is not None:
+            continue
+        # Scan the 3 lines AFTER the degree line
         for j in range(raw_idx + 1, min(raw_idx + 4, len(edu_lines))):
             candidate_ln = edu_lines[j]
-            if degree_signal_re.search(candidate_ln):
+            if degree_signal_re.search(_deglue(candidate_ln)):
                 break   # hit next degree line
             uni = extract_university(candidate_ln)
             if uni:

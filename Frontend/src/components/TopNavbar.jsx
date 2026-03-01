@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { SunIcon, MoonIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
+import { useUpload } from '../contexts/UploadContext'
 import logoUrl from '../assets/company-logo.png'
 
 const navItems = [
@@ -11,6 +12,7 @@ const navItems = [
 
 export default function TopNavbar() {
   const { isDark, toggleTheme, colors } = useTheme()
+  const { activeCount } = useUpload()
 
   return (
     <header 
@@ -31,7 +33,7 @@ export default function TopNavbar() {
               key={item.label}
               to={item.path}
               className={({ isActive }) =>
-                `rounded-button px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${
+                `relative rounded-button px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${
                   isActive
                     ? 'bg-brand-500 text-white'
                     : isDark 
@@ -41,6 +43,11 @@ export default function TopNavbar() {
               }
             >
               {item.label}
+              {item.label === 'Upload' && activeCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white ring-2 ring-white">
+                  {activeCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

@@ -33,7 +33,7 @@ function sanitizeLinkedInUrl(url) {
   return url
 }
 
-export default function ProfileCard({ row, downloaded, onOpen, onDownload, onEdit }) {
+export default function ProfileCard({ row, downloaded, selected, onToggleSelect, onOpen, onDownload, onEdit }) {
   const { colors, isDark } = useTheme()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
   const [isGenerated, setIsGenerated] = useState(false)
@@ -169,7 +169,17 @@ Availability: ${row.availability || 'N/A'}`
       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = colors.background}
     >
-      <div className="grid items-center py-4" style={{ gridTemplateColumns: '30% 26% 32% 12%', width: '100%' }}>
+      <div className="grid items-center py-4" style={{ gridTemplateColumns: '40px 1fr 26% 32% 12%', width: '100%' }}>
+
+        {/* Checkbox column */}
+        <div className="flex items-center justify-center">
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={(e) => { e.stopPropagation(); onToggleSelect(); }}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+          />
+        </div>
 
         <div className="overflow-hidden px-6">
           <div className="flex items-center gap-2">

@@ -22,7 +22,9 @@ export function useJobTitleSearch(debounceMs = 300) {
   const [strategy, setStrategy] = useState(null);
   const [count, setCount] = useState(0);
   
-  // Cache to avoid redundant API calls
+  // Cache to avoid redundant API calls — entries expire after 30 seconds
+  // so freshly-parsed data is never hidden behind a stale cache.
+  const CACHE_TTL_MS = 30_000;
   const cacheRef = useRef(new Map());
   const abortControllerRef = useRef(null);
 
@@ -37,9 +39,9 @@ export function useJobTitleSearch(debounceMs = 300) {
       return;
     }
 
-    // Check cache first
+    // Check cache first (honour TTL)
     const cached = cacheRef.current.get(searchQuery);
-    if (cached) {
+    if (cached && (Date.now() - cached._ts) < CACHE_TTL_MS) {
       setResults(cached.results);
       setCount(cached.count);
       setStrategy(cached.strategy);
@@ -67,8 +69,8 @@ export function useJobTitleSearch(debounceMs = 300) {
 
       const data = await response.json();
       
-      // Cache the results
-      cacheRef.current.set(searchQuery, data);
+      // Cache the results with timestamp
+      cacheRef.current.set(searchQuery, { ...data, _ts: Date.now() });
       
       setResults(data.results || []);
       setCount(data.count || 0);

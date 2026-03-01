@@ -186,7 +186,13 @@ _ROLE_SIGNAL: re.Pattern = re.compile(
     r"technical\s+lead|team\s+lead|tech\s+lead|delivery\s+manager|"
     r"dba|database\s+administrator|network\s+engineer|"
     r"automation\s+engineer|test\s+engineer|infrastructure\s+engineer|"
-    r"ux\s+designer|ui\s+designer|technical\s+writer)\b",
+    r"ux\s+designer|ui\s+designer|technical\s+writer|"
+    # Additional common roles
+    r"recruiter|trainer|officer|strategist|designer|researcher|"
+    r"scientist|programmer|technician|supervisor|"
+    r"vice\s+president|vp|cto|cio|ceo|cfo|"
+    r"presales|pre\s*sales|account\s+manager|sales\s+manager|"
+    r"it\s+recruiter|technical\s+recruiter|hr\s+manager)\b",
     re.IGNORECASE,
 )
 
@@ -199,6 +205,16 @@ _BAD_NAME_WORDS: frozenset = frozenset({
     "yahoo","hotmail","outlook","linkedin","github",
     # Contact labels that sometimes survive stripping and bleed into name fields.
     "email","phone","mobile","location","address","contact",
+    # Common English words that appear near names in resume headers.
+    "remote","work","hybrid","onsite","contract","freelance",
+    "requisition","position","available","immediate","joiner",
+    "loved","ones","dear","hiring","company","team","notice",
+    # Partial DevOps split / employment-type / junk tokens.
+    # NOTE: _BAD_NAME_WORDS uses SUBSTRING matching, so only add long/unambiguous
+    # tokens here.  Short tokens like "ai", "dev", "job" must go in _ROLE_TOKENS
+    # (exact match) instead to avoid false positives on "Sai", "Devin", etc.
+    "full-time","part-time","fulltime","parttime",
+    "description","conducted","comprehensive","responsible",
 })
 
 _ROLE_TOKENS: frozenset = frozenset({
@@ -217,6 +233,22 @@ _ROLE_TOKENS: frozenset = frozenset({
     "fsd",
     # Microsoft / web tech tokens.
     "asp","mvc","visual","studio",
+    # Tokens that were slipping through validation.
+    "ops","devops","devsecops","sre","mlops","engineering",
+    "de","da","se","sde","sdet",
+    "us","usa","uk","uae",
+    "remote","work","hybrid","onsite","contract","freelance",
+    "requisition","programmer","designer","trainer","recruiter",
+    "coordinator","officer","strategist","technician","researcher",
+    "hadoop","kafka","tableau","power","bi","etl","sap","oracle",
+    "salesforce","sharepoint","pipeline","warehouse",
+    # Partial DevOps split / employment-type tokens.
+    "dev","time","full-time","part-time","fulltime","parttime","wells",
+    "ai","job","description","conducted","comprehensive","responsible",
+    # Common English words never used as names.
+    "and","the","for","with","scripts","day",
+    "troubleshoot","issues","implement","maintain","deploy","monitor",
+    "configure","ensure","support","manage","collaborate",
 })
 
 _NAME_HONORIFICS: re.Pattern = re.compile(
@@ -304,6 +336,11 @@ def validate_name(
         # Role / skill tokens are never name tokens
         if tok_lower in _ROLE_TOKENS:
             return None, None
+        # Handle hyphenated tokens: check each sub-part against role tokens.
+        # E.g. "Full-time" → check "full" and "time".
+        if "-" in tok_lower:
+            if any(sub in _ROLE_TOKENS for sub in tok_lower.split("-") if sub):
+                return None, None
 
         # Single-letter token: allowed as a last-position initial (South Asian naming
         # convention e.g. "Akhil D", "Keerthi K") but not allowed elsewhere.
@@ -515,7 +552,17 @@ def validate_degree(degree: Optional[str]) -> Optional[str]:
         deg, re.IGNORECASE,
     ))
 
-    return deg if (has_in_domain or has_direct_domain or has_of_domain or has_abbrev_domain) else None
+    # Pattern 5: Known standalone degree labels that are acceptable without a domain
+    # e.g. "Associate Degree", "Associate/Diploma", "Bachelor's Degree", "Master's Degree"
+    is_known_label = bool(re.search(
+        r"(?i)\b(associate'?s?\s+degree|associate\s*/\s*diploma|"
+        r"bachelor'?s?\s+degree|master'?s?\s+degree|"
+        r"bachelor\s+of\s+science|bachelor\s+of\s+arts|"
+        r"bachelor\s+of\s+commerce|master\s+of\s+science)\b",
+        deg,
+    ))
+
+    return deg if (has_in_domain or has_direct_domain or has_of_domain or has_abbrev_domain or is_known_label) else None
 
 
 # ===========================================================================
@@ -552,8 +599,18 @@ def validate_applied_title(
     if not _ROLE_SIGNAL.search(title_s):
         return None
 
-    # Reject overly long strings (responsibility sentences)
-    word_count = len(title_s.split())
+    # Reject overly long strings (responsibility sentences).
+    # For pipe-separated multi-title strings like
+    # "Full Stack Developer | Java Developer | Cloud Engineer",
+    # check the longest *individual* segment rather than the whole string.
+    if "|" in title_s:
+        _longest_seg = max(
+            (seg.strip() for seg in title_s.split("|")),
+            key=lambda s: len(s.split()),
+        )
+        word_count = len(_longest_seg.split())
+    else:
+        word_count = len(title_s.split())
     if word_count > 10:
         return None
 
@@ -574,13 +631,18 @@ def validate_applied_title(
         return title_s  # no context -> accept structurally plausible title
 
     title_cf    = title_s.lower()
+    # Also create a no-space variant for matching glued PDF text
+    # e.g. "Senior Android Developer" -> "seniorandroiddeveloper"
+    title_cf_nospace = re.sub(r"\s+", "", title_cf)
     text_lines  = resume_text.splitlines()
     total_lines = max(len(text_lines), 1)
 
-    # Find first occurrence of title in document
+    # Find first occurrence of title in document (with and without spaces)
     first_occ: Optional[int] = None
     for i, line in enumerate(text_lines):
-        if title_cf in line.lower():
+        ll = line.lower()
+        ll_nospace = re.sub(r"\s+", "", ll)
+        if title_cf in ll or title_cf_nospace in ll_nospace:
             first_occ = i
             break
 
@@ -609,7 +671,8 @@ def validate_applied_title(
     if exp_start is not None and first_occ > exp_start:
         # Double-check: is there also a mention BEFORE the exp section?
         pre_exp = "\n".join(text_lines[:exp_start]).lower()
-        if title_cf not in pre_exp:
+        pre_exp_nospace = re.sub(r"\s+", "", pre_exp)
+        if title_cf not in pre_exp and title_cf_nospace not in pre_exp_nospace:
             return None
 
     # Default: accept

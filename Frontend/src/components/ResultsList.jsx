@@ -1,21 +1,34 @@
 import { useTheme } from '../contexts/ThemeContext'
 import ProfileCard from './ProfileCard.jsx'
 
-export default function ResultsList({ rows, downloadedIds, onOpen, onDownload, onEdit }) {
+export default function ResultsList({ rows, downloadedIds, onOpen, onDownload, onEdit, selectedIds, onToggleSelect, onToggleSelectAll }) {
   const { colors, isDark } = useTheme()
+  
+  const allSelected = rows.length > 0 && rows.every(r => selectedIds.has(r.id))
+  const someSelected = rows.some(r => selectedIds.has(r.id))
   
   return (
     <div className="space-y-0">
       <div 
         className="grid items-center py-3 text-xs font-semibold uppercase tracking-wide border-b transition-colors duration-300" 
         style={{ 
-          gridTemplateColumns: '30% 26% 32% 12%', 
+          gridTemplateColumns: '40px 1fr 26% 32% 12%', 
           width: '100%',
           color: isDark ? '#94a3b8' : '#6b7280',
           backgroundColor: colors.card,
           borderColor: colors.border
         }}
       >
+        <div className="flex items-center justify-center">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={el => { if (el) el.indeterminate = someSelected && !allSelected }}
+            onChange={() => onToggleSelectAll(rows.map(r => r.id))}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+            title={allSelected ? 'Deselect all' : 'Select all on this page'}
+          />
+        </div>
         <div className="truncate px-6">Candidate</div>
         <div className="truncate px-6">Location</div>
         <div className="truncate px-6">Contact</div>
@@ -28,6 +41,8 @@ export default function ResultsList({ rows, downloadedIds, onOpen, onDownload, o
             key={row.id}
             row={row}
             downloaded={downloadedIds.has(row.id)}
+            selected={selectedIds.has(row.id)}
+            onToggleSelect={() => onToggleSelect(row.id)}
             onOpen={() => onOpen(row.id)}
             onDownload={() => onDownload(row.id)}
             onEdit={() => onEdit(row.id)}

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { 
   DocumentIcon, 
   XMarkIcon, 
@@ -7,125 +7,12 @@ import {
   InformationCircleIcon,
   ArrowUpTrayIcon
 } from '@heroicons/react/24/outline'
-import { uploadResume } from '../services/api'
+import { useUpload } from '../contexts/UploadContext'
 
 export default function Upload() {
-  const [uploads, setUploads] = useState([])
+  const { uploads, fileInputRef, handleFileSelect, removeUpload, retryUpload } = useUpload()
   const [isDragging, setIsDragging] = useState(false)
   const [hoveredError, setHoveredError] = useState(null)
-  const fileInputRef = useRef(null)
-
-  const handleFileSelect = useCallback((files) => {
-    const validFiles = Array.from(files).filter(file => {
-      const ext = file.name.toLowerCase()
-      return ext.endsWith('.pdf') || ext.endsWith('.doc') || ext.endsWith('.docx')
-    })
-
-    if (validFiles.length === 0) {
-      alert('Please select PDF, DOC, or DOCX files only.')
-      return
-    }
-
-    // Add files to upload queue
-    const newUploads = validFiles.map(file => ({
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      file,
-      name: file.name,
-      progress: 0,
-      status: 'uploading',
-      errorMessage: null,
-      candidateInfo: null,
-    }))
-
-    setUploads(prev => [...prev, ...newUploads])
-
-    // Start uploading each file
-    newUploads.forEach(upload => {
-      uploadFileToBackend(upload)
-    })
-  }, [])
-
-  const uploadFileToBackend = async (upload) => {
-    try {
-      const result = await uploadResume(upload.file, (progress) => {
-        setUploads(prev => 
-          prev.map(u => u.id === upload.id 
-            ? { ...u, progress: Math.min(progress, 95) }
-            : u
-          )
-        )
-      })
-      
-      if (result.status === 'completed') {
-        setUploads(prev => 
-          prev.map(u => u.id === upload.id 
-            ? { 
-                ...u, 
-                progress: 100, 
-                status: 'completed',
-                candidateInfo: {
-                  name: result.name,
-                  email: result.email,
-                  jobTitle: result.job_title,
-                }
-              } 
-            : u
-          )
-        )
-        
-        // Auto-remove completed uploads after 5 seconds
-        setTimeout(() => {
-          setUploads(prev => prev.filter(u => u.id !== upload.id))
-        }, 5000)
-
-      } else if (result.status === 'duplicate') {
-        setUploads(prev =>
-          prev.map(u => u.id === upload.id
-            ? {
-                ...u,
-                progress: 100,
-                status: 'duplicate',
-                candidateInfo: {
-                  name: result.name,
-                  email: result.email,
-                  jobTitle: result.job_title,
-                }
-              }
-            : u
-          )
-        )
-        // Auto-remove duplicate notices after 7 seconds
-        setTimeout(() => {
-          setUploads(prev => prev.filter(u => u.id !== upload.id))
-        }, 7000)
-
-      } else if (result.status === 'failed') {
-        setUploads(prev => 
-          prev.map(u => u.id === upload.id 
-            ? { 
-                ...u, 
-                progress: 100, 
-                status: 'failed',
-                errorMessage: result.error || result.message || 'Unknown error occurred'
-              } 
-            : u
-          )
-        )
-      }
-      
-    } catch (error) {
-      const errorMsg = error.response?.data?.detail 
-        || error.message 
-        || 'Failed to upload resume. Please try again.'
-      
-      setUploads(prev => 
-        prev.map(u => u.id === upload.id 
-          ? { ...u, progress: 100, status: 'failed', errorMessage: errorMsg } 
-          : u
-        )
-      )
-    }
-  }
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault()
@@ -152,20 +39,6 @@ export default function Upload() {
       handleFileSelect(e.target.files)
     }
     e.target.value = ''
-  }
-
-  const removeUpload = (id) => {
-    setUploads(prev => prev.filter(u => u.id !== id))
-  }
-
-  const retryUpload = (upload) => {
-    setUploads(prev => 
-      prev.map(u => u.id === upload.id 
-        ? { ...u, progress: 0, status: 'uploading', errorMessage: null } 
-        : u
-      )
-    )
-    uploadFileToBackend(upload)
   }
 
   const getStatusIcon = (upload) => {

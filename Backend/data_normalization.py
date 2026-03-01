@@ -66,6 +66,11 @@ def canonicalize_job_title(title: str) -> str:
     if not title:
         return ""
 
+    # Normalize pipe separators to slash for consistent multi-role display
+    # e.g. "Cloud Engineer | DevOps Engineer" → "Cloud Engineer / DevOps Engineer"
+    title = re.sub(r"\s*\|\s*", " / ", title)
+    title = normalize_spaces(title)
+
     raw_parts = [normalize_spaces(p) for p in re.split(r"\s*/\s*", title) if normalize_spaces(p)]
     if not raw_parts:
         raw_parts = [title]
@@ -146,6 +151,14 @@ def canonicalize_job_title(title: str) -> str:
         p = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", p)
         p = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", p)
         p = normalize_spaces(p)
+
+        # ── Merge space-separated compound ops terms before abbreviation expansion ──
+        # "Dev Sec Ops" → "DevSecOps", "Dev Ops" → "DevOps", etc.
+        p = re.sub(r"(?i)\bdev\s+sec\s+ops\b", "DevSecOps", p)
+        p = re.sub(r"(?i)\bdev\s+ops\b", "DevOps", p)
+        p = re.sub(r"(?i)\bml\s+ops\b", "MLOps", p)
+        p = re.sub(r"(?i)\bfin\s+ops\b", "FinOps", p)
+        p = re.sub(r"(?i)\bdata\s+ops\b", "DataOps", p)
 
         # ── Abbreviation expansion ──
         p = re.sub(r"(?i)\bsr\.?\b", "Senior", p)
@@ -959,7 +972,8 @@ def extract_qualification(text: str) -> str:
 
         # B.Sc / BS
         if re.search(r"(?i)\b(b\.?\s*sc\b|bsc\b|b\.?\s*s\b|\bbs\b)\b", ln):
-            add_degree("b.sc", major_inline, major_required=True)
+            add_degree("b.sc", major_inline, major_required=False,
+                       fallback_label="Bachelor of Science")
             continue
 
         # BCA
@@ -976,17 +990,20 @@ def extract_qualification(text: str) -> str:
 
         # B.A
         if re.search(r"(?i)\b(b\.?\s*a\b|\bba\b|bachelor\s+of\s+arts)\b", ln):
-            add_degree("b.a", major_inline, major_required=True)
+            add_degree("b.a", major_inline, major_required=False,
+                       fallback_label="Bachelor of Arts")
             continue
 
         # B.Com
         if re.search(r"(?i)\b(b\.?\s*com\b|bcom\b|bachelor\s+of\s+commerce)\b", ln):
-            add_degree("b.com", major_inline, major_required=True)
+            add_degree("b.com", major_inline, major_required=False,
+                       fallback_label="Bachelor of Commerce")
             continue
 
         # Generic "Bachelor" / "Bachelor's"
-        if re.search(r"(?i)\b(bachelor|bachelor's|honou?rs\s+degree)\b", ln):
-            add_degree("Bachelor", major_inline, major_required=True)
+        if re.search(r"(?i)\b(bachelor|bachelor[\u2019']s|honou?rs\s+degree)\b", ln):
+            add_degree("Bachelor", major_inline, major_required=False,
+                       fallback_label="Bachelor's Degree")
             continue
 
         # M.Tech
@@ -1021,7 +1038,8 @@ def extract_qualification(text: str) -> str:
 
         # Diploma / Associate
         if re.search(r"(?i)\b(diploma|associate)\b", ln):
-            add_degree("Diploma", major_inline, major_required=True)
+            add_degree("Diploma", major_inline, major_required=False,
+                       fallback_label="Associate/Diploma")
             continue
 
     found = _dedupe_preserve_order(
@@ -1200,5 +1218,9 @@ def post_normalize_qualification(value: str) -> str:
     # ── Main: split on " / ", clean each entry, deduplicate ─────────────────
     parts   = [normalize_spaces(p) for p in value.split(" / ") if normalize_spaces(p)]
     cleaned = [c for p in parts if (c := _fix_one(p))]
+    # If ALL entries were stripped (all were placeholders), keep the originals
+    # to avoid losing the only available education info.
+    if not cleaned and parts:
+        cleaned = parts
     cleaned = _dedupe_preserve_order(cleaned)
     return " / ".join(cleaned)

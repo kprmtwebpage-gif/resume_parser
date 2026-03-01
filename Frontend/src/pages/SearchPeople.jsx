@@ -8,7 +8,7 @@ import Pagination from '../components/Pagination.jsx'
 import ProfileModal from '../components/ProfileModal.jsx'
 import EditProfileModal from '../components/EditProfileModal.jsx'
 
-import { fetchCandidateById, fetchCandidates, updateCandidate } from '../services/api.js'
+import { fetchCandidateById, fetchCandidates, updateCandidate, bulkDownloadResumes } from '../services/api.js'
 import { apiUrl } from '../config.js'
 import { onCandidateSelected } from '../chatbot/candidateEvents.js'
 
@@ -50,6 +50,10 @@ export default function SearchPeople() {
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [editCandidate, setEditCandidate] = useState(null)
   const [saving, setSaving] = useState(false)
+
+  // Multi-select export state
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [exporting, setExporting] = useState(false)
 
   // Client-side filtering based on search text, unique profiles, job titles, names, and locations (OR logic)
   const filteredRows = useMemo(() => {
@@ -245,6 +249,7 @@ export default function SearchPeople() {
     setActiveId(null)
     setActiveCandidate(null)
     setActiveTab('skills')
+    setSelectedIds(new Set()) // Clear selections on new search
     // load() will run due to offset/q change
   }
 
@@ -262,6 +267,54 @@ export default function SearchPeople() {
       return next
     })
   }, [])
+
+  // Selection handlers for multi-select export
+  const handleToggleSelect = useCallback((id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const handleToggleSelectAll = useCallback((ids) => {
+    setSelectedIds(prev => {
+      const allSelected = ids.every(id => prev.has(id))
+      if (allSelected) {
+        // Deselect all on this page
+        const next = new Set(prev)
+        ids.forEach(id => next.delete(id))
+        return next
+      } else {
+        // Select all on this page
+        const next = new Set(prev)
+        ids.forEach(id => next.add(id))
+        return next
+      }
+    })
+  }, [])
+
+  const handleExportSelected = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    setExporting(true)
+    try {
+      const blob = await bulkDownloadResumes([...selectedIds])
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `resumes_${selectedIds.size}.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('Export failed:', e)
+      alert('Failed to export resumes. Please try again.')
+    } finally {
+      setExporting(false)
+    }
+  }, [selectedIds])
 
   const openProfile = async (id) => {
     setModalOpen(true)
@@ -426,6 +479,27 @@ export default function SearchPeople() {
                 <span className="text-xs text-green-600 whitespace-nowrap">{syncMessage}</span>
               )}
 
+              {/* Export Selected Button */}
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={handleExportSelected}
+                  disabled={exporting}
+                  className="ml-auto flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {exporting ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                      Exporting…
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                      Export Selected ({selectedIds.size})
+                    </>
+                  )}
+                </button>
+              )}
+
             </div>
           </div>
 
@@ -441,6 +515,9 @@ export default function SearchPeople() {
               <ResultsList 
             rows={paginatedRows} 
             downloadedIds={downloadedIds}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onToggleSelectAll={handleToggleSelectAll}
             onOpen={openProfile}
             onDownload={markAsDownloaded}
             onEdit={openEditProfile}

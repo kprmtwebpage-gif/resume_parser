@@ -77,7 +77,8 @@ function JobTitleMultiSelect({ selectedTitles, onChange, onValidSelect }) {
   
   const debouncedSearch = useDebounce(searchQuery, 300)
 
-  // Fetch all job titles on mount for dropdown
+  // Fetch all job titles on mount AND refresh every 60 seconds
+  // so newly-parsed candidates' titles appear without a page reload.
   useEffect(() => {
     const fetchAllTitles = async () => {
       setLoading(true)
@@ -95,6 +96,8 @@ function JobTitleMultiSelect({ selectedTitles, onChange, onValidSelect }) {
       }
     }
     fetchAllTitles()
+    const interval = setInterval(fetchAllTitles, 60_000)
+    return () => clearInterval(interval)
   }, [])
 
   // Filter job titles based on search

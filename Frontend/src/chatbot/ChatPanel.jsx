@@ -6,13 +6,13 @@ import { parseCandidateResponse, getGreetingMessage } from './rules';
 import { useTheme } from '../contexts/ThemeContext';
 import axios from 'axios';
 import companyLogo from '../assets/company-logo.png';
+import { API_BASE } from '../config';
 
-const API_BASE = import.meta.env.VITE_CHATBOT_API_BASE || '';
 const ROLES_CACHE_KEY = 'chatbot_roles_cache';
 const SESSION_KEY = 'chatbot_session_id';
 const MESSAGES_CACHE_KEY = 'chatbot_messages_cache';
 const CACHE_VERSION_KEY = 'chatbot_cache_version';
-const CURRENT_CACHE_VERSION = '2';  // bump this to invalidate all chatbot caches
+const CURRENT_CACHE_VERSION = '5';  // bump this to invalidate all chatbot caches
 
 // Clear stale caches from previous builds
 (function clearStaleCaches() {
@@ -35,11 +35,15 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Convert timestamp strings back to Date objects
-        return parsed.map(msg => ({
-          ...msg,
-          timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
-        }));
+        // Convert timestamp strings back to Date objects.
+        // Filter out 'jobtitles' messages — these are ephemeral and must
+        // always be fetched fresh from the API so stale titles never appear.
+        return parsed
+          .filter(msg => msg.type !== 'jobtitles')
+          .map(msg => ({
+            ...msg,
+            timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+          }));
       } catch (error) {
         console.error('Failed to parse cached messages:', error);
       }
@@ -140,10 +144,13 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
     }
   }, []);
 
-  // Persist messages to localStorage whenever they change
+  // Persist messages to localStorage whenever they change.
+  // Exclude 'jobtitles' messages — they are ephemeral and fetched
+  // fresh from the API on every load to avoid stale data.
   useEffect(() => {
     if (messages.length > 0) {
-      localStorage.setItem(MESSAGES_CACHE_KEY, JSON.stringify(messages));
+      const persistable = messages.filter(m => m.type !== 'jobtitles');
+      localStorage.setItem(MESSAGES_CACHE_KEY, JSON.stringify(persistable));
     }
   }, [messages]);
 
@@ -152,50 +159,53 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load available job titles dynamically from the system
-  const loadAvailableJobTitles = async () => {
-    if (rolesLoadedRef.current) return;
+  // Periodically refresh roles from the API so newly-parsed candidates
+  // appear without a page reload (every 60 seconds).
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadAvailableJobTitles(true);
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load available job titles dynamically from the system.
+  // Always fetches live data from the API — no localStorage fallback
+  // so stale roles (from a previous reparse) never appear.
+  const loadAvailableJobTitles = async (force = false) => {
+    if (rolesLoadedRef.current && !force) return;
     rolesLoadedRef.current = true;
 
     const applyRoles = (titles) => {
       setAvailableJobTitles(titles);
       setSuggestions(titles);
       setMessages(prev => {
-        const alreadyShown = prev.some(m => m.type === 'jobtitles');
-        if (alreadyShown) return prev;
+        // Replace stale jobtitles message if roles changed, or add new one
+        const idx = prev.findIndex(m => m.type === 'jobtitles');
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = { type: 'jobtitles', titles, timestamp: new Date() };
+          return updated;
+        }
         return [...prev, { type: 'jobtitles', titles, timestamp: new Date() }];
       });
     };
 
     try {
-      // Always try fetching fresh roles first
       const response = await axios.get(`${API_BASE}/chatbot/roles`);
       if (response.data && Array.isArray(response.data) && response.data.length > 0) {
         const jobTitles = response.data;
-        localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(jobTitles));
         applyRoles(jobTitles);
         return;
       }
     } catch (error) {
-      console.error('Failed to load job roles from API, trying cache:', error);
+      console.error('Failed to load job roles from API:', error);
     }
 
-    // Fallback: use cached roles if API call failed
-    const cached = localStorage.getItem(ROLES_CACHE_KEY);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          applyRoles(parsed);
-          return;
-        }
-      } catch (error) {
-        console.error('Failed to parse cached roles:', error);
-      }
-    }
-
+    // API returned empty or errored — clear stale data completely
     setAvailableJobTitles([]);
     setSuggestions([]);
+    // Remove any stale jobtitles message from the chat
+    setMessages(prev => prev.filter(m => m.type !== 'jobtitles'));
   };
 
   const initializeChat = async () => {
@@ -269,7 +279,9 @@ export default function ChatPanel({ onClose, onMinimize, isVisible }) {
       id: convId,
       title,
       lastMessage: lastMessage,
-      messages: messages,
+      // Strip ephemeral jobtitles messages from saved history — they are
+      // always fetched live from the API and should never be stale.
+      messages: messages.filter(m => m.type !== 'jobtitles'),
       date: new Date().toISOString(),
     };
 

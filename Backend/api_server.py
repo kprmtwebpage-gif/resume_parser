@@ -2,6 +2,7 @@
 FastAPI server for Resume Parsing Application
 Serves candidate data from PostgreSQL database
 """
+import asyncio
 import json
 import os
 from contextlib import contextmanager
@@ -46,7 +47,7 @@ try:
     from chatbot_integration import create_resume_chatbot
     CHATBOT_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️  Chatbot integration not available: {e}")
+    print(f"[WARN] Chatbot integration not available: {e}")
     CHATBOT_AVAILABLE = False
     create_resume_chatbot = None
 
@@ -58,6 +59,9 @@ CANDIDATES_TABLE = os.getenv("NEW_CANDIDATES_TABLE", "candidate_profile")
 SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 
 app = FastAPI(title="Resume Parser API", version="1.0.0")
+
+# Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
+_parse_semaphore = asyncio.Semaphore(3)
 
 # CORS configuration - allows dev, production, and server IP
 _extra_origins = [o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()]
@@ -81,16 +85,23 @@ app.add_middleware(
 )
 
 
-# Middleware to prevent caching - DISABLED (was causing timeouts)
-# class NoCacheMiddleware(BaseHTTPMiddleware):
-#     async def dispatch(self, request: Request, call_next):
-#         response = await call_next(request)
-#         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-#         response.headers["Pragma"] = "no-cache"
-#         response.headers["Expires"] = "0"
-#         return response
-# 
-# app.add_middleware(NoCacheMiddleware)
+# Lightweight no-cache middleware for API JSON endpoints only.
+# The previous middleware was disabled because it applied to all responses
+# (including chunked static files) and caused timeouts.  This version only
+# targets API paths so static/HTML serving is unaffected.
+class APINoCacheMiddleware(BaseHTTPMiddleware):
+    _API_PREFIXES = ("/candidates", "/chatbot", "/job-titles",
+                     "/skills", "/locations", "/chat")
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if any(request.url.path.startswith(p) for p in self._API_PREFIXES):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+app.add_middleware(APINoCacheMiddleware)
 
 
 # Serve built frontend in production (mount after API routes defined)
@@ -448,6 +459,80 @@ async def get_candidates(
             return candidates
 
 
+# ── Bulk resume download (ZIP) ──────────────────────────────────────────────
+import zipfile
+from io import BytesIO
+
+class BulkDownloadRequest(BaseModel):
+    candidate_ids: List[int]
+
+@app.post("/candidates/bulk-download")
+async def bulk_download_resumes(body: BulkDownloadRequest):
+    """
+    Download multiple resumes as a single ZIP archive.
+    Accepts a JSON body with { "candidate_ids": [1, 2, 3, ...] }.
+    """
+    if not body.candidate_ids:
+        raise HTTPException(status_code=400, detail="No candidate IDs provided")
+    if len(body.candidate_ids) > 200:
+        raise HTTPException(status_code=400, detail="Maximum 200 candidates per download")
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            placeholders = ",".join(["%s"] * len(body.candidate_ids))
+            cursor.execute(
+                f"SELECT id, first_name, last_name, resume_filename FROM {CANDIDATES_TABLE} WHERE id IN ({placeholders})",
+                body.candidate_ids,
+            )
+            rows = cursor.fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No candidates found")
+
+    buf = BytesIO()
+    missing = []
+    added = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for row in rows:
+            resume_filename = row.get("resume_filename")
+            if not resume_filename:
+                missing.append(row.get("id"))
+                continue
+            resume_path = os.path.join(os.path.dirname(__file__), resume_filename)
+            if not os.path.exists(resume_path):
+                missing.append(row.get("id"))
+                continue
+            fname = os.path.basename(resume_path)
+            fn = (row.get("first_name") or "").strip()
+            ln = (row.get("last_name") or "").strip()
+            if fn or ln:
+                ext = os.path.splitext(fname)[1]
+                archive_name = f"{fn}_{ln}{ext}".replace(" ", "_")
+            else:
+                archive_name = fname
+            existing_names = set(zf.namelist())
+            base, ext = os.path.splitext(archive_name)
+            counter = 1
+            while archive_name in existing_names:
+                archive_name = f"{base}_{counter}{ext}"
+                counter += 1
+            zf.write(resume_path, archive_name)
+            added += 1
+
+    if added == 0:
+        raise HTTPException(status_code=404, detail="No resume files found for the selected candidates")
+
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="selected_resumes.zip"',
+            "X-Missing-Count": str(len(missing)),
+        },
+    )
+
+
 @app.get("/candidates/{candidate_id}", response_model=Candidate)
 async def get_candidate(candidate_id: int):
     """
@@ -649,8 +734,11 @@ async def search_job_titles(
     """
     Search for job titles based on user input with intelligent matching.
     
+    Queries the live candidate_skills_profile table so results always reflect
+    the current database state (no stale reference table).
+    
     Rules:
-    - Short queries (≤8 chars or 1 word): Returns all matching titles (partial match)
+    - Short queries (<=8 chars or 1 word): Returns all matching titles (partial match)
     - Multi-word queries: Attempts exact match first, then fuzzy match (up to 5 results)
     
     - **q**: Search query (job title or keywords)
@@ -661,6 +749,10 @@ async def search_job_titles(
     if not query:
         raise HTTPException(status_code=400, detail="Search query cannot be empty")
     
+    # Use the live skills table so results are always current
+    _TITLE_SRC = f"""(SELECT DISTINCT job_title FROM {SKILLS_TABLE}
+                      WHERE job_title IS NOT NULL AND job_title != '')"""
+
     with get_db() as conn:
         with conn.cursor() as cursor:
             # Determine search strategy based on query length and word count
@@ -669,9 +761,9 @@ async def search_job_titles(
             
             if is_short_query:
                 # Broad exploratory search: partial match, return all results
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT DISTINCT job_title 
-                    FROM public.job_titles 
+                    FROM {_TITLE_SRC} AS t
                     WHERE job_title ILIKE %s
                     ORDER BY job_title
                     LIMIT %s
@@ -689,16 +781,15 @@ async def search_job_titles(
             
             else:
                 # Multi-word query: try exact match first
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT job_title 
-                    FROM public.job_titles 
+                    FROM {_TITLE_SRC} AS t
                     WHERE LOWER(job_title) = LOWER(%s)
                 """, (query,))
                 
                 exact_match = cursor.fetchone()
                 
                 if exact_match:
-                    # Exact match found, return only that
                     return {
                         "query": query,
                         "strategy": "exact_match",
@@ -708,11 +799,10 @@ async def search_job_titles(
                     }
                 
                 # No exact match: perform fuzzy semantic match
-                # Use PostgreSQL's similarity functions or word-based matching
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT job_title,
                            similarity(LOWER(job_title), LOWER(%s)) as sim_score
-                    FROM public.job_titles
+                    FROM {_TITLE_SRC} AS t
                     WHERE job_title ILIKE %s
                        OR similarity(LOWER(job_title), LOWER(%s)) > 0.1
                     ORDER BY sim_score DESC, job_title
@@ -722,7 +812,6 @@ async def search_job_titles(
                 fuzzy_results = cursor.fetchall()
                 
                 if fuzzy_results:
-                    # Return fuzzy matches
                     return {
                         "query": query,
                         "strategy": "fuzzy_match",
@@ -738,7 +827,7 @@ async def search_job_titles(
                 
                 cursor.execute(f"""
                     SELECT DISTINCT job_title
-                    FROM public.job_titles
+                    FROM {_TITLE_SRC} AS t
                     WHERE {conditions}
                     ORDER BY job_title
                     LIMIT 5
@@ -925,35 +1014,84 @@ async def upload_resume_endpoint(background_tasks: BackgroundTasks, file: Upload
         dest_path = cache_dir / f"{base}_{int(os.path.getmtime(str(dest_path)))}{suffix}"
 
     contents = await file.read()
+
+    # ── SHA-256 duplicate check: reject identical file content even with different filenames ──
+    import hashlib as _hashlib
+    file_sha256 = _hashlib.sha256(contents).hexdigest()
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""SELECT c.id, c.first_name, c.last_name, c.email, s.job_title
+                    FROM {CANDIDATES_TABLE} c
+                    LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
+                    WHERE c.resume_sha256 = %s
+                    LIMIT 1""",
+                (file_sha256,)
+            )
+            sha_existing = cursor.fetchone()
+    if sha_existing:
+        full_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or None
+        return {
+            "status": "duplicate",
+            "message": "This exact resume has already been uploaded (content match)",
+            "id": sha_existing["id"],
+            "name": full_name,
+            "email": sha_existing.get("email"),
+            "job_title": sha_existing.get("job_title"),
+        }
+
+    dest_path = cache_dir / file.filename
+    # Avoid overwriting existing file with different content
+    if dest_path.exists():
+        base = Path(file.filename).stem
+        dest_path = cache_dir / f"{base}_{int(os.path.getmtime(str(dest_path)))}{suffix}"
+
     with open(dest_path, "wb") as f:
         f.write(contents)
 
     save_name = dest_path.name
 
-    # Run parser for only this file
+    # Run parser for only this file.
+    # Use subprocess.run in a thread pool instead of asyncio.create_subprocess_exec
+    # because the latter raises NotImplementedError on Windows + Python 3.14
+    # (the default ProactorEventLoop doesn't support subprocess transports in all configs).
     env = os.environ.copy()
     env["RESUME_INPUT_DIR"] = str(cache_dir)
     env["RESUME_PROCESS_ONLY"] = save_name
     env["QUIET"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
 
-    try:
-        result = subprocess.run(
+    import subprocess as _sp
+    import concurrent.futures
+
+    def _run_parser():
+        return _sp.run(
             [sys.executable, str(backend_dir / "parser.py")],
             env=env,
             capture_output=True,
-            text=True,
-            timeout=120,
             cwd=str(backend_dir),
+            timeout=180,
         )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Parsing timed out. File may be too complex.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Parser error: {e}")
 
-    if result.returncode != 0:
-        stderr = (result.stderr or "")[:500]
-        raise HTTPException(status_code=500, detail=f"Parser failed: {stderr}")
+    try:
+        async with _parse_semaphore:  # max 3 concurrent parsers
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, _run_parser)
+            returncode = result.returncode
+            stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
+            stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
+    except _sp.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Parsing timed out. File may be too complex.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[UPLOAD ERROR] {type(e).__name__}: {e}\n{tb}", flush=True)
+        raise HTTPException(status_code=500, detail=f"Parser error: {type(e).__name__}: {e}")
+
+    if returncode != 0:
+        raise HTTPException(status_code=500, detail=f"Parser failed: {stderr_text[:500]}")
 
     # Look up the newly created candidate by resume filename
     relative_filename = f"resumes_cache/{save_name}"
@@ -1129,9 +1267,9 @@ async def gdrive_sync_and_parse(background_tasks: BackgroundTasks):
                         stdout, stderr = await process.communicate()
                         
                         if process.returncode == 0:
-                            print(f"✅ Successfully parsed {downloaded} resumes")
+                            print(f"[OK] Successfully parsed {downloaded} resumes")
                         else:
-                            print(f"⚠️ Parser completed with errors:")
+                            print(f"[WARN] Parser completed with errors:")
                             print(f"Output: {stdout.decode()}")
                             print(f"Errors: {stderr.decode()}")
                     except Exception as e:
@@ -1172,11 +1310,11 @@ if CHATBOT_AVAILABLE:
             CANDIDATES_TABLE,
             SKILLS_TABLE
         )
-        print("✅ Chatbot initialized successfully")
+        print("[OK] Chatbot initialized successfully")
     except Exception as e:
-        print(f"⚠️  Warning: Could not initialize chatbot: {e}")
+        print(f"[WARN] Warning: Could not initialize chatbot: {e}")
 else:
-    print("⚠️  Chatbot module not available - running without chatbot features")
+    print("[WARN] Chatbot module not available - running without chatbot features")
 
 
 # Chatbot API Endpoints
@@ -1235,17 +1373,45 @@ async def chatbot_clear():
 
 @app.get("/chatbot/roles")
 async def chatbot_roles():
-    """Return distinct job titles for chatbot role-picker UI"""
+    """Return distinct job titles for chatbot role-picker UI.
+
+    Applies the same noise filtering and case-insensitive de-duplication
+    as the /job-titles/all endpoint so both UIs show consistent data.
+    """
+    import re as _re
+    _NOISE = _re.compile(
+        r"(^.{0,3}$"                         # too short
+        r"|^.{80,}$"                          # too long
+        r"|[(){}\[\]]"                        # contains brackets
+        r"|\bsuch as\b|\bwithin\b|\bframework like\b"
+        r"|\bexperienced? with\b"
+        r"|\band backend\b|\band frontend\b"
+        r"|\bservices\)"                       # fragment
+        r")",
+        _re.IGNORECASE,
+    )
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                f"""SELECT DISTINCT job_title
+                f"""SELECT job_title, COUNT(*) AS cnt
                     FROM {SKILLS_TABLE}
                     WHERE job_title IS NOT NULL AND job_title != ''
-                    ORDER BY job_title"""
+                    GROUP BY job_title
+                    ORDER BY cnt DESC"""
             )
-            rows = cursor.fetchall()
-    return [row["job_title"] for row in rows]
+            raw = cursor.fetchall()
+
+    # Case-insensitive de-duplication: keep the variant with highest count
+    seen: dict[str, str] = {}  # lower -> best-variant
+    for row in raw:
+        title = row["job_title"].strip()
+        if _NOISE.search(title):
+            continue
+        key = title.lower()
+        if key not in seen:
+            seen[key] = title
+
+    return sorted(seen.values(), key=str.lower)
 
 
 @app.get("/chatbot/search")
@@ -1592,7 +1758,7 @@ if os.path.exists(frontend_dist) and os.getenv("SERVE_FRONTEND", "0") == "1":
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
     
-    print(f"✅ Serving built frontend from {frontend_dist}")
+    print(f"[OK] Serving built frontend from {frontend_dist}")
     print(f"   Access UI at: http://localhost:8000/")
 
     # SPA catch-all: serve index.html for any non-API, non-asset path
@@ -1615,10 +1781,10 @@ if __name__ == "__main__":
                 cursor.execute(f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE}")
                 result = cursor.fetchone()
                 count = result["total"] if result else 0
-                print(f"✅ Connected to PostgreSQL database")
+                print(f"[OK] Connected to PostgreSQL database")
                 print(f"📊 Found {count} candidates in database")
     except Exception as e:
-        print(f"⚠️  Warning: Could not connect to database: {e}")
+        print(f"[WARN] Warning: Could not connect to database: {e}")
         print("Please check your database configuration in .env file")
         print("Database tables:", CANDIDATES_TABLE, SKILLS_TABLE)
     
@@ -1632,9 +1798,9 @@ if __name__ == "__main__":
                       cwd=os.path.dirname(__file__), 
                       capture_output=True, 
                       check=False)
-        print("✅ Data corrections applied")
+        print("[OK] Data corrections applied")
     except Exception as e:
-        print(f"⚠️  Warning: Could not apply corrections: {e}")
+        print(f"[WARN] Warning: Could not apply corrections: {e}")
     
     api_host = os.getenv("API_HOST", "127.0.0.1")
     api_port = int(os.getenv("API_PORT", "8000"))

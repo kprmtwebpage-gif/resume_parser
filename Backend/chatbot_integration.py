@@ -11,8 +11,16 @@ from typing import Dict, List, Any, Optional
 chatbot_path = os.path.join(os.path.dirname(__file__), '..', 'chatbot-integration', 'src')
 sys.path.insert(0, chatbot_path)
 
-from chatbot import Chatbot, ChatbotConfig
-from handlers.base import BaseHandler
+try:
+    from chatbot import Chatbot, ChatbotConfig
+    from handlers.base import BaseHandler
+    CHATBOT_LIB_AVAILABLE = True
+except ImportError:
+    CHATBOT_LIB_AVAILABLE = False
+    Chatbot = None
+    ChatbotConfig = None
+    BaseHandler = object
+
 import psycopg2.extras
 
 
@@ -260,7 +268,7 @@ class GreetingHandler(BaseHandler):
         }
 
 
-def create_resume_chatbot(get_db_connection, candidates_table: str, skills_table: str) -> Chatbot:
+def create_resume_chatbot(get_db_connection, candidates_table: str, skills_table: str):
     """
     Create and configure chatbot for resume parsing application
     
@@ -270,8 +278,10 @@ def create_resume_chatbot(get_db_connection, candidates_table: str, skills_table
         skills_table: Name of skills table
         
     Returns:
-        Configured Chatbot instance
+        Configured Chatbot instance, or None if chatbot library is not available
     """
+    if not CHATBOT_LIB_AVAILABLE:
+        return None
     config = ChatbotConfig(
         app_name="Resume Parser AI Assistant",
         greeting_message="Hello! I can help you find candidates. Try asking 'find Python developer' or 'search Full Stack engineer'.",

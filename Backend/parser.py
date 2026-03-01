@@ -1,5 +1,7 @@
 import hashlib
+import gzip
 import logging
+import logging.handlers
 import os
 import re
 import shutil
@@ -16,6 +18,111 @@ from xml.etree import ElementTree as ET
 import pdfplumber
 import psycopg2
 from dotenv import load_dotenv
+
+# ── Persistent debug logging ────────────────────────────────────────────────
+# Production-ready logging with compression, environment-aware defaults, and
+# separate error logs for quick troubleshooting.
+#
+# Environment variables:
+#   DEPLOY_ENV: dev|uat|prod (default: dev)
+#   PARSER_LOG_LEVEL: DEBUG|INFO|WARNING|ERROR (default: auto per env)
+#   PARSER_LOG_COMPRESS: 1|0 (default: 1 for uat/prod, 0 for dev)
+#
+# Log files (in Backend/logs/):
+#   parser_debug_{env}.log       - Main log (rotates at 10MB, keeps 5 backups)
+#   parser_errors_{env}.log      - Errors only (rotates at 5MB, keeps 3 backups)
+#   parser_debug_{env}.log.1.gz  - Compressed backups (auto-created on rotation)
+
+
+class CompressedRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """RotatingFileHandler that compresses old logs to .gz (saves 5-10× space)."""
+    
+    def __init__(self, *args, compress=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.compress = compress
+    
+    def doRollover(self):
+        """Override to compress rotated logs after rotation."""
+        super().doRollover()
+        if not self.compress:
+            return
+        
+        # Compress .log.1, .log.2, etc. after rotation
+        for i in range(1, self.backupCount + 1):
+            src = f"{self.baseFilename}.{i}"
+            dst = f"{src}.gz"
+            if os.path.exists(src) and not src.endswith('.gz'):
+                try:
+                    with open(src, 'rb') as f_in:
+                        with gzip.open(dst, 'wb', compresslevel=6) as f_out:
+                            shutil.copyfileobj(f_in, f_out)
+                    os.remove(src)
+                except Exception:
+                    pass  # Keep uncompressed if compression fails
+
+
+_log = logging.getLogger("parser")
+_log.propagate = False  # avoid duplicate console output
+
+if not _log.handlers:
+    _deploy_env = os.getenv("DEPLOY_ENV", "dev").strip().lower()
+    _log_dir = Path(__file__).resolve().parent / "logs"
+    _log_dir.mkdir(exist_ok=True)
+    
+    # Environment-specific defaults:
+    # - dev: DEBUG (full visibility for local development)
+    # - uat: INFO (reasonable detail for testing)
+    # - prod: WARNING (errors + warnings only, minimal noise)
+    _env_defaults = {"dev": "DEBUG", "uat": "INFO", "prod": "WARNING"}
+    _default_level = _env_defaults.get(_deploy_env, "INFO")
+    _log_level_str = os.getenv("PARSER_LOG_LEVEL", _default_level).upper()
+    _log_level = getattr(logging, _log_level_str, logging.INFO)
+    
+    # Enable compression by default for uat/prod (saves disk space)
+    _compress_default = "1" if _deploy_env in ("uat", "prod") else "0"
+    _compress = os.getenv("PARSER_LOG_COMPRESS", _compress_default) == "1"
+    
+    # Main debug log (all levels)
+    _debug_file = _log_dir / f"parser_debug_{_deploy_env}.log"
+    _debug_handler = CompressedRotatingFileHandler(
+        _debug_file,
+        maxBytes=10 * 1024 * 1024,  # 10 MB per file
+        backupCount=5,               # Keep 5 backups (total ~60 MB max)
+        encoding="utf-8",
+        compress=_compress,
+    )
+    _debug_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)-7s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    _debug_handler.setLevel(_log_level)
+    _log.addHandler(_debug_handler)
+    
+    # Separate error-only log (for quick troubleshooting without noise)
+    _error_file = _log_dir / f"parser_errors_{_deploy_env}.log"
+    _error_handler = CompressedRotatingFileHandler(
+        _error_file,
+        maxBytes=5 * 1024 * 1024,   # 5 MB per file
+        backupCount=3,               # Keep 3 backups (total ~20 MB max)
+        encoding="utf-8",
+        compress=_compress,
+    )
+    _error_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    _error_handler.setLevel(logging.WARNING)  # Errors + warnings only
+    _log.addHandler(_error_handler)
+    
+    _log.setLevel(_log_level)
+    
+    # Log startup info (helpful for debugging environment issues)
+    _log.info(
+        "Logger initialized  env=%s  level=%s  compress=%s  dir=%s",
+        _deploy_env, _log_level_str, _compress, _log_dir,
+    )
+
+# ── end logging setup ───────────────────────────────────────────────────────
 
 from data_normalization import (
     canonicalize_job_title,
@@ -280,10 +387,15 @@ def _text_has_contact_signals(text: str) -> bool:
 
 
 def _pdf_should_try_ocr_first_page(extracted_text: str) -> bool:
-    """Heuristic: OCR only when the extracted text looks like it's missing contact info."""
+    """Heuristic: OCR only when the extracted text looks like it's missing contact info
+    or when the extracted text is suspiciously short (likely image-based PDF)."""
 
     t = (extracted_text or "").strip()
     if not t:
+        return True
+    # Very short first-page text is a strong sign of a scanned/image PDF.
+    # A real resume's first page has at minimum ~100 chars of name+contact+title.
+    if len(t) < 100:
         return True
     # If we already got an email or a phone-like run, skip OCR.
     if "@" in t:
@@ -693,6 +805,179 @@ def extract_text_from_docx(path: str) -> str:
     return "\n".join(out)
 
 
+def ocr_cleanup(text: str) -> str:
+    """Fix common OCR artifacts in resume text.
+
+    Applied early in the pipeline (after collapse_char_spacing) so that ALL
+    downstream extractors — name, title, education, certifications, skills —
+    see corrected text rather than garbled ligature drops.
+    """
+    t = text
+    # Strip stray brackets/braces embedded in words (OCR bracket artifacts)
+    t = re.sub(r"(?<=[A-Za-z])[\[\]{}](?=[A-Za-z])", "", t)
+    # <on → tion (ligature artifact where "<" replaces "ti")
+    t = re.sub(r"<on\b", "tion", t)
+    # So8ware → Software (OCR misread of ligature)
+    t = re.sub(r"\bSo8ware\b", "Software", t, flags=re.IGNORECASE)
+    # Remove CID references — (cid:NNN) placeholders from garbled PDFs
+    t = re.sub(r"\(cid:\d+\)", "", t)
+    # ── Fix common ligature-drop artifacts in words ──────────────────────
+    t = re.sub(r"\bSoware\b", "Software", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bImplementaon\b", "Implementation", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bSoluons?\b",
+               lambda m: "Solutions" if m.group().endswith(("s", "S")) else "Solution",
+               t, flags=re.IGNORECASE)
+    t = re.sub(r"\bApplicaons?\b",
+               lambda m: "Applications" if m.group().endswith(("s", "S")) else "Application",
+               t, flags=re.IGNORECASE)
+    t = re.sub(r"\bAdministraon\b", "Administration", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bAutomaaon\b", "Automation", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bConfguraon\b", "Configuration", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bOperaons?\b",
+               lambda m: "Operations" if m.group().endswith(("s", "S")) else "Operation",
+               t, flags=re.IGNORECASE)
+    t = re.sub(r"\bInformaon\b", "Information", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bCommunicaons?\b",
+               lambda m: "Communications" if m.group().endswith(("s", "S")) else "Communication",
+               t, flags=re.IGNORECASE)
+    t = re.sub(r"\bFulllment\b", "Fulfillment", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bFullf[il]*ment\b", "Fulfillment", t, flags=re.IGNORECASE)
+    # Func<onal → Functional, Specifica<on → Specification, etc.
+    t = re.sub(r"\bFunc<onal\b", "Functional", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bSpecifica<on\b", "Specification", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bOrganiza<on\b", "Organization", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bQualifica<on\b", "Qualification", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bEduca<on\b", "Education", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bCer<fica<on\b", "Certification", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bCer<ficaon\b", "Certification", t, flags=re.IGNORECASE)
+    # Generic: any remaining <on patterns (catches novel words)
+    # Only when preceded by 3+ alpha chars (avoids false positives like "<on")
+    t = re.sub(r"(?<=[A-Za-z]{3})<on\b", "tion", t)
+    return t
+
+
+def collapse_char_spacing(text: str) -> str:
+    """Detect and collapse PDF character-spacing artifacts.
+
+    Some PDF extractors produce text where every character is separated by a
+    space, e.g. ``"Z e e n a t  N a e e m"`` instead of ``"Zeenat Naeem"``.
+    Word boundaries are marked by 2+ consecutive spaces (empty-string tokens in
+    a single-space split) or by an uppercase char following a lowercase one.
+
+    When a line has a char-spaced prefix followed by normal text (e.g.
+    ``"Z e e n a t  N a e e m Jamaica Estates, NY |"``), the two parts are
+    emitted on separate lines so downstream extractors (name, address) each
+    see clean input.
+
+    The heuristic: a line is "char-spaced" when ≥50 % of its alphabetic tokens
+    are single characters.  Only such lines are processed.
+    """
+    out_lines: list[str] = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            out_lines.append(line)
+            continue
+
+        # Split by single space (preserving empty strings from double spaces).
+        parts = stripped.split(" ")
+
+        # Count single-char alpha tokens vs total alpha tokens.
+        single_alpha = sum(1 for p in parts if len(p) == 1 and p.isalpha())
+        alpha_tokens = [p for p in parts if p and any(c.isalpha() for c in p)]
+        if len(alpha_tokens) < 3 or single_alpha / len(alpha_tokens) < 0.50:
+            out_lines.append(line)
+            continue
+
+        # Walk tokens: accumulate runs of single-char alpha tokens into words.
+        # Multi-char tokens (normal words) are emitted as-is.
+        # Track whether each output word came from collapsed chars or was normal.
+        # Walk tokens: single-char alpha tokens are accumulated into runs
+        # and collapsed into words. Multi-char tokens are kept as-is.
+        # Unlike the previous approach, multi-char tokens do NOT prevent
+        # subsequent single chars from being collapsed (no saw_normal flag).
+        result_tokens: list[str] = []
+        current_word: list[str] = []
+
+        for part in parts:
+            if not part:  # empty = double-space = word boundary
+                if current_word:
+                    result_tokens.append("".join(current_word))
+                    current_word = []
+                continue
+
+            # Single-char non-alpha (& , | . etc.) — separator / punctuation.
+            if len(part) <= 1 and not part.isalpha():
+                if current_word:
+                    result_tokens.append("".join(current_word))
+                    current_word = []
+                result_tokens.append(part)
+                continue
+
+            if len(part) == 1 and part.isalpha():
+                # Detect word boundary: uppercase char after a lowercase char.
+                if current_word and part.isupper() and len(current_word[-1]) == 1 and current_word[-1].islower():
+                    result_tokens.append("".join(current_word))
+                    current_word = [part]
+                else:
+                    current_word.append(part)
+            else:
+                # Multi-char token.
+                if current_word:
+                    # If token starts lowercase, it's likely the tail of the
+                    # char-spaced word (e.g. "pe" after "D e v e l o").
+                    if part[0].islower() and len("".join(current_word)) >= 2:
+                        current_word.append(part)
+                    else:
+                        result_tokens.append("".join(current_word))
+                        current_word = []
+                        result_tokens.append(part)
+                else:
+                    result_tokens.append(part)
+
+        if current_word:
+            result_tokens.append("".join(current_word))
+
+        # ── Post-processing: merge short alpha fragments with neighbours ──
+        # After the walk, isolated 1-char tokens are merged backward and
+        # short (≤4 char) all-alpha fragments are merged forward/trailing.
+        _SHORT = 4
+
+        # Pass 1: merge isolated 1-char alpha tokens with preceding word.
+        merged: list[str] = []
+        for t in (t2 for t2 in result_tokens if t2):
+            if t.isalpha() and len(t) == 1 and merged and merged[-1].isalpha():
+                merged[-1] = merged[-1] + t
+            else:
+                merged.append(t)
+
+        # Pass 2: merge short alpha fragments forward with next token.
+        merged2: list[str] = []
+        i = 0
+        while i < len(merged):
+            w = merged[i]
+            if (w.isalpha() and len(w) <= _SHORT
+                    and i + 1 < len(merged) and merged[i + 1].isalpha()
+                    and len(w) + len(merged[i + 1]) <= 25):
+                merged2.append(w + merged[i + 1])
+                i += 2
+            else:
+                merged2.append(w)
+                i += 1
+
+        # Pass 3: merge short trailing fragment with preceding word.
+        if (len(merged2) >= 2
+                and merged2[-1].isalpha() and len(merged2[-1]) <= _SHORT
+                and merged2[-2].isalpha()
+                and len(merged2[-2]) + len(merged2[-1]) <= 25):
+            merged2[-2] = merged2[-2] + merged2[-1]
+            merged2.pop()
+
+        out_lines.append(" ".join(w for w in merged2 if w) or stripped)
+
+    return "\n".join(out_lines)
+
+
 def normalize_text(text: str) -> str:
     # psycopg2 refuses NUL (0x00) characters in text fields.
     text = text.replace("\x00", "")
@@ -816,6 +1101,22 @@ def _segment_compact_line(line: str) -> str:
     if not s:
         return ""
 
+    # ── Protect email addresses before letter/digit splitting ──
+    # Mark emails so that CamelCase / letter-digit splitting won't break them.
+    _email_placeholder: dict[str, str] = {}
+    _email_idx = [0]
+
+    def _save_email(m: re.Match) -> str:
+        # Use letters-only key to avoid the letter→digit split rule.
+        _num_word = ["ZERO","ONE","TWO","THREE","FOUR","FIVE","SIX","SEVEN","EIGHT","NINE"]
+        idx_word = _num_word[_email_idx[0]] if _email_idx[0] < 10 else f"N{_email_idx[0]}"
+        key = f"\x00EMAILPH{idx_word}\x00"
+        _email_placeholder[key] = m.group(0)
+        _email_idx[0] += 1
+        return key
+
+    s = re.sub(r"\S+@\S+\.\S+", _save_email, s)
+
     # Only do aggressive re-segmentation for lines that are unusually compact.
     if s.count(" ") <= 1:
         s = s.replace("|", " | ")
@@ -824,12 +1125,73 @@ def _segment_compact_line(line: str) -> str:
         # Treat dots as separators in compact tokens (e.g., "Sr.FullStackDeveloper").
         s = s.replace(".", " ")
 
+    # ── Split ALL-CAPS concatenated role names even with spaces present ──
+    # Garbled PDFs produce tokens like "DATAANALYST" on their own line.
+    # Apply known-word splitting to any fully-uppercase alpha token >= 8 chars,
+    # regardless of overall line word count.
+    # (The main _split_allcaps_token below handles tokens >= 10 chars in all lines;
+    #  this early pass catches concatenated terms that appear with other words.)
+
     # Split CamelCase runs: "FullStackDeveloper" -> "Full Stack Developer"
     s = re.sub(r"([a-z])([A-Z])", r"\1 \2", s)
     # Split letters/digits: "EngineerII" or "Engineer2" -> "Engineer II" / "Engineer 2"
     s = re.sub(r"([A-Za-z])(\d)", r"\1 \2", s)
     s = re.sub(r"(\d)([A-Za-z])", r"\1 \2", s)
     s = re.sub(r"\s+", " ", s).strip()
+
+    # ── Split ALL-CAPS compact tokens using known role word boundaries ──
+    # "SENIORANDROIDENGINEER" → "SENIOR ANDROID ENGINEER"
+    # "ANDROIDDEVELOPER"      → "ANDROID DEVELOPER"
+    # Only applied when the token is ≥12 chars and fully uppercase alpha.
+    _ALLCAPS_ROLE_WORDS = sorted([
+        "DEVELOPER", "ENGINEER", "ANALYST", "ARCHITECT", "CONSULTANT",
+        "TESTER", "ADMINISTRATOR", "SPECIALIST", "MANAGER", "DESIGNER",
+        "PROGRAMMER", "DIRECTOR", "SCIENTIST", "LEAD", "COORDINATOR",
+        "MASTER", "OWNER", "RECRUITER", "INTERN", "RESEARCHER", "FELLOW",
+        "OFFICER", "TRAINER", "OPERATOR", "TECHNICIAN", "ASSOCIATE",
+    ], key=len, reverse=True)  # longest first
+    _ALLCAPS_PREFIX_WORDS = sorted([
+        "SENIOR", "JUNIOR", "PRINCIPAL", "STAFF", "ASSOCIATE", "LEAD",
+        "ANDROID", "ANGULAR", "REACT", "JAVA", "PYTHON", "DOTNET",
+        "CLOUD", "DEVOPS", "DATA", "MACHINE", "LEARNING", "FULL",
+        "STACK", "FRONTEND", "BACKEND", "SOFTWARE", "WEB", "MOBILE",
+        "PLATFORM", "SOLUTIONS", "TECHNICAL", "SYSTEM", "SYSTEMS",
+        "QUALITY", "NETWORK", "SECURITY", "INFRASTRUCTURE", "DATABASE",
+        "PRODUCT", "PROJECT", "PROGRAM", "BUSINESS", "SCRUM", "TEAM",
+        "AUTOMATION", "TEST", "QA", "APP", "APPLICATION",
+    ], key=len, reverse=True)
+    _ALL_KNOWN = sorted(set(_ALLCAPS_ROLE_WORDS + _ALLCAPS_PREFIX_WORDS), key=len, reverse=True)
+
+    def _split_allcaps_token(tok: str) -> str:
+        if len(tok) < 10 or not tok.isalpha() or not tok.isupper():
+            return tok
+        remaining = tok
+        parts: list[str] = []
+        while remaining:
+            matched = False
+            for word in _ALL_KNOWN:
+                if remaining.startswith(word):
+                    parts.append(word)
+                    remaining = remaining[len(word):]
+                    matched = True
+                    break
+            if not matched:
+                parts.append(remaining)
+                break
+        # Only accept if we split into 2+ parts and matched most of the token
+        if len(parts) >= 2 and all(len(p) >= 2 for p in parts):
+            return " ".join(parts)
+        return tok
+
+    new_tokens: list[str] = []
+    for tok in s.split():
+        new_tokens.append(_split_allcaps_token(tok))
+    s = " ".join(new_tokens)
+
+    # ── Restore protected emails ──
+    for key, original in _email_placeholder.items():
+        s = s.replace(key, original)
+
     return s
 
 
@@ -933,6 +1295,10 @@ def extract_email(text):
 
     # 1) Normal emails (including spaced punctuation)
     t = text
+    # Strip stray leading '@' before emails: " @john@gmail.com" → " john@gmail.com"
+    # This prevents the space-collapse below from joining a phone number with the email.
+    t = re.sub(r"(?<=[\s\n])@(?=[A-Za-z0-9._%+-]+@)", "", t)
+    t = re.sub(r"^@(?=[A-Za-z0-9._%+-]+@)", "", t)
     t = re.sub(r"\s*@\s*", "@", t)
     t = re.sub(r"\s*\.\s*", ".", t)
     for m in re.finditer(r"(?:mailto:)?([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", t, flags=re.I):
@@ -962,7 +1328,7 @@ def extract_email(text):
         seen.add(k)
         uniq.append(e)
 
-    def score(email: str) -> int:
+    def score(email: str, position: int = 0) -> int:
         e = (email or "").strip()
         m = re.fullmatch(r"([A-Z0-9._%+-]+)@([A-Z0-9.-]+)\.([A-Z]{2,})", e, flags=re.I)
         if not m:
@@ -970,6 +1336,7 @@ def extract_email(text):
         local, domain, tld = m.group(1), m.group(2), m.group(3)
         local_cf = local.casefold()
         domain_cf = domain.casefold()
+        full_domain = f"{domain_cf}.{tld.casefold()}"
         tld_cf = tld.casefold()
 
         # Hard rejects
@@ -982,6 +1349,13 @@ def extract_email(text):
         if ".." in local or ".." in domain:
             return -10
 
+        # Reject common false-positive domains (sample/template/test)
+        _bad_domains = {"example.com", "sampleresume.com", "noreply.com",
+                        "test.com", "email.com", "yourcompany.com",
+                        "company.com", "sample.com", "domain.com"}
+        if full_domain in _bad_domains:
+            return -10
+
         s = 0
         # Prefer local-parts with letters (numeric-only locals are often extraction junk).
         if any(ch.isalpha() for ch in local):
@@ -989,9 +1363,20 @@ def extract_email(text):
         else:
             s -= 40
 
-        # Prefer common real domains slightly.
-        if domain_cf in {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com"}:
-            s += 10
+        # Prefer common personal email providers (high confidence these are the candidate's).
+        _personal_domains = {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com",
+                             "protonmail.com", "icloud.com", "aol.com", "live.com",
+                             "ymail.com", "zoho.com", "mail.com", "gmx.com",
+                             "rediffmail.com", "yahoo.co.in"}
+        if full_domain in _personal_domains:
+            s += 15
+
+        # Penalize role/generic email addresses (recruiter emails, not candidate's)
+        _role_locals = {"info", "hr", "admin", "support", "contact", "careers",
+                        "recruiting", "jobs", "talent", "resume", "resumes",
+                        "noreply", "no-reply", "enquiry", "office"}
+        if local_cf.split(".")[0] in _role_locals or local_cf in _role_locals:
+            s -= 50
 
         # Penalize weird TLDs that look like words (often false positives like "Implemented").
         if len(tld_cf) > 10:
@@ -1001,13 +1386,16 @@ def extract_email(text):
         if local.isdigit() and len(local) <= 4:
             s -= 30
 
-        # Prefer earlier-looking emails by leaving tie-breaking to order; score only content.
+        # Prefer emails found earlier in the document (position bonus).
+        # Earlier = more likely in the header/contact block.
+        s += max(0, 20 - position * 2)
+
         return s
 
     best = None
     best_score = -10**9
-    for e in uniq:
-        s = score(e)
+    for idx_e, e in enumerate(uniq):
+        s = score(e, position=idx_e)
         if s > best_score:
             best_score = s
             best = e
@@ -1475,6 +1863,202 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "certified",
         "certification",
         "infosys",
+        # ── Tokens that were slipping through and becoming bogus names ──
+        # Common English words that sometimes appear near names in resume headers.
+        "remote",
+        "work",
+        "working",
+        "hybrid",
+        "onsite",
+        "contract",
+        "freelance",
+        "requisition",
+        "position",
+        "available",
+        "immediate",
+        "joiner",
+        "notice",
+        "period",
+        "loved",
+        "ones",
+        "dear",
+        # "DevOps" partial tokens and compound-role words.
+        "ops",
+        "devops",
+        "devsecops",
+        "sre",
+        "mlops",
+        # Filename-derived abbreviations used as titles (DE=Data Engineer, DA=Data Analyst).
+        "de",
+        "da",
+        "se",
+        "sde",
+        "sdet",
+        # Country / region codes that appear in visa/work-auth lines.
+        "us",
+        "usa",
+        "uk",
+        "uae",
+        "india",
+        "canada",
+        # Additional role & tech words that were missing.
+        "engineering",
+        "programmer",
+        "designer",
+        "trainer",
+        "recruiter",
+        "coordinator",
+        "officer",
+        "strategist",
+        "evangelist",
+        "technician",
+        "researcher",
+        "fellow",
+        # Common suffix-words from compound tech phrases.
+        "hadoop",
+        "kafka",
+        "tableau",
+        "power",
+        "bi",
+        "etl",
+        "sap",
+        "oracle",
+        "salesforce",
+        "sharepoint",
+        "middleware",
+        "integration",
+        "microservices",
+        "pipeline",
+        "pipelines",
+        "warehouse",
+        "lakehouse",
+        # Partial "DevOps" split and job-context tokens.
+        "dev",
+        "data",
+        "time",
+        "full-time",
+        "part-time",
+        "fulltime",
+        "parttime",
+        "wells",
+        # More junk tokens from resume body text.
+        "ai",
+        "job",
+        "description",
+        "conducted",
+        "comprehensive",
+        "responsible",
+        "responsibilities",
+        # Common English stop words that are never person names.
+        "and",
+        "the",
+        "for",
+        "with",
+        "scripts",
+        "day",
+        # Job-description verbs/nouns that appear as body text.
+        "troubleshoot",
+        "issues",
+        "implement",
+        "maintain",
+        "deploy",
+        "monitor",
+        "configure",
+        "ensure",
+        "support",
+        "manage",
+        "collaborate",
+        # ── Address words that should never be a person's name ──
+        "street",
+        "avenue",
+        "ave",
+        "blvd",
+        "boulevard",
+        "road",
+        "lane",
+        "court",
+        "place",
+        "apt",
+        "suite",
+        "floor",
+        "highway",
+        "hwy",
+        # ── Organisation / company words ──
+        "services",
+        "consultancy",
+        "consulting",
+        "technologies",
+        "corporation",
+        "limited",
+        "pvt",
+        "inc",
+        "llc",
+        "ltd",
+        "corp",
+        "company",
+        "enterprises",
+        "tata",
+        "wipro",
+        "cognizant",
+        "capgemini",
+        "accenture",
+        "deloitte",
+        "hcl",
+        "techm",
+        # Company / product / domain tokens that bleed through from two-column PDFs.
+        "tech",
+        "lightning",
+        "step",
+        "telehealth",
+        "finance",
+        "healthcare",
+        "banking",
+        "ats",
+        "accounting",
+        "php",
+        "js",
+        "node",
+        "nodejs",
+        # ── Junk / noise words that sometimes appear as name tokens ──
+        "responsiveness",
+        "responsive",
+        "none",
+        "null",
+        "column",
+        "row",
+        "table",
+        "header",
+        "footer",
+        "novoc",
+        "voc",
+        # ── Section heading words that should never be person names ──
+        "career",
+        "highlights",
+        "summary",
+        "objective",
+        "professional",
+        "profile",
+        "overview",
+        "introduction",
+        "minimizing",
+        "intervention",
+        "experience",
+        # ── Indian address locality suffixes ──
+        "nagar",
+        "colony",
+        "puram",
+        "palya",
+        "layout",
+        "enclave",
+        "marg",
+        "vihar",
+        "kunj",
+        "bagh",
+        "chowk",
+        "gali",
+        "bazaar",
+        "needed",
+        "package",
     }
     section_words = {
         "professional summary",
@@ -1484,6 +2068,7 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "curriculum",
         "resume",
         "experience",
+        "linkedin",
         "education",
         "skills",
         "certifications",
@@ -1514,7 +2099,8 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "core skills",
     }
 
-    lines = [_segment_compact_line(ln) for ln in non_empty_lines(text)]
+    _raw_lines = non_empty_lines(text)
+    lines = [_segment_compact_line(ln) for ln in _raw_lines]
     skills_master = _skills_master_set()
     known_first_names = _first_names_set()
     candidates: list[tuple[int, tuple[str, str]]] = []
@@ -1610,10 +2196,16 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             # name and role, e.g. "Praveen SS – Python/Java Developer"
             parts = [p.strip() for p in re.split(r"\s*[\u2013\u2014]\s*", ln) if p.strip()]
         if len(parts) <= 1:
+            # Split on plain hyphen-minus surrounded by spaces:
+            # "Nathan Courey - Seasoned UX Professional With Over a Decade"
+            parts = [p.strip() for p in re.split(r"\s+-\s+", ln) if p.strip()]
+        if len(parts) <= 1:
             # Fallback: split on contact/title labels when spaces were collapsed
             # e.g. "NIHARIKA A Phone: +1(469)" → "NIHARIKA A"
+            # Also handles labels at the very start of a line:
+            # e.g. "Mobile: - 8189951445 Tamilarasi.M" → remainder after label.
             parts = [p.strip() for p in re.split(
-                r"(?i)\s+(?:phone|email|e-?mail|mobile|cell|tel|linkedin|github|address|location)\s*:",
+                r"(?i)(?:^|\s+)(?:phone|email|e-?mail|mobile|cell|tel|linkedin|github|address|location)\s*:\s*[-–—]*\s*",
                 ln,
             ) if p.strip()]
         return parts[0] if parts else ln
@@ -1623,6 +2215,24 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "or",
         "for",
         "with",
+        "as",
+        "at",
+        "by",
+        "in",
+        "on",
+        "to",
+        "if",
+        "so",
+        "no",
+        "am",
+        "package",
+        "needed",
+        "mobile",
+        "phone",
+        "tel",
+        "cell",
+        "fax",
+        "mail",
         "based",
         "implementing",
         "building",
@@ -1684,6 +2294,27 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "executed",
         "validated",
         "pioneered",
+        # Address/org/noise tokens that leak into name candidates
+        "responsiveness",
+        "responsive",
+        "column",
+        "none",
+        "null",
+        "street",
+        "avenue",
+        "boulevard",
+        "highway",
+        "services",
+        "consultancy",
+        "technologies",
+        "corporation",
+        "tata",
+        "wipro",
+        "cognizant",
+        "capgemini",
+        "accenture",
+        "deloitte",
+        "novoc",
     }
 
     # Scan up to 50 lines: the first-page / header-block can be quite tall
@@ -1729,7 +2360,7 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             ln = re.sub(r"(?i)\b(mail\s*id|e-?mail|email|phone|mobile|linked\s*in|linkedin|github)\b\s*[:\-]?", " ", ln)
             # Remove stray numbers/ids in the header (e.g., LinkedIn slug numbers)
             ln = re.sub(r"\b\d{2,}\b", " ", ln)
-            ln = re.sub(r"\s+", " ", ln).strip(" ,|\t")
+            ln = re.sub(r"\s+", " ", ln).strip(" ,|/\t")
             return ln
 
         if any(k in lnl for k in ["@", "linkedin", "github", "http", "www."]):
@@ -1741,6 +2372,11 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                 continue
         if any(k in lnl for k in section_words):
             continue
+        # Defensive: catch garbled section headers where char-spacing
+        # collapsed imperfectly (e.g. "EDUCAT ION", "EXPERI ENCE").
+        _joined = re.sub(r'\s+', '', lnl)
+        if any(k.replace(' ', '') in _joined for k in section_words if len(k) >= 5):
+            continue
         # Strip phone-like patterns from the line itself so tokens like
         # "+1 904 525 7389" don't inflate the token count or digit count.
         line = re.sub(r"\+?\d[\d ()\-]{6,}\d", " ", line)
@@ -1751,18 +2387,46 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         if sum(ch.isdigit() for ch in line) >= 2:
             continue
 
-        # Avoid city/state header lines being treated as names (e.g., "Fort Mill, SC" or "Fairfield, Iowa").
-        if city_state_re.search(line) or _US_FULL_STATE_RE.search(line):
-            continue
+        # Avoid city/state header lines being treated as names
+        # (e.g. "Fort Mill, SC").  However, many resumes pack the name
+        # AND address onto one line: "Zeenat Naeem Jamaica Estates, NY".
+        # Instead of skipping the entire line, try to strip the trailing
+        # city/state/zip suffix and salvage the name tokens in front.
+        _cs_match = city_state_re.search(line) or _US_FULL_STATE_RE.search(line)
+        if _cs_match:
+            _m_text = _cs_match.group(0)
+            _comma_rel = _m_text.rfind(',')
+            _comma_abs = _cs_match.start() + _comma_rel
+            _bc_words = line[:_comma_abs].strip().split()
+            _name_salvaged = False
+            # Try stripping 1-3 trailing words as the city name,
+            # largest city first so we keep the most name tokens.
+            for _n_city in range(min(3, len(_bc_words)), 0, -1):
+                _remaining = _bc_words[:-_n_city]
+                if not _remaining:
+                    continue
+                _rem_tokens = [t.strip(',./') for t in _remaining if t.strip('./')]
+                if len(_rem_tokens) >= 2 and looks_like_name_tokens(_rem_tokens):
+                    line = ' '.join(_remaining)
+                    lnl = line.lower().strip()
+                    _name_salvaged = True
+                    break
+                if len(_rem_tokens) == 1 and _rem_tokens[0].casefold() in known_first_names:
+                    line = ' '.join(_remaining)
+                    lnl = line.lower().strip()
+                    _name_salvaged = True
+                    break
+            if not _name_salvaged:
+                continue
 
         # Normalize separators and remove common prefix labels.
         cleaned = re.sub(r"(?i)^name\s*[:\-]\s*", "", line).strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
-        cleaned = cleaned.strip(" ,|-\t")
+        cleaned = cleaned.strip(" ,|-/\t")
 
         # Tokenize and drop common suffixes.
         tokens = [t for t in re.split(r"\s+", cleaned) if t]
-        tokens = [t.strip(",.") for t in tokens]
+        tokens = [t.strip(",./") for t in tokens]
         # Drop tokens ending with ':' — they are field labels (e.g. "id:", "Designation:")
         # that survived contact-info stripping, never person names.
         tokens = [t for t in tokens if not t.endswith(":")]
@@ -1782,6 +2446,11 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         while tokens and tokens[-1].lower().strip(".") in suffixes:
             tokens = tokens[:-1]
         if not looks_like_name_tokens(tokens):
+            continue
+        # Reject candidates where ALL tokens are very short (≤2 chars).
+        # These are almost always garbled section header fragments
+        # (e.g. "SU Y" from char-spaced "SUMMARY").
+        if all(len(t) <= 2 for t in tokens):
             continue
         if tokens and tokens[0].casefold() in bad_name_leading_tokens:
             continue
@@ -1854,8 +2523,96 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         if re.search(r"[{}<>\\/]", cleaned):
             score -= 10
 
+        # ── Handle initial-first patterns ─────────────────────────────
+        # South Asian naming: "S. Praveen", "K Ravi Kumar", "S.Praveen"
+        # where a single letter/initial precedes the actual first name.
+        # Rearrange so initial becomes last_name and the real name is first.
+        if len(tokens) >= 2:
+            t0_alpha = re.sub(r"[^A-Za-z]", "", tokens[0])
+            t1_alpha = re.sub(r"[^A-Za-z]", "", tokens[1])
+            if len(t0_alpha) == 1 and t0_alpha.isupper() and len(t1_alpha) >= 3:
+                # "S. Praveen Kumar" → first="Praveen", (middle tokens if any), last="S"
+                # Or "K Ravi" → first="Ravi", last="K"
+                initial = t0_alpha.upper()
+                tokens = tokens[1:]  # shift off the initial
+                # Append initial as last token so it becomes last_name
+                tokens.append(initial)
+
         first = tokens[0]
         last = tokens[-1] if len(tokens) >= 2 else ""
+
+        # ── Surname particles ─────────────────────────────────────────
+        # "Angela Du Buc" → first="Angela", last="DuBuc"
+        _surname_particles = {
+            "de", "du", "di", "da", "del", "della", "delle", "dos", "das",
+            "van", "von", "der", "den", "le", "la", "el", "al",
+            "bin", "bint", "ibn", "ap", "san", "st", "mc", "mac",
+        }
+
+        # ── Three-part name merging ───────────────────────────────────
+        # Common South Asian compound-name second parts ("Sai Kiran",
+        # "Sri Chandra", "Rajashekar Reddy", "Sai Surendra", etc.).
+        _compound_parts = {
+            "reddy", "kumar", "kiran", "teja", "ram", "rao", "mohan",
+            "kishore", "prasad", "babu", "nath", "chandra", "surendra",
+            "viswanath", "priya", "devi", "lakshmi", "kanth", "murthy",
+            "deep", "hari", "venkat", "veni", "sai", "sri", "raj",
+            "mani", "bala", "narayan", "gopal", "shankar", "sekhar",
+            "shekar", "prakash", "anand", "lal", "kant", "chand",
+            "singh", "durga", "jyothi", "padma", "naga", "ravi",
+            "surya", "uma", "veera", "kamal", "suresh", "ganesh",
+            "prabhu", "kalyan", "phani", "satya", "ratna", "jaya",
+            "vijaya", "rama", "laxmi", "bhanu", "prathap", "vardhan",
+            "talha",
+            # Additional common South Asian middle names
+            "sudha", "gowri", "bhavani", "madhavi", "sravya",
+            "swathi", "divya", "sowmya", "lalitha", "kavitha",
+            "radha", "meena", "rekha", "smitha", "sunitha",
+        }
+
+        if len(tokens) == 3:
+            t0a = re.sub(r"[^A-Za-z']", "", tokens[0])
+            t1a = re.sub(r"[^A-Za-z']", "", tokens[1])
+            t2a = re.sub(r"[^A-Za-z']", "", tokens[2])
+
+            # Case A: surname particle → merge particle + surname as last name
+            if t1a.casefold() in _surname_particles and len(t0a) >= 2 and len(t2a) >= 2:
+                first = tokens[0]
+                last = tokens[1][:1].upper() + tokens[1][1:].lower() + tokens[2][:1].upper() + tokens[2][1:].lower()
+
+            # Case B: trailing single-letter initial → compound first name
+            # "Sri Viswanath K" → first="SriViswanath", last="K"
+            elif len(t2a) == 1 and t2a.isupper() and len(t0a) >= 2 and len(t1a) >= 3:
+                _tc0 = tokens[0][:1].upper() + tokens[0][1:].lower()
+                _tc1 = tokens[1][:1].upper() + tokens[1][1:].lower()
+                merged = _tc0 + _tc1
+                if len(merged) <= 20:
+                    first = merged
+                    last = tokens[2]
+
+            # Case C: known South Asian compound second part → merge first two
+            # "Sai Surendra Siripurapu" → first="SaiSurendra", last="Siripurapu"
+            elif (
+                len(t0a) >= 2 and len(t1a) >= 2 and len(t2a) >= 2
+                and t1a.casefold() in _compound_parts
+            ):
+                _tc0 = tokens[0][:1].upper() + tokens[0][1:].lower()
+                _tc1 = tokens[1][:1].upper() + tokens[1][1:].lower()
+                merged_candidate = _tc0 + _tc1
+                if len(merged_candidate) <= 20:
+                    first = merged_candidate
+                    last = tokens[2]
+                else:
+                    first = tokens[0]
+                    last = tokens[2]
+
+            # Case D: default for other 3-token names — keep first + last
+            # "STEVEN STANY PAIS" → first="Steven", last="Pais"
+            # "Manoj Jung Thapa" → first="Manoj", last="Thapa"
+            elif len(t0a) >= 2 and len(t2a) >= 2:
+                first = tokens[0]
+                last = tokens[2]
+
         last_alpha = re.sub(r"[^A-Za-z]", "", last)
         # Drop empty/zero-alpha tokens.
         # Keep uppercase single-letter last initials (e.g. "Harsha K", "YOGENDRA P")
@@ -1878,11 +2635,16 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             """Title-case names but keep short all-caps tokens (initials) as-is.
 
             'PRAVEEN' -> 'Praveen', 'SS' -> 'SS', 'KP' -> 'KP',
+            'SaiSurendra' -> 'SaiSurendra' (CamelCase preserved),
             'python/java' -> 'Python/java'
             """
             alpha = re.sub(r"[^A-Za-z]", "", tok)
             if alpha.isupper() and len(alpha) <= 3:
                 return tok.upper()  # keep initials fully uppercase
+            # Preserve internal CamelCase produced by compound-name merge
+            # (e.g. "SaiSurendra", "SriViswanath", "DuBuc").
+            if re.search(r'[a-z][A-Z]', tok):
+                return tok
             return tok[:1].upper() + tok[1:].lower() if tok else ""
 
         first = _title_or_keep(first)
@@ -1898,8 +2660,17 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
     # Framework, Machine Learning, Map Reduce, Web Based) from being misclassified
     # as PERSON entities and beating the correct heuristic candidate.
     if _SPACY_NER_AVAILABLE and _SPACY_NLP is not None:
+        # Section-heading words that must NEVER appear inside a PERSON entity.
+        _ner_section_words = {
+            "summary", "objective", "profile", "skills", "experience",
+            "education", "certification", "certifications", "projects",
+            "portfolio", "references", "achievements", "accomplishments",
+            "qualifications", "overview", "introduction", "highlights",
+        }
         try:
-            _ner_header = " ".join(str(ln) for ln in lines[:5])
+            # Use raw (non-segmented) lines for NER so that CamelCase-split
+            # artifacts like "SaaS" → "Saa S" don't create fake PERSON entities.
+            _ner_header = " ".join(str(ln) for ln in _raw_lines[:5])
             _doc = _SPACY_NLP(_ner_header[:400])
             for _ent in _doc.ents:
                 if _ent.label_ == "PERSON":
@@ -1907,6 +2678,10 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                     if not looks_like_name_tokens(_etoks):
                         continue
                     if _etoks[0].casefold() in bad_name_leading_tokens:
+                        continue
+                    # Reject entities that contain section heading words
+                    # (e.g. "Portfolio SUMMARY Business" from joined lines).
+                    if any(t.casefold() in _ner_section_words for t in _etoks):
                         continue
                     _sfn = _etoks[0][:1].upper() + _etoks[0][1:].lower()
                     _sln = (_etoks[-1][:1].upper() + _etoks[-1][1:].lower()) if len(_etoks) >= 2 else ""
@@ -1961,21 +2736,26 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
 
     # Strip common non-name tokens and separators.
     base = raw
-    base = re.sub(r"(?i)^(resume|cv|profile)\b", " ", base)
+    # "resume" prefix is long enough to strip without word boundary.
+    # Handles concatenated filenames: "Resumeravireddy" → "ravireddy"
+    base = re.sub(r"(?i)^resume", " ", base)
+    base = re.sub(r"(?i)^(cv|profile)\b", " ", base)
     base = re.sub(r"(?i)\b(resume|cv|profile)\b", " ", base)
     base = re.sub(r"\b\d{4,}\b", " ", base)  # remove long numeric ids
     base = re.sub(r"\b\+?\d[\d ()\-]{8,}\d\b", " ", base)  # remove phone-like runs
     base = re.sub(r"[_.\-]+", " ", base).strip()
 
     # Insert spaces for CamelCase in a Unicode-aware way.
-    spaced: list[str] = []
-    prev = ""
-    for ch in base:
-        if prev and prev.isalpha() and ch.isalpha() and prev.islower() and ch.isupper():
-            spaced.append(" ")
-        spaced.append(ch)
-        prev = ch
-    base = "".join(spaced)
+    # Two rules:
+    #   1) lower→UPPER: "camelCase" → "camel Case"
+    #   2) UPPER+→UPPER+lower: "NHarsha" → "N Harsha", "HTMLParser" → "HTML Parser"
+    # This correctly splits initial-prefix names like "NHarsha" (N + Harsha).
+    base = re.sub(r"([a-z])([A-Z])", r"\1 \2", base)
+    base = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", base)
+    # Fix dangling single-uppercase from rule-2 when a long ALLCAPS first
+    # name is glued to a lowercase last name (e.g. "SHIVAPRASADkanagabatte"
+    # → rule-2 yields "SHIVAPRASA Dkanagabatte"; merge the "D" back).
+    base = re.sub(r"(\b[A-Z]{6,}) ([A-Z])([a-z]{3,})", r"\1\2 \3", base)
     base = re.sub(r"\s+", " ", base).strip()
 
     utility_tokens = {
@@ -1990,6 +2770,40 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "copy",
         "draft",
         "version",
+        # Job-board / download-system prefixes that appear in filenames.
+        "dice",
+        # Layout / UI words that appear in filenames but are never name parts.
+        "column",
+        "columns",
+        "row",
+        "rows",
+        "table",
+        "header",
+        "footer",
+        "page",
+        "template",
+        "format",
+        "style",
+        # Address words
+        "nagar",
+        "street",
+        "avenue",
+        "road",
+        # Prepositions/connectors from filename phrases (e.g. "Resume of Karthick")
+        "of",
+        "for",
+        "by",
+        "the",
+        "and",
+        # Domain / context words from filename that are not names
+        "finance",
+        "healthcare",
+        "banking",
+        "ats",
+        "accounting",
+        "marketing",
+        "phd",
+        "mba",
     }
 
     # If the filename contains skills/roles or organization-ish tokens, don't trust it.
@@ -2031,11 +2845,73 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "sql",
         "bi",
         "it",
+        "js",
+        "php",
+        "ruby",
+        "html",
+        "css",
+        "xml",
         # Microsoft / web tech tokens that must not appear as surname candidates.
         "asp",
         "mvc",
         "visual",
         "studio",
+        # Partial "DevOps" split and data/tech tokens.
+        "dev",
+        "data",
+        "time",
+        "full-time",
+        "part-time",
+        "fulltime",
+        "parttime",
+        # Abbreviations and country codes misread as name parts (e.g. "NHarsha_DE_Resume").
+        "de",
+        "da",
+        "us",
+        "usa",
+        "uk",
+        "uae",
+        "ops",
+        "engineering",
+        "requisition",
+        # Job-context words that appear in filenames.
+        "remote",
+        "work",
+        "hybrid",
+        "onsite",
+        "contract",
+        "freelance",
+        "position",
+        "senior",
+        "junior",
+        "sr",
+        "jr",
+        "mlops",
+        "devsecops",
+        "administrator",
+        "specialist",
+        "coordinator",
+        "trainer",
+        "recruiter",
+        "officer",
+        # Management/role abbreviations from filenames
+        "pmo",
+        "sme",
+        "smb",
+        "cto",
+        "cio",
+        "cfo",
+        "ceo",
+        "vp",
+        "avp",
+        "evp",
+        "svp",
+        "director",
+        "president",
+        "scientist",
+        "designer",
+        "programmer",
+        "tester",
     }
     # Suffixes: a token *ending* with any of these is also a role token
     # (e.g. "dotnetdeveloper", "javadeveloper", "fullstackengineer").
@@ -2084,6 +2960,43 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "amazon",
         "meta",
         "oracle",
+        # Financial/consulting/telecom organisations
+        "citi",
+        "citibank",
+        "citigroup",
+        "jpmorgan",
+        "jpm",
+        "bofa",
+        "ubs",
+        "barclays",
+        "hsbc",
+        "deutsche",
+        "fidelity",
+        "schwab",
+        "verizon",
+        "att",
+        "sprint",
+        "comcast",
+        "boeing",
+        "lockheed",
+        "raytheon",
+        "anthem",
+        "humana",
+        "cigna",
+        "aetna",
+        "kaiser",
+        "optum",
+        "unitedhealth",
+        # Telehealth / specific company names from resumes
+        "lightning",
+        "step",
+        "telehealth",
+        "tradefull",
+        "arreglo",
+        "hexaware",
+        "virtusa",
+        "mphasis",
+        "mindtree",
     }
     skills_master = _skills_master_set()
 
@@ -2240,7 +3153,7 @@ _FN_ROLE_RE = re.compile(
     r"developer|engineer|analyst|architect|consultant|tester|administrator|"
     r"specialist|devops|sre|manager|intern|sde|sdet|programmer|designer|"
     r"director|scientist|lead|coordinator|scrum\s*master|product\s*owner|"
-    r"dba|trainer|recruiter|strategist|officer|owner"
+    r"dba|trainer|recruiter|strategist|officer|owner|expert"
     r")\b|\b("
     r"data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|"
     r"full\s*stack|front\s*end|back\s*end|"
@@ -2255,7 +3168,7 @@ _FN_ROLE_RE = re.compile(
 # Tokens that are noise in filenames (not part of name or role).
 _FN_NOISE = {
     "resume", "cv", "profile", "final", "latest", "updated", "update",
-    "new", "copy", "draft", "version", "data", "docx", "pdf", "doc",
+    "new", "copy", "draft", "version", "docx", "pdf", "doc",
 }
 
 # Organisation / company tokens to strip.
@@ -2274,7 +3187,7 @@ _FN_TECH = {
     "aws", "azure", "cloud", "sql", "sap", "oracle", "salesforce",
     "sharepoint", "tableau", "power", "bi", "etl", "big", "ai", "ml",
     "devops", "fullstack", "full", "stack", "front", "end", "back",
-    "frontend", "backend", "qa", "ui", "ux",
+    "frontend", "backend", "qa", "ui", "ux", "data",
 }
 
 
@@ -2301,6 +3214,13 @@ def infer_title_from_filename(
     stem = re.sub(r"(?i)\.net\b", " dotnet ", stem)
 
     stem = re.sub(r"[.]+", " ", stem)
+
+    # ── Split CamelCase tokens ──
+    # "FullStackDeveloper" → "Full Stack Developer"
+    # "TechnicalLead" → "Technical Lead"
+    # "CloudExpert" → "Cloud Expert"
+    stem = re.sub(r"([a-z])([A-Z])", r"\1 \2", stem)
+
     stem = re.sub(r"\s+", " ", stem).strip()
 
     tokens = stem.split()
@@ -2462,6 +3382,76 @@ def _pick_best_name_pair(
         "strategic",
         "staff",
         "data",
+        # Country/abbreviation codes that pollute name extraction.
+        "de",
+        "da",
+        "us",
+        "usa",
+        "uk",
+        "uae",
+        "ops",
+        "dev",
+        "devops",
+        "devsecops",
+        "mlops",
+        "sre",
+        "engineering",
+        "requisition",
+        "data",
+        # Context words from resume content.
+        "remote",
+        "work",
+        "hybrid",
+        "onsite",
+        "contract",
+        "freelance",
+        "position",
+        "available",
+        "immediate",
+        "joiner",
+        "loved",
+        "ones",
+        "dear",
+        "hiring",
+        "company",
+        "team",
+        "notice",
+        "cloud",
+        "bi",
+        # Partial DevOps split / employment-type tokens.
+        "time",
+        "full-time",
+        "part-time",
+        "fulltime",
+        "parttime",
+        "wells",
+        # More junk tokens.
+        "ai",
+        "job",
+        "description",
+        "conducted",
+        "comprehensive",
+        "responsible",
+        "responsibilities",
+        # Common English stop words.
+        "and",
+        "the",
+        "for",
+        "with",
+        "scripts",
+        "day",
+        # Job-description verbs/nouns.
+        "troubleshoot",
+        "issues",
+        "implement",
+        "maintain",
+        "deploy",
+        "monitor",
+        "configure",
+        "ensure",
+        "support",
+        "manage",
+        "collaborate",
     }
     # Role-suffix patterns: any token ending with these is also a bad token.
     _bad_token_suffixes = (
@@ -2512,8 +3502,17 @@ def _pick_best_name_pair(
         # ── First-name dictionary signal ──────────────────────────────────
         _known = _first_names_set()
         if fn and _known:
-            if fn.casefold() in _known:
+            _fn_lower = fn.casefold()
+            if _fn_lower in _known:
                 s += 12  # positive confirmation
+            # For compound CamelCase names ("SaiSurendra"), check if the
+            # first sub-part is a known first name.
+            elif re.search(r'[a-z][A-Z]', fn):
+                _cc_parts = re.findall(r'[A-Z][a-z]+', fn)
+                if _cc_parts and _cc_parts[0].casefold() in _known:
+                    s += 12
+                else:
+                    s -= 3
             else:
                 s -= 3   # mild penalty for unknown first names
         # ── end first-name signal ─────────────────────────────────────────
@@ -2559,10 +3558,25 @@ def _pick_best_name_pair(
             return re.search(rf"\b{re.escape(ww)}\b", re.sub(r"[^a-z]+", " ", t)) is not None
 
         bonus = 0
-        if fn and has_word(fn):
+        # Handle compound CamelCase first names: "SaiSurendra" →
+        # confirm if either "Sai" or "Surendra" appears in the text.
+        _fn_parts = re.findall(r'[A-Z][a-z]+', fn) if fn and re.search(r'[a-z][A-Z]', fn) else []
+        if _fn_parts:
+            for _fp in _fn_parts:
+                if has_word(_fp):
+                    bonus += 15
+                    break
+        elif fn and has_word(fn):
             bonus += 15
         if ln and has_word(ln):
             bonus += 15
+        elif ln and re.search(r'[a-z][A-Z]', ln):
+            # Compound CamelCase surname ("DuBuc"): confirm any sub-part.
+            _ln_parts = re.findall(r'[A-Z][a-z]+', ln)
+            for _lp in _ln_parts:
+                if has_word(_lp):
+                    bonus += 15
+                    break
         return bonus
 
     def merge_body_with_filename(body: tuple[str, str], file_guess: tuple[str, str]) -> tuple[str, str]:
@@ -3142,6 +4156,10 @@ def extract_address(
         # Common action/resume words
         "client", "project", "developed", "implemented", "managed",
         "responsible", "utilizing", "leveraging",
+        # Common English words that leak into city slot via "Word, State, Country"
+        "remote", "settle", "metal", "analysis", "ms",
+        "objective", "summary", "seeking", "looking",
+        "visa", "sponsorship", "authorization",
     }
 
     def _looks_like_sql_state_suffix(full_line: str, state_match_end: int) -> bool:
@@ -3224,6 +4242,21 @@ def extract_address(
         toks_cf = {_norm_token(t) for t in tokens}
         if any(t in bad_location_tokens for t in toks_cf):
             return False
+
+        # Single-token directional/adjective prefixes are never standalone cities.
+        _prefix_only = {"new", "old", "east", "west", "north", "south",
+                        "upper", "lower", "great", "little", "grand", "big",
+                        "port", "fort", "mount", "saint", "san", "santa",
+                        "los", "las", "el", "la"}
+        if len(tokens) == 1 and any(t in _prefix_only for t in toks_cf):
+            return False
+
+        # Reject tokens containing institution keywords as substrings — catches
+        # concatenated forms like "Universityof" that slip past exact-token check.
+        for t in tokens:
+            t_lower = t.lower()
+            if any(kw in t_lower for kw in ("university", "college", "institute", "polytechnic")):
+                return False
 
         # Reject if it looks like a skill (e.g., "MySQL, Mississippi, United States").
         if len(tokens) == 1:
@@ -3777,9 +4810,21 @@ def extract_address(
         # Instead of skipping such lines entirely, redact them and still attempt location parsing.
         ln_loc = ln
         lnl_loc = lnl
-        if any(bad in lnl for bad in ["@", "http", "www."]):
+        if any(bad in lnl for bad in ["@", "http", "www.", "email:"]):
+            # Strip labeled email patterns: "Email: something@domain.com"
+            ln_loc = re.sub(r"(?i)\b(?:e[\-\s]*mail)\s*:?\s*\S*@\S+", " ", ln_loc)
+            # Strip standard emails.
             ln_loc = re.sub(r"(?i)\b\S+@\S+\b", " ", ln_loc)
+            # Strip space-broken emails from _segment_compact_line:
+            # e.g. "Ahmed.ahsanullah 95@gmail.com" where digits got separated.
+            ln_loc = re.sub(r"(?i)\b\w+[\.\w]*\s+\d+@\S+", " ", ln_loc)
+            # Strip URLs.
             ln_loc = re.sub(r"(?i)https?://\S+|www\.\S+", " ", ln_loc)
+            # Strip any leftover "name.name" fragments that look like email local parts
+            # (e.g., "Ahmed.Ahsanullah" left after the @ portion was stripped).
+            # Only strip if the line also contained '@' originally.
+            if "@" in lnl:
+                ln_loc = re.sub(r"\b[A-Za-z]+\.[A-Za-z]+(?:\d+)?\b(?!\.\w)", " ", ln_loc)
             ln_loc = re.sub(r"\s+", " ", ln_loc).strip()
             lnl_loc = ln_loc.lower()
 
@@ -3920,9 +4965,13 @@ def extract_address(
         # As above: redact emails/URLs rather than skipping the whole line,
         # since many resumes put email + location together.
         ln_loc = ln
-        if any(bad in ln.lower() for bad in ["http", "www.", "@"]):
+        if any(bad in ln.lower() for bad in ["http", "www.", "@", "email:"]):
+            ln_loc = re.sub(r"(?i)\b(?:e[\-\s]*mail)\s*:?\s*\S*@\S+", " ", ln_loc)
             ln_loc = re.sub(r"(?i)\b\S+@\S+\b", " ", ln_loc)
+            ln_loc = re.sub(r"(?i)\b\w+[\.\w]*\s+\d+@\S+", " ", ln_loc)
             ln_loc = re.sub(r"(?i)https?://\S+|www\.\S+", " ", ln_loc)
+            if "@" in ln.lower():
+                ln_loc = re.sub(r"\b[A-Za-z]+\.[A-Za-z]+(?:\d+)?\b(?!\.\w)", " ", ln_loc)
             ln_loc = re.sub(r"\s+", " ", ln_loc).strip()
 
         m_any = city_state_any.search(ln_loc)
@@ -4111,9 +5160,13 @@ def extract_linkedin(text):
         slug_match = re.search(r"/in/([a-zA-Z0-9][a-zA-Z0-9\-_%]{1,})", url)
         if not slug_match:
             return None
-        # Reject obviously-bad slugs (pure numbers, single char)
+        # Reject obviously-bad slugs (pure numbers, single char, protocol names)
         slug = slug_match.group(1)
         if slug.isdigit() or len(slug) < 2:
+            return None
+        _bad_slugs = {"http", "https", "www", "linkedin", "profile", "view",
+                      "company", "school", "jobs", "feed", "messaging"}
+        if slug.casefold() in _bad_slugs:
             return None
         return url
 
@@ -4148,14 +5201,19 @@ def extract_linkedin(text):
             if slug_raw and not slug_raw.isdigit() and len(slug_raw) >= 2:
                 return _normalise_url(f"https://www.linkedin.com/in/{slug_raw}")
         # Handle shorthand label: "LinkedIn: john-smith" or "LinkedIn: /in/john-smith"
+        # Skip if the value after the label is a full URL (already handled above)
         label_m = re.search(
             r"(?i)linked\s*in\s*[:\-]\s*(?:/\s*in\s*/\s*)?([a-zA-Z0-9][a-zA-Z0-9\-_%]{2,})",
             ln,
         )
         if label_m:
             slug = label_m.group(1).strip()
-            # Reject common false positives ("LinkedIn: Profile", "LinkedIn: View")
-            if slug.casefold() not in {"profile", "view", "link", "url", "connect", "visit"}:
+            # Reject when the label is followed by a URL (e.g. "LinkedIn: https://...")
+            _label_false_positives = {
+                "profile", "view", "link", "url", "connect", "visit",
+                "http", "https", "www", "linkedin", "company",
+            }
+            if slug.casefold() not in _label_false_positives:
                 result = _normalise_url(f"https://www.linkedin.com/in/{slug}")
                 if result:
                     return result
@@ -4510,6 +5568,11 @@ def extract_skills(text):
         "collaboration",
         "problem solving",
         "problem-solving",
+        # URL protocol / domain fragments that leak through text extraction.
+        "http",
+        "https",
+        "www",
+        "com",
     }
 
     # Phrases that appear in resumes but are not desired as tech skill tokens.
@@ -4667,18 +5730,113 @@ def extract_skills(text):
     if not found:
         return None
 
+    # Strip URL/protocol fragments that leak through text extraction.
+    _url_noise = {"http", "https", "www", "com", "org", "net", "io", "in"}
+    found -= _url_noise
+
     cleaned = sorted({re.sub(r"\s+", " ", v).strip() for v in found if v.strip()}, key=lambda x: x.casefold())
     return ", ".join(cleaned) if cleaned else None
 
 
 # ---------------- EXPERIENCE ----------------
+def _compute_experience_from_date_ranges(text: str) -> float | None:
+    """Compute total experience years from work history date ranges.
+
+    Scans for patterns like:
+        Jan 2018 - Present
+        March 2015 to December 2017
+        2015 - 2018
+        06/2019 - 03/2022
+    Returns total unique years (handles overlapping ranges).
+    """
+    from datetime import datetime as _dt
+
+    _MONTH_MAP = {
+        'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
+        'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6,
+        'jul': 7, 'july': 7, 'aug': 8, 'august': 8, 'sep': 9, 'sept': 9, 'september': 9,
+        'oct': 10, 'october': 10, 'nov': 11, 'november': 11, 'dec': 12, 'december': 12,
+    }
+
+    # Pattern: "Mon YYYY - Mon YYYY" or "Mon YYYY - Present/Current/Till Date"
+    _date_range_re = re.compile(
+        r'(?i)'
+        r'(?:([A-Za-z]{3,9})[\s.,]*)?'     # optional month name
+        r"['\u2018\u2019]?"                  # optional curly quote
+        r'(\d{1,2}[/\-.])?'                 # optional MM/ or DD/
+        r'(\d{4})'                           # year (required)
+        r'\s*(?:[–—\-]+|to)\s*'              # separator: dash, en-dash, em-dash, "to"
+        r'(?:'
+        r'(?:([A-Za-z]{3,9})[\s.,]*)?'       # optional month
+        r"['\u2018\u2019]?"
+        r'(\d{1,2}[/\-.])?'                 # optional MM/
+        r'(\d{4})'                           # end year
+        r'|'
+        r'(?:present|current|till\s*date|now|ongoing)'  # "present" etc.
+        r')'
+    )
+
+    now = _dt.now()
+    intervals = []
+
+    for m in _date_range_re.finditer(text):
+        try:
+            start_month_str = (m.group(1) or "").strip().casefold()
+            start_year = int(m.group(3))
+            start_month = _MONTH_MAP.get(start_month_str, 1)
+
+            end_month_str = (m.group(4) or "").strip().casefold()
+            end_year_str = m.group(6)
+            if end_year_str:
+                end_year = int(end_year_str)
+                end_month = _MONTH_MAP.get(end_month_str, 12)
+            else:
+                # "Present"
+                end_year = now.year
+                end_month = now.month
+
+            # Sanity: years should be in a reasonable range
+            if start_year < 1970 or start_year > now.year + 1:
+                continue
+            if end_year < 1970 or end_year > now.year + 1:
+                continue
+            if start_year > end_year:
+                continue
+
+            start_val = start_year + (start_month - 1) / 12.0
+            end_val = end_year + (end_month - 1) / 12.0
+            if end_val > start_val:
+                intervals.append((start_val, end_val))
+        except (ValueError, TypeError):
+            continue
+
+    if not intervals:
+        return None
+
+    # Merge overlapping intervals to avoid double-counting
+    intervals.sort()
+    merged = [intervals[0]]
+    for s, e in intervals[1:]:
+        if s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
+    total = sum(e - s for s, e in merged)
+    return round(total, 1) if total >= 0.5 else None
+
+
 def extract_experience_years(text):
     # Capture common variations: "6+ years", "over 6 years", "6 yrs", and PDFs with missing spaces like "6yearsofexperience".
     m = re.search(
         r"(?i)(?:over\s*|more\s*than\s*|around\s*)?(\d{1,2}(?:\.\d+)?)\s*\+?\s*(?:years|yrs)\s*(?:of\s*)?",
         text,
     )
-    return float(m.group(1)) if m else None
+    if m:
+        return float(m.group(1))
+
+    # Fallback: compute from work history date ranges
+    return _compute_experience_from_date_ranges(text)
 
 
 def extract_role_experience_years(text: str, job_title: str) -> float | None:
@@ -5021,6 +6179,149 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         # Strip leading non-title symbols (e.g., checkmarks/bullets from PDF extraction).
         t = re.sub(r"^[^A-Za-z0-9.]+", "", t).strip()
 
+        # Strip Unicode decorator symbols anywhere (❖, ★, ✦, etc.)
+        t = re.sub(r"[\u2756\u2605\u2606\u2726\u2727\u25C6\u25B6\u25BA\u27A4\u2794\u2192\u279C\u25CF\u25CB\u25A0\u25A1\u2714\u2022]", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+
+        # ── OCR artifact cleanup ────────────────────────────────────────────
+        # Garbled PDFs often substitute digits/brackets for letters via OCR:
+        # "Implementa 7 On" for "Implementation", "So8ware" for "Software",
+        # "So]ware" for "Software" (bracket replacing ligature)
+        # Strip stray brackets/braces/angle-brackets embedded in words.
+        t = re.sub(r"(?<=[A-Za-z])[\[\]{}](?=[A-Za-z])", "", t)
+        # Remove stray single digits sandwiched between letter-sequences.
+        t = re.sub(r"(?<=[A-Za-z])\s*\d\s+(?=[A-Za-z])", "", t)
+        t = re.sub(r"(?<=[A-Za-z])\d(?=[A-Za-z])", "", t)
+        # Clean up common OCR substitutions: <on → tion, 8 in middle of word
+        t = re.sub(r"<on\b", "tion", t)
+        t = re.sub(r"\bSo8ware\b", "Software", t, flags=re.IGNORECASE)
+
+        # ── Fix common OCR ligature-drop artifacts in tech terminology ──────
+        # PDFs often drop the "fi", "fl", "ft", "ti" ligatures during extraction.
+        # E.g. "Soware" → "Software", "Implementaon" → "Implementation"
+        t = re.sub(r"\bSoware\b", "Software", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bImplementaon\b", "Implementation", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bSoluons?\b",
+                    lambda m: "Solutions" if m.group().endswith("s") or m.group().endswith("S") else "Solution",
+                    t, flags=re.IGNORECASE)
+        t = re.sub(r"\bApplicaons?\b",
+                    lambda m: "Applications" if m.group().endswith("s") or m.group().endswith("S") else "Application",
+                    t, flags=re.IGNORECASE)
+        t = re.sub(r"\bAdministraon\b", "Administration", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bAutomaaon\b", "Automation", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bConfguraon\b", "Configuration", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bOperaons?\b",
+                    lambda m: "Operations" if m.group().endswith("s") or m.group().endswith("S") else "Operation",
+                    t, flags=re.IGNORECASE)
+        t = re.sub(r"\bInformaon\b", "Information", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bCommunicaons?\b",
+                    lambda m: "Communications" if m.group().endswith("s") or m.group().endswith("S") else "Communication",
+                    t, flags=re.IGNORECASE)
+        t = re.sub(r"\bFulllment\b", "Fulfillment", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bFulllment\b", "Fulfillment", t, flags=re.IGNORECASE)
+        # Common misspelling: "Fullfilment" → "Fulfillment"
+        t = re.sub(r"\bFullf[il]*ment\b", "Fulfillment", t, flags=re.IGNORECASE)
+
+        t = re.sub(r"\s+", " ", t).strip()
+
+        # ── Strip leading "City, State" prefix before role titles ──────────
+        # e.g. "Chennai, Tamilnadu Assistant Consultant" → "Assistant Consultant"
+        # Only fires when comma separates the geographic words (avoids false
+        # positives like "Fullfilment Officer" or "Team Lead").
+        _city_state_prefix = re.match(
+            r"(?i)^([A-Z][a-z]+,\s*[A-Z][a-z]+)\s+"
+            r"((?:Senior\s+|Lead\s+|Associate\s+|Principal\s+|Staff\s+|Junior\s+|Assistant\s+)?"
+            r"(?:Director|Manager|Engineer|Developer|Analyst|Architect|Consultant|Specialist|"
+            r"Administrator|Coordinator|Recruiter|Officer|VP|AVP|Technician|Scientist|"
+            r"Designer|Programmer|Tester|Lead|Head|Professor|Intern)\b.*)$",
+            t,
+        )
+        if _city_state_prefix:
+            t = _city_state_prefix.group(2).strip()
+
+        # Strip objective/seeking preamble
+        # e.g. "To seek the position for Senior Architect" → "Senior Architect"
+        t = re.sub(r"(?i)^to\s+seek\s+(?:the\s+)?(?:position|role|opportunity)\s+(?:for|as|of)\s+", "", t).strip()
+        t = re.sub(r"(?i)^to\s+(?:obtain|secure|find|get)\s+(?:a\s+|an\s+)?(?:position|role|opportunity)\s+(?:as|in|of|for)\s+", "", t).strip()
+        t = re.sub(r"(?i)^(?:objective|career\s+objective)\s*[:]\s*", "", t).strip()
+
+        # ── Reject summary-sentence titles ──────────────────────────────────
+        # e.g. "6+ Years of Experience in Developing Full Stack .NET" is a
+        # summary sentence, not a job title — return empty so fallback fires.
+        if re.match(r"(?i)^\d+\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b", t):
+            return ""
+        # Also reject "Personable Full Stack Software Developer with 7+ years"
+        # when the sentence is too long (>70 chars) and contains "with X years"
+        if len(t) > 70 and re.search(r"(?i)\bwith\s+\d+\+?\s*(?:years?|yrs?)\b", t):
+            return ""
+
+        # ── Strip "Academic Project –" / "Project –" preambles ─────────────
+        t = re.sub(r"(?i)^(?:academic\s+)?project\s*[-–—:]\s*", "", t).strip()
+
+        # ── Strip leading university / company names before role titles ──────
+        # e.g. "Harvard University Associate Director" → "Associate Director"
+        # Pattern: known institution keyword → strip everything up to and including it.
+        _uni_prefix = re.match(
+            r"(?i)^((?:[A-Z][\w.-]+\s+){0,4}"
+            r"(?:University|College|Institute|School|Academy|Polytechnic)"
+            r"(?:\s+of\s+[A-Z][\w]+)?)\s+"
+            r"((?:Senior\s+|Lead\s+|Associate\s+|Principal\s+|Staff\s+|Junior\s+)?"
+            r"(?:Director|Manager|Engineer|Developer|Analyst|Architect|Consultant|Specialist|Administrator|Coordinator|Recruiter|Officer|VP|AVP|Technician|Scientist|Designer|Programmer|Tester|Lead|Head|Dean|Professor)\b.*)$",
+            t,
+        )
+        if _uni_prefix:
+            t = _uni_prefix.group(2).strip()
+
+        # ── Strip .com / .org / .net domain suffixes from company-in-title ───
+        # e.g. "Chief Architect-MiArreglo.com" → "Chief Architect"
+        t = re.sub(r"[-–]?\s*\b[A-Za-z0-9]+\.(?:com|org|net|io|co)\b", "", t).strip(" -–—")
+
+        # Strip leading year(s) and date-range artifacts
+        # e.g. "2017 Decision Science Consultant" → "Decision Science Consultant"
+        # Also handles cascaded: "2013 – 2017 Decision Science Consultant"
+        # → after symbol strip "2013" removed → "2017 ..." still has leading year
+        for _ in range(3):  # up to 3 passes for cascaded year/separator patterns
+            t = re.sub(r"^\d{4}\s*[-–—:,/]\s*", "", t).strip()
+            t = re.sub(r"^\d{4}\s+", "", t).strip()
+            t = re.sub(r"^[-–—:,/\s]+", "", t).strip()
+            if not re.match(r"^\d{4}\b", t):
+                break
+
+        # Normalize bare ampersand between role words
+        # e.g. "ProjectManager&ScrumMaster" → "ProjectManager / ScrumMaster"
+        t = re.sub(r"(?<=[A-Za-z])&(?=[A-Za-z])", " / ", t)
+
+        # Strip trailing Remote / Hybrid / Onsite location markers
+        t = re.sub(r"(?i)\s+(?:Remote|Hybrid|Onsite)\s*,?\s*(?:[A-Z]{2})?\s*$", "", t).strip()
+        # Strip trailing "City, ST" (e.g. "Scrum Master Austin, TX")
+        t = re.sub(r"\s+[A-Z][a-z]+\s*,\s*[A-Z]{2}\s*$", "", t).strip()
+
+        # ── Strip trailing company/org segment after dash ────────────────────
+        # e.g. "Chief Architect-Mi Arreglo Com" → "Chief Architect"
+        # Detects dash-separated segment that contains company-like words.
+        _co_trail = re.search(
+            r"(?i)\s*[-–—]\s*(?:[A-Z][\w]*\s+){0,4}"
+            r"(?:Inc|LLC|Ltd|Corp|Technologies|Technology|Tech|Solutions|Services|Consulting|Group|Software|Labs|Pvt|Private|Limited|Hospital|Ventures)"
+            r"(?:\s|$)",
+            t,
+        )
+        if _co_trail:
+            t = t[: _co_trail.start()].strip()
+        # Also strip "– CompanyName" when followed by dates like Apr'15
+        _co_date_trail = re.search(
+            r"(?i)\s*[-–—]\s*[A-Za-z][\w.]*(?:\s+[A-Za-z][\w.]*){0,3}\s+"
+            r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)['\x22]?\s*\d{2,4}",
+            t,
+        )
+        if _co_date_trail:
+            t = t[: _co_date_trail.start()].strip()
+
+        # Fix PDF artifact: single letter detached from word start
+        # e.g. "F ULLSTACK DEVELOPER" → "FULLSTACK DEVELOPER"
+        # Only reattach when the first token is a single uppercase letter
+        # followed by an all-uppercase continuation (not a real initial).
+        t = re.sub(r"\b([A-Z]) ([A-Z]{2,})\b", r"\1\2", t)
+
         # Reject if it looks like a parenthetical fragment (e.g. "Services) and Backend (oracle")
         if t.count(")") > t.count("(") or t.count("(") > t.count(")") + 1:
             return ""
@@ -5046,13 +6347,19 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
 
         # Remove trailing date ranges / tenure markers often appended to titles.
         # Examples: "Dec 2022 – Till Date", "01/2020-Present", "Jun '24 — Present"
+        # Also handles abbreviated months with apostrophe-year: "Apr'15-Apr'18"
         t = re.sub(
-            r"(?i)\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s*'?\d{2,4}.*$",
+            r"(?i)\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b[.']?\s*'?\d{2,4}.*$",
             "",
             t,
         ).strip()
         t = re.sub(r"(?i)\b\d{1,2}/\d{4}.*$", "", t).strip()
         t = re.sub(r"(?i)\b(?:present|till\s+date|current)\b.*$", "", t).strip()
+
+        # Space-separated domain fragments from CamelCase splitting
+        # e.g. "Chief Architect-Mi Arreglo Com" → "Chief Architect"
+        # (must run AFTER date stripping so "Com" is at end of string)
+        t = re.sub(r"(?i)\s*[-–—]\s*(?:[A-Z][a-z]+\s+){0,3}(?:Com|Org|Net|Io)\s*$", "", t).strip(" -–—")
 
         # Drop skill-tail after dash when it looks like a tech stack, not a role.
         m_dash = re.split(r"\s+[–—-]\s+", t, maxsplit=1)
@@ -5078,6 +6385,35 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         t = re.sub(r"(?i)\bdotnet\b", ".NET", t)
         # Bare "Net" before role words → ".NET"
         t = re.sub(r"(?i)(?<!\.)Net\b(?=\s+(?:Full Stack|Developer|Engineer|Architect|Lead|Manager|Specialist|Administrator|Consultant|Programmer))", ".NET", t)
+
+        # Strip trailing parenthetical junk like "(opento Remote) +", "(Remote/Hybrid)", etc.
+        t = re.sub(r"\s*\([^)]*\)\s*[+\-–—]*\s*$", "", t).strip()
+        # Also strip trailing status markers like "+ Available Immediately"
+        t = re.sub(r"\s*\+\s*$", "", t).strip()
+
+        # Strip trailing tokens that look like social media usernames / handles.
+        # Example: "AI and Machine Learning Leader aineshpandey" → strip "aineshpandey"
+        # A username is a single all-lowercase token at the end that is NOT a role word.
+        _role_tail_words = {
+            "developer", "engineer", "analyst", "architect", "consultant",
+            "tester", "administrator", "specialist", "manager", "designer",
+            "programmer", "director", "scientist", "lead", "leader",
+            "coordinator", "master", "owner", "intern", "devops", "sre",
+            "dba", "trainer", "recruiter", "officer", "researcher",
+            "fellow", "associate", "technician", "operator",
+        }
+        _t_tokens = t.rsplit(None, 1)
+        if len(_t_tokens) == 2:
+            _tail = _t_tokens[1]
+            if (
+                _tail.islower()
+                and _tail.isalpha()
+                and len(_tail) >= 4
+                and _tail not in _role_tail_words
+                and not re.search(r"(?i)\b(?:stack|end)$", _tail)
+            ):
+                t = _t_tokens[0].strip()
+
         return t
 
     def shrink_to_role_phrase(title: str) -> str:
@@ -5091,6 +6427,15 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         t = re.sub(r"\s+", " ", t).strip()
         if not t:
             return ""
+
+        # If title has "/" separators with multiple role segments, shrink each independently.
+        if " / " in t:
+            parts = [p.strip() for p in t.split("/") if p.strip()]
+            if len(parts) >= 2:
+                shrunk = [shrink_to_role_phrase(p) for p in parts]
+                shrunk = [s for s in shrunk if s]
+                if len(shrunk) >= 2:
+                    return " / ".join(shrunk)
 
         role_words_single = {
             "developer",
@@ -5110,6 +6455,9 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             "coordinator",
             "master",
             "owner",
+            "researcher",
+            "recruiter",
+            "officer",
         }
         tech_prefix = {
             "java",
@@ -5152,6 +6500,39 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             "senior",
             "principal",
             "staff",
+            # ── Non-tech role qualifiers that form valid compound titles ──
+            "team",           # Team Lead
+            "it",             # IT Analyst
+            "assistant",      # Assistant Consultant, Assistant Manager
+            "hr",             # HR Manager
+            "account",        # Account Manager
+            "accounts",       # Accounts Executive
+            "operations",     # Operations Manager
+            "executive",      # Executive Assistant (when before "assistant")
+            "service",        # Service Desk Analyst
+            "support",        # Support Engineer
+            "sales",          # Sales Manager
+            "marketing",      # Marketing Manager
+            "product",        # Product Manager (already covered by "product" in role contexts)
+            "project",        # Project Manager
+            "program",        # Program Manager
+            "delivery",       # Delivery Manager
+            "business",       # Business Analyst
+            "information",    # Information Security Analyst
+            "production",     # Production Support Engineer
+            "application",    # Application Developer
+            "scrum",          # Scrum Master
+            "release",        # Release Engineer
+            "quality",        # Quality Analyst
+            "test",           # Test Engineer
+            "automation",     # Automation Engineer
+            "sql",            # SQL Developer, SQL/ETL Developer
+            "sql/etl",        # SQL/ETL Developer
+            "fulfillment",    # Fulfillment Officer
+            "fullfilment",    # common OCR/typo variant
+            "ux",             # UX Designer, UX Researcher
+            "ui",             # UI Designer, UI Developer
+            "ux/ui",          # UX/UI Designer
         }
 
         specific_prefix = {
@@ -5169,7 +6550,7 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
 
         # Tokenize, preserving .NET-ish tokens.
         raw_tokens = [x for x in re.split(r"\s+", t) if x]
-        tokens = [re.sub(r"[^A-Za-z0-9.+#]", "", x) for x in raw_tokens]
+        tokens = [re.sub(r"[^A-Za-z0-9.+#/]", "", x) for x in raw_tokens]
         tokens = [x for x in tokens if x]
 
         # Find the last role word position.
@@ -5252,9 +6633,10 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         r"dba|trainer|recruiter|strategist|evangelist|officer|vp|cto|cio|cfo|comptroller|"
         r"technician|operator|associate|fellow|researcher"
         r")\b|\b(data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|systems?\s+analyst|"
-        r"full\s*stack|front\s*end|back\s*end|backend|frontend|"
-        r"machine\s+learning|cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
+        r"cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
         r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer|"
+        r"machine\s+learning\s+engineer|full\s*stack\s+(?:developer|engineer)|"
+        r"front\s*end\s+(?:developer|engineer)|back\s*end\s+(?:developer|engineer)|"
         r"database\s+administrator|network\s+engineer|security\s+engineer|infrastructure\s+engineer|"
         r"release\s+engineer|build\s+engineer|test\s+engineer|automation\s+engineer|"
         r"support\s+engineer|systems?\s+engineer|embedded\s+engineer|"
@@ -5368,12 +6750,13 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         r"(?i)\b("
         r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|devops|sre|manager|intern|"
         r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner|"
-        r"dba|trainer|recruiter|strategist|evangelist|officer|vp|cto|cio|cfo|"
+        r"dba|trainer|recruiter|strategist|evangelist|officer|vp|cto|cio|cfo|executive|"
         r"technician|operator|associate|fellow|researcher"
         r")\b|\b(data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|systems?\s+analyst|"
-        r"full\s*stack|front\s*end|back\s*end|backend|frontend|"
-        r"machine\s+learning|cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
+        r"cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
         r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer|"
+        r"machine\s+learning\s+engineer|full\s*stack\s+(?:developer|engineer)|"
+        r"front\s*end\s+(?:developer|engineer)|back\s*end\s+(?:developer|engineer)|"
         r"database\s+administrator|network\s+engineer|security\s+engineer|infrastructure\s+engineer|"
         r"release\s+engineer|build\s+engineer|test\s+engineer|automation\s+engineer|"
         r"support\s+engineer|systems?\s+engineer|embedded\s+engineer|"
@@ -5405,7 +6788,7 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         r"front\s*end\s+developer|back\s*end\s+developer|react\s+developer|angular\s+developer|"
         r"node(?:\.?js)?\s+developer|"
         r"machine\s+learning\s+engineer|ai\s+engineer|ml\s+engineer|"
-        r"business\s+analyst|systems?\s+analyst|qa\s+engineer|qa\s+analyst|qa\s+lead|"
+        r"business\s+analyst|systems?\s+analyst|qa\s+engineer|qa\s+analyst|qa\s+lead|qa\s+manager|"
         r"solutions?\s+architect|technical\s+architect|systems?\s+architect|enterprise\s+architect|"
         r"technology\s+lead|technical\s+lead|team\s+lead|"
         r"big\s+data\s+engineer|etl\s+developer|bi\s+developer|"
@@ -5437,9 +6820,9 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     #   "Seeking a Full Stack Developer role where I can …"
     #   "Looking for a Senior Java Developer position"
     _seeking_role_re = re.compile(
-        r"(?i)\b(?:seeking|looking\s+for|aspiring\s+to\s+(?:be(?:come)?|work\s+as))\s+"
-        r"(?:a\s+|an\s+)?"
-        r"(?:(?:position|role|opportunity|career)\s+(?:as|in|of)\s+(?:a\s+|an\s+)?)?"
+        r"(?i)\b(?:seeking|to\s+seek|looking\s+for|aspiring\s+to\s+(?:be(?:come)?|work\s+as))\s+"
+        r"(?:a\s+|an\s+)?(?:the\s+)?"
+        r"(?:(?:position|role|opportunity|career)\s+(?:as|in|of|for)\s+(?:a\s+|an\s+)?)?"
         r"((?:(?:senior|lead|principal|staff|junior|associate)\s+)?"
         r"(?:\w[\w.#+]*\s+){0,4}"
         r"(?:developer|engineer|analyst|architect|consultant|specialist|"
@@ -5465,28 +6848,47 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     # body lines for a leading role phrase like "Senior Developer with 6 yrs…"
     # or an "Experienced <Role>" / "Results-driven <Role>" pattern.
     _obj_header_re = re.compile(
-        r"(?i)^(?:objective|professional\s+summary|summary|profile|"
+        r"(?i)^(?:objective|professional\s+summary|profile\s+summary|summary|profile|"
         r"career\s+(?:objective|summary|profile))\s*:?\s*$"
     )
     _leading_role_re = re.compile(
         r"(?i)^(?:(?:an?\s+)?(?:results?[\s-]*driven|detail[\s-]*oriented|highly[\s-]*(?:skilled|motivated|experienced)|"
-        r"experienced|accomplished|dedicated|passionate|versatile|dynamic|proactive|innovative|motivated)\s+)?"
+        r"experienced|accomplished|dedicated|passionate|versatile|dynamic|proactive|innovative|motivated|"
+        r"[\w][\w-]*certified)\s+)?"
         r"((?:(?:senior|lead|principal|staff|junior|associate)\s+)?"
-        r"(?:\w[\w.#+]*\s+){0,3}"
+        r"(?:[\w][\w.#+-]*\s+){0,3}"
         r"(?:developer|engineer|analyst|architect|consultant|specialist|"
         r"manager|designer|director|scientist|coordinator|tester|"
-        r"programmer|administrator|devops|sre))"
+        r"programmer|administrator|devops|sre|officer|recruiter|"
+        r"dba|trainer|technician|researcher|fellow|intern))"
         r"\s+(?:with|having|who|–|—|-|,|\()"
+    )
+    # Non-anchored fallback: catches "<Role> with/having" anywhere in a line
+    # when the ^-anchored _leading_role_re fails due to complex adjective
+    # preambles like "Analytical and detail-oriented Data Analyst with..."
+    _role_with_fallback_re = re.compile(
+        r"(?i)\b((?:(?:senior|lead|principal|staff|junior|associate)\s+)?"
+        r"(?:[\w][\w.#+-]*\s+){0,3}"
+        r"(?:developer|engineer|analyst|architect|consultant|specialist|"
+        r"manager|designer|director|scientist|coordinator|tester|"
+        r"programmer|administrator|devops|sre|officer|recruiter|"
+        r"dba|trainer|technician|researcher|fellow|intern))"
+        r"\s+(?:with|having|who)\b"
     )
     _nel = non_empty_lines(text)
     for idx, ln in enumerate(_nel[:20]):
-        if not _obj_header_re.match(ln.strip()):
+        # Strip decorative underscores/equals/dashes from section headers
+        # e.g. "Summary ___________________" → "Summary"
+        _ln_for_header = re.sub(r"[_=~]{3,}", "", ln.strip()).strip()
+        if not _obj_header_re.match(_ln_for_header):
             continue
         # Found objective/summary header – scan next 5 body lines
         for body_ln in _nel[idx + 1 : idx + 6]:
             body_ln = body_ln.strip()
             if not body_ln:
                 continue
+            # Strip leading bullet characters (➔, •, *, -, ❖, ▶, etc.)
+            body_ln = re.sub(r"^[\u2022\u00b7\u2794\u279C\u27A4\u2756\u25B6\u25BA\u2605★❖➔➜▶►●*\-]+\s*", "", body_ln).strip()
             # Stop if we hit another section header
             if _obj_header_re.match(body_ln) or re.match(
                 r"(?i)^(?:education|skills|experience|certification|projects?)\s*:?\s*$",
@@ -5494,14 +6896,91 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             ):
                 break
             m_lead = _leading_role_re.search(body_ln)
+            if not m_lead:
+                # Fallback: non-anchored match for lines with complex adjective
+                # preambles like "Analytical and detail-oriented Data Analyst with..."
+                m_lead = _role_with_fallback_re.search(body_ln)
             if m_lead:
                 guessed = m_lead.group(1).strip()
                 guessed = finalize_title(guessed)
                 guessed = shrink_to_role_phrase(guessed)
                 guessed = finalize_title(guessed)
+                # Reject single-word generic titles (e.g. "Designer" from
+                # summary like "accomplished UX/UI Designer and UX Researcher");
+                # the header tier will find the full multi-word title.
+                _gl = guessed.casefold()
+                _gw = _gl.split()
+                _summary_generic = {
+                    "backend", "frontend", "associate", "intern", "lead",
+                    "senior", "junior", "staff", "principal", "manager",
+                    "director", "consultant", "researcher", "trainee",
+                    "member", "analyst", "officer", "head", "executive",
+                    "designer", "architect", "administrator", "coordinator",
+                    "specialist", "supervisor", "recruiter", "scientist",
+                }
+                if len(_gw) == 1 and _gl in _summary_generic:
+                    continue  # skip, let the header tier handle it
                 if 3 <= len(guessed) <= 70 and has_role_signal(guessed.casefold()):
                     return canonicalize_job_title(guessed)
         break  # only process first matching section header
+
+    # ── INLINE summary leading-role detection ───────────────────────────────
+    # Many resumes start with an inline summary (no explicit "SUMMARY" header):
+    #   "Experienced Senior Business Analyst with 11 years in..."
+    #   "Detail-oriented Data Engineer with 5+ years of experience..."
+    # Scan the first 15 lines for this pattern regardless of section headers.
+    _section_hdr_quick = re.compile(
+        r"(?i)^\s*(?:skills|technical\s+skills|experience|work\s+experience|"
+        r"education|certifications?|projects?|summary|objective|profile)\s*[:]*\s*$"
+    )
+    for ln in _nel[:15]:
+        ln_stripped = ln.strip()
+        if not ln_stripped:
+            continue
+        # Skip section headers, contact lines, name lines
+        if _obj_header_re.match(ln_stripped):
+            continue
+        if _section_hdr_quick.match(re.sub(r"[_=~]{3,}", "", ln_stripped).strip()):
+            continue
+        if any(x in ln_stripped for x in ["@", "http", "www."]):
+            continue
+        # Strip leading bullet characters
+        ln_clean = re.sub(r"^[\u2022\u00b7\u2794\u279C\u27A4\u2756\u25B6\u25BA\u2605★❖➔➜▶►●*\-]+\s*", "", ln_stripped).strip()
+        m_lead = _leading_role_re.search(ln_clean)
+        if not m_lead:
+            m_lead = _role_with_fallback_re.search(ln_clean)
+        if m_lead:
+            guessed = m_lead.group(1).strip()
+            guessed = finalize_title(guessed)
+            guessed = shrink_to_role_phrase(guessed)
+            guessed = finalize_title(guessed)
+            # Reject single-word generic titles (same guard as summary tier above)
+            _gl2 = guessed.casefold()
+            _gw2 = _gl2.split()
+            _inline_generic = {
+                "backend", "frontend", "associate", "intern", "lead",
+                "senior", "junior", "staff", "principal", "manager",
+                "director", "consultant", "researcher", "trainee",
+                "member", "analyst", "officer", "head", "executive",
+                "designer", "architect", "administrator", "coordinator",
+                "specialist", "supervisor", "recruiter", "scientist",
+            }
+            if not (len(_gw2) == 1 and _gl2 in _inline_generic):
+                if 3 <= len(guessed) <= 70 and has_role_signal(guessed.casefold()):
+                    return canonicalize_job_title(guessed)
+
+    # ── Early initialisation of skills_master + looks_like_skills_line ──────
+    # Needed by is_plausible_job_title which is called from the header tier.
+    skills_master = _skills_master_set()
+
+    def looks_like_skills_line(line: str) -> bool:
+        # If a line contains many known skills, it's likely a skills listing.
+        toks = [t.casefold() for t in re.split(r"[^A-Za-z0-9.+#]+", line) if t]
+        hits = 0
+        for t in toks:
+            if t in skills_master:
+                hits += 1
+        return hits >= 3
 
     def is_plausible_job_title(s: str) -> bool:
         s = re.sub(r"\s+", " ", (s or "").strip())
@@ -5513,6 +6992,38 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         if not has_role_signal(sl):
             return False
         if any(x in sl for x in ["@", "http", "www."]):
+            return False
+        # Reject LinkedIn URL fragments (e.g. "Linkedin Com / In / Krishna-Raj")
+        if "linkedin" in sl:
+            return False
+        # ── Reject single-word generic titles ("Backend", "Frontend", "Lead", etc.)
+        _too_generic_singles = {
+            "backend", "frontend", "associate", "intern", "lead", "senior",
+            "junior", "staff", "principal", "manager", "director", "consultant",
+            "researcher", "trainee", "member", "analyst", "officer", "head",
+            "executive", "designer", "architect", "administrator", "coordinator",
+            "specialist", "supervisor", "recruiter", "scientist",
+        }
+        _words = sl.split()
+        if len(_words) == 1 and sl in _too_generic_singles:
+            return False
+        # ── Reject two-word skill-only phrases that are NOT job titles ──
+        _too_generic_pairs = {
+            "machine learning", "generative ai", "artificial intelligence",
+            "deep learning", "data science", "big data", "cloud computing",
+            "data analytics", "business intelligence", "cyber security",
+            "natural language", "computer vision",
+        }
+        if sl in _too_generic_pairs:
+            return False
+        # ── Reject summary-sentence titles ("6+ years of experience...")
+        if re.match(r"(?i)^\d+\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b", sl):
+            return False
+        # Reject known software product names that contain role-signal words
+        _product_names = {"affinity designer", "affinity photo", "adobe illustrator",
+                          "visual studio", "android studio", "unity editor",
+                          "unreal editor", "unreal engine", "game maker"}
+        if sl.strip() in _product_names:
             return False
         # Reject unbalanced parenthetical fragments (garbage extraction)
         if s.count(")") != s.count("("):
@@ -5535,6 +7046,35 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
             "experienced ",
             "hands on ",
             "hands-on ",
+            # Reject sentence-fragment titles starting with resume verbs/adjectives
+            "demonstrated ",
+            "proven ",
+            "strong ",
+            "skilled ",
+            "proficient ",
+            "adept ",
+            "excellent ",
+            "extensive ",
+            "passionate ",
+            "dedicated ",
+            "committed ",
+            "collaborative ",
+            "effective ",
+            "ability ",
+            "capable ",
+            "competent ",
+            # Resume action-verb starts that are not titles
+            "managed ",
+            "led ",
+            "created ",
+            "built ",
+            "delivered ",
+            "oversaw ",
+            "spearheaded ",
+            "coordinated ",
+            "performed ",
+            "conducted ",
+            "handled ",
         )):
             return False
 
@@ -5648,7 +7188,41 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
 
     # Prefer the earliest clean title-looking line in the header.
     # First-page / header blocks can be 20-25 non-empty lines tall, so scan[:25].
+    # Track section boundaries: once we enter a "skip" section (Skills, Education,
+    # Certifications), skip all lines until a new section header appears.
+    # Experience / Summary sections are NOT skipped — they contain job titles.
+    _skip_section_re = re.compile(
+        r"(?i)^\s*(?:"
+        r"skills|technical\s+skills|core\s+skills|key\s+skills|core\s+competenc|"
+        r"education|certifications?|projects?|publications?|"
+        r"awards?|achievements?|languages?|hobbies|interests?|"
+        r"references?"
+        r")\s*[:]*\s*$"
+    )
+    _any_section_re = re.compile(
+        r"(?i)^\s*(?:"
+        r"skills|technical\s+skills|core\s+skills|key\s+skills|core\s+competenc|"
+        r"experience|work\s+experience|professional\s+experience|"
+        r"education|certifications?|projects?|publications?|"
+        r"awards?|achievements?|languages?|hobbies|interests?|"
+        r"references?|summary|professional\s+summary|objective|profile"
+        r")\s*[:]*\s*$"
+    )
+    _in_skip_section = False
     for idx, ln in enumerate(lines[:25]):
+        _ln_stripped = ln.strip()
+        # Check if this is any section header.
+        if _any_section_re.match(_ln_stripped):
+            # If it's a "skip" section, enter skip mode.
+            if _skip_section_re.match(_ln_stripped):
+                _in_skip_section = True
+                continue
+            else:
+                # Non-skip section (Experience, Summary) — exit skip mode.
+                _in_skip_section = False
+                continue  # still skip the header line itself
+        if _in_skip_section:
+            continue
         for raw in header_variants(ln):
             compact = re.sub(r"\s+", " ", raw).strip()
             if not (4 <= len(compact) <= 70):
@@ -5663,19 +7237,38 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
                     lnl = compact.casefold()
                 else:
                     continue
-            if any(x in lnl for x in ["summary", "objective", "profile", "skills", "experience", "education", "certification"]):
+            if any(x in lnl for x in ["summary", "objective", "profile"]):
+                continue
+            if any(x in lnl for x in ["skills", "education", "certification"]):
+                _in_skip_section = True
                 continue
             # Avoid labeled/list lines.
             if any(ch in compact for ch in [":", "•"]):
                 continue
             if is_cert_or_exam_line(compact):
+                # Try stripping certification prefix — the line might encode a real role
+                # e.g. "(Certified Salesforce Developer)" → "Salesforce Developer"
+                _cert_stripped = re.sub(r"(?i)\b(?:certified|certificate)\b\s*", "", compact).strip(" ()[]")
+                if _cert_stripped and has_role_signal(_cert_stripped.casefold()) and not is_cert_or_exam_line(_cert_stripped):
+                    compact = _cert_stripped
+                    lnl = compact.casefold()
+                else:
+                    continue
+            # Reject LinkedIn URL fragments in header
+            if "linkedin" in lnl:
                 continue
             cand = strip_leading_candidate_name(compact)
             cand = finalize_title(cand)
             cand = pick_best_role_segment(cand)
             cand = shrink_to_role_phrase(cand)
             cand = finalize_title(cand)
-            if 3 <= len(cand) <= 70 and has_role_signal(cand.casefold()):
+            if 3 <= len(cand) <= 70 and has_role_signal(cand.casefold()) and is_plausible_job_title(cand):
+                _cand_cf = cand.casefold()
+                # Reject sentences, skill lists, LinkedIn fragments in header
+                if "linkedin" in _cand_cf:
+                    continue
+                if cand.count(",") >= 2 or cand.count(";") >= 1:
+                    continue
                 # Strip candidate name prefixes like "Harish .Net Developer"
                 if fn and cand.lower().startswith(fn + " "):
                     cand = cand[len(fn) + 1 :].strip()
@@ -5684,10 +7277,8 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
                 cand = finalize_title(cand)
                 cand = shrink_to_role_phrase(cand)
                 cand = finalize_title(cand)
-                if 3 <= len(cand) <= 70 and has_role_signal(cand.casefold()):
+                if 3 <= len(cand) <= 70 and has_role_signal(cand.casefold()) and is_plausible_job_title(cand):
                     return canonicalize_job_title(cand)
-
-    skills_master = _skills_master_set()
 
     education_markers = [
         "bachelor",
@@ -5704,6 +7295,8 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         "degree",
         "university",
         "college",
+        "associate of",
+        "diploma",
     ]
 
     def looks_like_name_line(line: str) -> bool:
@@ -5730,15 +7323,6 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
 
         # Otherwise: treat generic 2-4 Title-Case tokens as a likely name header.
         return True
-
-    def looks_like_skills_line(line: str) -> bool:
-        # If a line contains many known skills, it's likely a skills listing.
-        toks = [t.casefold() for t in re.split(r"[^A-Za-z0-9.+#]+", line) if t]
-        hits = 0
-        for t in toks:
-            if t in skills_master:
-                hits += 1
-        return hits >= 3
 
     def score_title_candidate(line: str, idx: int) -> int:
         l = line.casefold()
@@ -5776,7 +7360,7 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         if any(x in l for x in ["education", "skills", "certification"]):
             score -= 12
         if any(x in l for x in education_markers):
-            score -= 30
+            score -= 200          # hard reject – degrees are never job titles
         if any(x in l for x in ["@", "http", "www."]):
             score -= 30
         if any(x in l for x in ["visa", "ead", "h1b", "c2c", "w2", "usc", "citizen"]):
@@ -5873,7 +7457,9 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         if has_role_signal(lnl) and 4 <= len(ln) <= 70:
             if any(x in lnl for x in ["@", "http", "www."]):
                 continue
-            if any(x in lnl for x in ["education", "skills", "certification"]):
+            if any(x in lnl for x in ["education", "skills", "certification", "certified"]):
+                continue
+            if is_cert_or_exam_line(ln):
                 continue
             if any(x in lnl for x in education_markers):
                 continue
@@ -5905,7 +7491,7 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
     #   Work Experience
     #   Full time - Company LLC - Software Developer (Jan. 2023 – Aug. 2024)
     _exp_header_re = re.compile(
-        r"(?i)^(?:(?:professional|relevant|work)\s+)?experience(?:\s+(?:summary|history))?\s*:?\s*$"
+        r"(?i)^(?:(?:professional|relevant|work|working)\s+)?experience(?:\s+(?:summary|history))?\s*:?\s*$"
     )
     _date_range_re = re.compile(
         r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
@@ -5946,7 +7532,7 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
                     seg_clean = finalize_title(seg_clean)
                     seg_clean = shrink_to_role_phrase(seg_clean)
                     seg_clean = finalize_title(seg_clean)
-                    if 3 <= len(seg_clean) <= 70 and has_role_signal(seg_clean.casefold()):
+                    if 3 <= len(seg_clean) <= 70 and has_role_signal(seg_clean.casefold()) and is_plausible_job_title(seg_clean):
                         if not is_cert_or_exam_line(seg_clean):
                             return canonicalize_job_title(seg_clean)
             # If no inline segments matched, skip pure company/location lines
@@ -5954,26 +7540,182 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
                 continue
 
             # Standard format: "Associate Lead  Nov 2019 – Sept 2022"
-            cleaned = _date_range_re.split(exp_ln)[0].strip()
+            # Also handle DOCX format: "Company, City  Date Range  Job Title"
+            # where the role appears AFTER the date range.
+            _date_parts = _date_range_re.split(exp_ln)
+            cleaned = _date_parts[0].strip()
             cleaned = _year_re.split(cleaned)[0].strip()
             # Remove trailing parenthetical dates: "Software Developer (Jan 2023 ...)"
             cleaned = re.sub(r"\(.*$", "", cleaned).strip()
             # Remove trailing separators and whitespace
             cleaned = re.sub(r"[\s,|–—-]+$", "", cleaned).strip()
             if not cleaned:
-                continue
-            # Also try comma-prefix: "Senior Software Engineer, ProArch IT"
-            if "," in cleaned:
-                cleaned = cleaned.split(",")[0].strip()
-            cleaned = finalize_title(cleaned)
-            cleaned = shrink_to_role_phrase(cleaned)
-            cleaned = finalize_title(cleaned)
-            if 3 <= len(cleaned) <= 70 and has_role_signal(cleaned.casefold()):
-                if not is_cert_or_exam_line(cleaned):
-                    return canonicalize_job_title(cleaned)
+                # If nothing before date, try after (rare)
+                pass
+            else:
+                # Also try comma-prefix: "Senior Software Engineer, ProArch IT"
+                if "," in cleaned:
+                    cleaned = cleaned.split(",")[0].strip()
+                cleaned = finalize_title(cleaned)
+                cleaned = shrink_to_role_phrase(cleaned)
+                cleaned = finalize_title(cleaned)
+                if 3 <= len(cleaned) <= 70 and has_role_signal(cleaned.casefold()) and is_plausible_job_title(cleaned):
+                    if not is_cert_or_exam_line(cleaned):
+                        return canonicalize_job_title(cleaned)
+
+            # ── Also check text AFTER the date range. ──────────────────────
+            # Handles DOCX lines like:
+            #   "Swift Transportation, Charlotte, NC   Feb 2024 to Present  Data Analyst"
+            # where the role title appears after the date range.
+            if len(_date_parts) >= 2:
+                after_date = _date_parts[-1].strip()
+                # Strip leading connectors: "to Present", "– Present", "- Current", year, etc.
+                after_date = re.sub(
+                    r"^(?:to\s+)?(?:present|current|till\s+date|date|now)\b[\s,|–—-]*",
+                    "", after_date, flags=re.IGNORECASE,
+                ).strip()
+                after_date = _year_re.sub("", after_date).strip()
+                after_date = re.sub(r"^[\s,|–—-]+", "", after_date).strip()
+                after_date = re.sub(r"[\s,|–—-]+$", "", after_date).strip()
+                if after_date:
+                    after_date = finalize_title(after_date)
+                    after_date = shrink_to_role_phrase(after_date)
+                    after_date = finalize_title(after_date)
+                    if 3 <= len(after_date) <= 70 and has_role_signal(after_date.casefold()) and is_plausible_job_title(after_date):
+                        if not is_cert_or_exam_line(after_date):
+                            return canonicalize_job_title(after_date)
         break  # only process first experience section
 
     return ""
+
+
+def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = "") -> str:
+    """Extract ALL job titles from a resume, returning them pipe-separated.
+
+    Resumes often list multiple roles in the header area:
+      "Cloud Engineer | DevOps Engineer | System Engineer"
+      "Senior Data Engineer / Data Analyst"
+      "DevOps Engineer – SRE – Cloud Engineer"
+
+    This function first looks for multi-role header lines and extracts each
+    distinct role.  If no multi-role line is found, falls back to the standard
+    single ``extract_job_title`` function.
+
+    Returns a string like "Cloud Engineer | DevOps Engineer | System Engineer".
+    """
+    _role_signal_re = re.compile(
+        r"(?i)\b("
+        r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|"
+        r"devops|sre|manager|intern|sde|sdet|programmer|designer|director|scientist|lead|"
+        r"coordinator|scrum\s*master|product\s*owner|dba|trainer|recruiter|officer|"
+        r"data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|"
+        r"full\s*stack|front\s*end|back\s*end|solutions?\s+architect|"
+        r"technical\s+lead|team\s+lead|tech\s+lead"
+        r")\b"
+    )
+    _section_words = {"summary", "objective", "profile", "skills", "experience",
+                      "education", "certification", "certifications", "projects"}
+
+    lines = non_empty_lines(text)
+
+    fn_cf = (first_name or "").casefold()
+    ln_cf = (last_name or "").casefold()
+
+    for idx, ln in enumerate(lines[:25]):
+        ln_stripped = ln.strip()
+        lnl = ln_stripped.casefold()
+
+        # Skip section headers, contact lines, cert lines
+        if any(w in lnl for w in _section_words):
+            continue
+        if "@" in lnl or "http" in lnl or "www." in lnl:
+            continue
+
+        # Must contain at least one separator (pipe, slash, dash, en-dash, em-dash)
+        # AND at least 2 distinct role signals
+        segments: list[str] = []
+        # Try pipe first (most explicit)
+        if "|" in ln_stripped:
+            segments = [s.strip() for s in ln_stripped.split("|") if s.strip()]
+        elif " / " in ln_stripped:
+            segments = [s.strip() for s in ln_stripped.split("/") if s.strip()]
+        elif re.search(r"\s+[\u2013\u2014]\s+", ln_stripped):
+            segments = [s.strip() for s in re.split(r"\s+[\u2013\u2014]\s+", ln_stripped) if s.strip()]
+        elif " - " in ln_stripped:
+            segments = [s.strip() for s in ln_stripped.split(" - ") if s.strip()]
+
+        if len(segments) < 2:
+            continue
+
+        # Validate: each segment must contain a role signal
+        valid_titles: list[str] = []
+        for seg in segments:
+            seg = seg.strip(" -:•·,")
+            # ── Preamble / decorator cleanup (matches finalize_title logic) ───
+            # Strip unicode decorators (❖ ★ etc.)
+            seg = re.sub(r"[❖★☆✦✧◆▶►➤➔→➜●○■□✔•]", " ", seg)
+            # Strip seeking / objective preambles
+            seg = re.sub(r"(?i)^to\s+seek\s+(?:the\s+)?(?:position|role|opportunity)\s+(?:for|as|of)\s+", "", seg).strip()
+            seg = re.sub(r"(?i)^(?:seeking|looking\s+for|to\s+obtain|to\s+secure|to\s+find)\s+(?:a\s+|an\s+)?(?:position|role|opportunity)\s+(?:as|in|of|for)\s+(?:a\s+|an\s+)?", "", seg).strip()
+            seg = re.sub(r"(?i)^objective\s*:\s*", "", seg).strip()
+            # Strip leading year (e.g. "2017 Decision Science Consultant")
+            seg = re.sub(r"^\d{4}\s+", "", seg).strip()
+            # Normalize ampersand gluing: "Manager&Scrum" → "Manager / Scrum"
+            seg = re.sub(r"(?<=[A-Za-z])&(?=[A-Za-z])", " / ", seg)
+            seg = re.sub(r"\s+", " ", seg).strip()
+            # ── end preamble cleanup ──────────────────────────────────────────
+
+            # Skip candidate name segments
+            seg_cf = seg.casefold()
+            if fn_cf and seg_cf == fn_cf:
+                continue
+            if ln_cf and seg_cf == ln_cf:
+                continue
+            # Strip leading name tokens
+            if fn_cf and seg_cf.startswith(fn_cf + " "):
+                seg = seg[len(fn_cf) + 1:].strip()
+            if not seg or len(seg) < 3 or len(seg) > 80:
+                continue
+            # Reject certification lines (e.g. "AWS Certified Solution Architect")
+            _seg_lc = seg.casefold()
+            if any(kw in _seg_lc for kw in ("certified", "certification", "certificate", "exam")):
+                continue
+            if re.search(r"\b(?:az|dp|ai|sc|pl|mb)-?\d{3}\b", _seg_lc):
+                continue
+            # Reject LinkedIn URL fragments
+            if "linkedin" in seg_cf:
+                continue
+            if not _role_signal_re.search(seg):
+                continue
+            # Reject overly generic single-word segments ("Frontend", "Backend")
+            seg_words = seg.split()
+            if len(seg_words) == 1 and seg_cf in {
+                "frontend", "backend", "associate", "intern", "lead",
+                "designer", "architect", "administrator", "coordinator",
+                "specialist", "supervisor", "recruiter", "scientist",
+            }:
+                continue
+            # Clean up
+            title = canonicalize_job_title(seg)
+            if title and len(title) >= 3:
+                valid_titles.append(title)
+
+        # Need at least 2 valid role titles for this to be a multi-title line
+        if len(valid_titles) >= 2:
+            # Deduplicate while preserving order
+            seen: set[str] = set()
+            unique: list[str] = []
+            for t in valid_titles:
+                key = t.casefold()
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(t)
+            # Cap at 3 titles to avoid overly long composite titles
+            unique = unique[:3]
+            return " | ".join(unique)
+
+    # Fallback to single title extraction
+    return extract_job_title(text, first_name=first_name, last_name=last_name)
 
 
 def main() -> int:
@@ -6059,6 +7801,8 @@ def main() -> int:
         if not resume_dir.exists():
             raise SystemExit(f"Resume input folder not found: {resume_dir}")
 
+        _log.info("=== Parse run started  dir=%s  env=%s ===", resume_dir, _deploy_env)
+
         for entry in sorted(resume_dir.iterdir(), key=lambda p: p.name.casefold()):
             if not entry.is_file():
                 continue
@@ -6094,16 +7838,23 @@ def main() -> int:
                 )
                 if not quiet:
                     print(f"Skipped (parse error): {file} ({e.__class__.__name__})")
+                _log.warning("SKIPPED [%s] reason=%s timeout=%s", file, e.__class__.__name__, is_timeout)
                 continue
 
             resume_text = normalize_text(resume_text)
+            # Collapse PDF character-spacing artefacts *before* any extraction.
+            # "Z e e n a t  N a e e m" → "Zeenat Naeem", etc.
+            resume_text = collapse_char_spacing(resume_text)
+            # Fix common OCR artifacts (ligature drops, bracket substitutions,
+            # CID placeholders) so all extractors see corrected text.
+            resume_text = ocr_cleanup(resume_text)
             extraction_text = resume_text + ("\n" + "\n".join(links) if links else "")
             resume_text_norm = resume_text.lower()
 
             # Priority block:
             # Both PDFs and DOCXs now produce a ``first_page_text`` / header-block
             # so all field extraction uses the same first-page-priority path.
-            priority_source_text = normalize_text(first_page_text) if first_page_text else resume_text
+            priority_source_text = ocr_cleanup(collapse_char_spacing(normalize_text(first_page_text))) if first_page_text else resume_text
             header_text, header_extraction_text = _build_header_text(
                 priority_source_text,
                 links,
@@ -6156,6 +7907,12 @@ def main() -> int:
                 file_name_guess=file_name_guess,
                 email_guess=email_guess,
                 confirm_text=resume_text,
+            )
+
+            _log.debug(
+                "NAME-RAW  [%s] body=%s  file=%s  email=%s  picked=(%s, %s)",
+                file, body_name, file_name_guess, email_guess,
+                first_name, last_name,
             )
 
             # If the extracted name parts are actually skill/role tokens (e.g., "Net", "Data"), drop them.
@@ -6270,30 +8027,182 @@ def main() -> int:
                 "json",
                 "html",
                 "css",
+                # Section headings that get mis-parsed as person names.
+                "career",
+                "highlights",
+                "summary",
+                "objective",
+                "professional",
+                "profile",
+                "overview",
+                "introduction",
+                "experience",
+                "education",
+                "qualifications",
+                "skills",
+                "accomplishments",
+                "achievements",
+                "references",
+                # ── Additional non-name tokens that slipped through ──
+                "remote",
+                "work",
+                "hybrid",
+                "onsite",
+                "contract",
+                "freelance",
+                "requisition",
+                "position",
+                "available",
+                "immediate",
+                "joiner",
+                "loved",
+                "ones",
+                "dear",
+                "ops",
+                "devops",
+                "devsecops",
+                "sre",
+                "mlops",
+                "de",
+                "da",
+                "se",
+                "sde",
+                "sdet",
+                "us",
+                "usa",
+                "uk",
+                "uae",
+                "india",
+                "canada",
+                "engineering",
+                "programmer",
+                "designer",
+                "trainer",
+                "recruiter",
+                "coordinator",
+                "officer",
+                "strategist",
+                "evangelist",
+                "technician",
+                "researcher",
+                "hadoop",
+                "kafka",
+                "tableau",
+                "power",
+                "bi",
+                "etl",
+                "sap",
+                "oracle",
+                "salesforce",
+                "sharepoint",
+                "pipeline",
+                "pipelines",
+                "warehouse",
+                # Partial DevOps split / employment-type tokens.
+                "dev",
+                "time",
+                "full-time",
+                "part-time",
+                "fulltime",
+                "parttime",
+                "wells",
+                # More junk tokens.
+                "ai",
+                "job",
+                "description",
+                "conducted",
+                "comprehensive",
+                "responsible",
+                "responsibilities",
+                # Common English stop words that are never person names.
+                "and",
+                "the",
+                "for",
+                "with",
+                "scripts",
+                "day",
+                # Job-description verbs/nouns.
+                "troubleshoot",
+                "issues",
+                "implement",
+                "maintain",
+                "deploy",
+                "monitor",
+                "configure",
+                "ensure",
+                "support",
+                "manage",
+                "collaborate",
+                # Company/org/domain tokens that bleed into names from filenames.
+                "tech",
+                "technologies",
+                "technology",
+                "lightning",
+                "step",
+                "telehealth",
+                "finance",
+                "healthcare",
+                "banking",
+                "ats",
+                "accounting",
+                "inc",
+                "llc",
+                "ltd",
+                "corp",
+                "pvt",
+                "limited",
+                "php",
+                "js",
+                "ruby",
+                "html",
+                "css",
+                "xml",
             }
             us_state_names = {v.casefold() for v in US_STATE_ABBR_TO_FULL.values()}
+            # US state abbreviation codes (2-letter) that should not be last names.
+            _us_state_abbrs = {s.casefold() for s in US_STATE_ABBR_TO_FULL}  # "dc", "ca", "ny", ...
             def _compact_token(s: str) -> str:
                 return re.sub(r"[^a-z0-9.+#]", "", (s or "").casefold().strip())
 
+            def _is_roleish_or_junk(tok: str) -> bool:
+                """Return True if a name token is actually a role/tech/junk word."""
+                t = (tok or "").casefold().strip()
+                c = _compact_token(tok)
+                return bool(
+                    t in roleish
+                    or c in roleish
+                    or t in skills_master
+                    or c in skills_master
+                    or t in us_state_names
+                    or t in _us_state_abbrs
+                )
+
+            # ── Garbled-name heuristic ──
+            # If a name token is extremely long (>14 chars) it is almost certainly
+            # glued OCR / garbled PDF text (e.g. "Minimizingmanual").  Blank it so
+            # the filename fallback can provide something sensible.
+            def _looks_garbled(tok: str) -> bool:
+                t = (tok or "").strip()
+                if len(t) > 14:
+                    return True
+                # Token contains digits mixed with alpha (e.g., "19Ap12Dec")
+                if re.search(r"\d", t) and re.search(r"[A-Za-z]", t) and len(t) > 4:
+                    return True
+                return False
+
+            if first_name and _looks_garbled(first_name):
+                first_name = ""
+            if last_name and _looks_garbled(last_name):
+                last_name = ""
+
             fn_cf = (first_name or "").casefold().strip()
             fn_compact = _compact_token(first_name)
-            if first_name and (
-                fn_cf in skills_master
-                or fn_compact in skills_master
-                or fn_compact in roleish
-                or fn_cf in roleish
-            ):
+            if first_name and _is_roleish_or_junk(first_name):
                 first_name = ""
 
             ln_cf = (last_name or "").casefold().strip()
             ln_cf_compact = _compact_token(last_name)
-            if last_name and (
-                ln_cf in skills_master
-                or ln_cf_compact in skills_master
-                or ln_cf_compact in roleish
-                or ln_cf in roleish
-                or ln_cf in us_state_names
-            ):
+            if last_name and _is_roleish_or_junk(last_name):
                 last_name = ""
 
             # Prefer filename-based names when the body result is obviously incomplete or title-ish.
@@ -6306,15 +8215,18 @@ def main() -> int:
             # garbage from a garbled PDF.  Prefer the filename in that case.
             if first_name and not last_name and f_fn:
                 if first_name.casefold() != f_fn.casefold():
+                    # Only adopt filename pair if f_ln isn't also junk.
                     first_name = f_fn
-                    last_name = f_ln or ""
+                    last_name = f_ln if f_ln and not _is_roleish_or_junk(f_ln) else ""
 
             # If last name is missing, or looks like initials, fill from filename when consistent.
+            # Guard: never re-insert a roleish/junk f_ln that was stripped above.
             ln_alpha = re.sub(r"[^A-Za-z]", "", (last_name or ""))
             f_ln_alpha = re.sub(r"[^A-Za-z]", "", (f_ln or ""))
-            if f_fn and f_ln and first_name and first_name.casefold() == f_fn.casefold():
+            _f_ln_clean = f_ln if (f_ln and not _is_roleish_or_junk(f_ln)) else ""
+            if f_fn and _f_ln_clean and first_name and first_name.casefold() == f_fn.casefold():
                 if not last_name:
-                    last_name = f_ln
+                    last_name = _f_ln_clean
                 elif 1 <= len(ln_alpha) <= 3 and len(f_ln_alpha) >= 5:
                     # Only expand a short initial to the filename's full last name when
                     # the first letter matches — "K" → "Kumar" is correct, but
@@ -6336,6 +8248,11 @@ def main() -> int:
             #   Tier 1: first_page/header block (most reliable – fewest noise lines)
             #   Tier 2: full text with links appended
             #   Tier 3: raw resume_text (final safety net)
+
+            _log.debug(
+                "NAME-FINAL[%s] first=%r  last=%r  (after roleish/garbled/fallback filtering)",
+                file, first_name, last_name,
+            )
 
             # Phone ──────────────────────────────────────────────────────────────
             phone = (
@@ -6440,16 +8357,26 @@ def main() -> int:
             # Tier 2: full priority_source_text (wider first-page slice)
             # Tier 3: entire resume text (deepest fallback)
             # Tier 4: filename hint (e.g. "Manickam C_QA lead.docx")
+            # Uses extract_all_job_titles to capture multiple roles like
+            # "Cloud Engineer | DevOps Engineer | System Engineer"
             job_title = (
-                extract_job_title(header_text, first_name=first_name, last_name=last_name)
+                extract_all_job_titles(header_text, first_name=first_name, last_name=last_name)
                 or (
-                    extract_job_title(priority_source_text, first_name=first_name, last_name=last_name)
+                    extract_all_job_titles(priority_source_text, first_name=first_name, last_name=last_name)
                     if priority_source_text and priority_source_text != header_text
                     else None
                 )
-                or extract_job_title(resume_text, first_name=first_name, last_name=last_name)
+                or extract_all_job_titles(resume_text, first_name=first_name, last_name=last_name)
                 or infer_title_from_filename(file, first_name=first_name, last_name=last_name)
             )
+            # If body extraction returned a very short/generic title (single word like
+            # "Engineer"), but the filename encodes a more specific role (e.g. "Cloud
+            # Engineer"), prefer the filename.  This commonly happens with char-spaced
+            # PDFs where the title is split across non-adjacent lines.
+            if job_title and len(job_title.split()) <= 1:
+                _fn_title = infer_title_from_filename(file, first_name=first_name, last_name=last_name)
+                if _fn_title and len(_fn_title) > len(job_title):
+                    job_title = _fn_title
             skills = canonicalize_skill_list(extract_skills(resume_text) or "") or None
             experience_years = extract_role_experience_years(resume_text_norm, job_title) or extract_experience_years(resume_text_norm)
             certifications = extract_standard_certifications(resume_text, job_title=job_title, skills=skills)
@@ -6501,8 +8428,28 @@ def main() -> int:
                 first_name, last_name = validate_name(first_name, last_name)
                 address = validate_location(address)
                 qualification = validate_degree(qualification)
+                _pre_val_title = job_title
                 job_title = validate_applied_title(job_title, resume_text)
+                # If validation stripped a structurally-valid title (e.g. it
+                # appeared only in the experience section), keep the original
+                # so we don't lose genuinely-useful role information.
+                if not job_title and _pre_val_title:
+                    job_title = _pre_val_title
             # ── end validation layer ──────────────────────────────────────────
+
+            # ── Per-candidate extraction log ──────────────────────────────────
+            _log.info(
+                "PARSED [%s] name=(%s, %s) title=%s email=%s edu=%s certs=%s",
+                file, first_name, last_name, job_title, email,
+                (qualification or "")[:80], (certifications or "")[:80],
+            )
+            _log.debug(
+                "DETAIL [%s] phone=%s addr=%s visa=%s/%s linkedin=%s exp=%s",
+                file, phone_to_store if 'phone_to_store' in dir() else phone,
+                (address or "")[:60], visa_support, visa_type,
+                (linkedin or "")[:60], experience_years,
+            )
+            # ── end extraction log ────────────────────────────────────────────
 
             # professional_experience removed
 
@@ -6532,46 +8479,108 @@ def main() -> int:
                 # Default: store a relative path (or a URL when base_url is set).
                 resume_file_ref = url or path_ref
 
-            cursor.execute(
-                f"""
-                INSERT INTO {CANDIDATES_TABLE}
-                (first_name, last_name, address, phone, email, qualification,
-                 visa_support, work_authorization_type, linkedin, resume_filename,
-                 resume_sha256, parsed_at, education_structured)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (resume_sha256) DO UPDATE SET
-                    first_name = EXCLUDED.first_name,
-                    last_name = EXCLUDED.last_name,
-                    address = EXCLUDED.address,
-                    phone = EXCLUDED.phone,
-                    email = EXCLUDED.email,
-                    qualification = EXCLUDED.qualification,
-                    visa_support = EXCLUDED.visa_support,
-                    work_authorization_type = EXCLUDED.work_authorization_type,
-                    linkedin = EXCLUDED.linkedin,
-                    resume_filename = EXCLUDED.resume_filename,
-                    parsed_at = EXCLUDED.parsed_at,
-                    education_structured = EXCLUDED.education_structured
-                RETURNING id
-            """,
-                (
-                    first_name if first_name and str(first_name).lower() != "none" else None,
-                    last_name if last_name and str(last_name).lower() != "none" else None,
-                    address,
-                    phone_to_store,
-                    email,
-                    qualification or None,
-                    visa_support,
-                    visa_type,
-                    linkedin,
-                    resume_file_ref,
-                    resume_sha256,
-                    parsed_at,
-                    _edu_structured,
-                ),
-            )
+            # ── Person-level de-duplication ───────────────────────────────
+            # The SHA-256 ON CONFLICT handles byte-identical files.  But the
+            # same person's resume uploaded as a different file (different
+            # version, different filename convention, PDF vs DOCX, etc.)
+            # produces a different hash.  Detect the same person via email or
+            # (first_name + last_name) and UPDATE the existing row instead of
+            # creating a duplicate.
+            _safe_fn = first_name if first_name and str(first_name).lower() != "none" else None
+            _safe_ln = last_name if last_name and str(last_name).lower() != "none" else None
 
-            candidate_id = cursor.fetchone()[0]
+            # --- DEBUG: trace name values at DB write point ---
+            if "vamshi" in file.lower():
+                print(f"DEBUG [{file}] first_name={first_name!r}, last_name={last_name!r}, _safe_fn={_safe_fn!r}, _safe_ln={_safe_ln!r}")
+            # --- end DEBUG ---
+
+            _existing_id = None
+            # 1) Email match — strongest identity signal
+            if email and email.strip():
+                cursor.execute(
+                    f"SELECT id FROM {CANDIDATES_TABLE} WHERE LOWER(email) = LOWER(%s) LIMIT 1",
+                    (email.strip(),),
+                )
+                _row = cursor.fetchone()
+                if _row:
+                    _existing_id = _row[0] if isinstance(_row, (tuple, list)) else _row.get("id", _row[0])
+
+            # 2) Name match — fallback when email is missing or different
+            if _existing_id is None and _safe_fn and _safe_ln and len(_safe_ln) > 1:
+                cursor.execute(
+                    f"""SELECT id FROM {CANDIDATES_TABLE}
+                        WHERE LOWER(first_name) = LOWER(%s)
+                          AND LOWER(last_name) = LOWER(%s)
+                        LIMIT 1""",
+                    (_safe_fn, _safe_ln),
+                )
+                _row = cursor.fetchone()
+                if _row:
+                    _existing_id = _row[0] if isinstance(_row, (tuple, list)) else _row.get("id", _row[0])
+
+            if _existing_id is not None:
+                # Update the existing candidate row instead of inserting a duplicate.
+                cursor.execute(
+                    f"""UPDATE {CANDIDATES_TABLE} SET
+                            first_name = %s, last_name = %s, address = %s,
+                            phone = %s, email = %s, qualification = %s,
+                            visa_support = %s, work_authorization_type = %s,
+                            linkedin = %s, resume_filename = %s,
+                            resume_sha256 = %s, parsed_at = %s,
+                            education_structured = %s
+                        WHERE id = %s
+                        RETURNING id""",
+                    (
+                        _safe_fn, _safe_ln, address,
+                        phone_to_store, email, qualification or None,
+                        visa_support, visa_type,
+                        linkedin, resume_file_ref,
+                        resume_sha256, parsed_at,
+                        _edu_structured,
+                        _existing_id,
+                    ),
+                )
+                candidate_id = _existing_id
+            else:
+                cursor.execute(
+                    f"""
+                    INSERT INTO {CANDIDATES_TABLE}
+                    (first_name, last_name, address, phone, email, qualification,
+                     visa_support, work_authorization_type, linkedin, resume_filename,
+                     resume_sha256, parsed_at, education_structured)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (resume_sha256) DO UPDATE SET
+                        first_name = EXCLUDED.first_name,
+                        last_name = EXCLUDED.last_name,
+                        address = EXCLUDED.address,
+                        phone = EXCLUDED.phone,
+                        email = EXCLUDED.email,
+                        qualification = EXCLUDED.qualification,
+                        visa_support = EXCLUDED.visa_support,
+                        work_authorization_type = EXCLUDED.work_authorization_type,
+                        linkedin = EXCLUDED.linkedin,
+                        resume_filename = EXCLUDED.resume_filename,
+                        parsed_at = EXCLUDED.parsed_at,
+                        education_structured = EXCLUDED.education_structured
+                    RETURNING id
+                """,
+                    (
+                        _safe_fn,
+                        _safe_ln,
+                        address,
+                        phone_to_store,
+                        email,
+                        qualification or None,
+                        visa_support,
+                        visa_type,
+                        linkedin,
+                        resume_file_ref,
+                        resume_sha256,
+                        parsed_at,
+                        _edu_structured,
+                    ),
+                )
+                candidate_id = cursor.fetchone()[0]
 
             cursor.execute(
                 f"""
@@ -6596,11 +8605,17 @@ def main() -> int:
             )
 
             conn.commit()
+            _log.debug("DB-COMMIT [%s] candidate_id=%s", file, candidate_id)
             report["processed"].append(file)
             if not quiet:
                 print(f"Processed: {file}")
 
     finally:
+        _n_ok = len(report.get("processed", []))
+        _n_skip = len(report.get("skipped", []))
+        _log.info(
+            "=== Parse run finished  processed=%d  skipped=%d ===", _n_ok, _n_skip,
+        )
         if report_path:
             try:
                 import json
@@ -6611,6 +8626,14 @@ def main() -> int:
 
         cursor.close()
         conn.close()
+
+    # ── Apply manual post-parse corrections (runs after every ingestion) ──
+    try:
+        from post_parse_fixes import apply_fixes as _apply_fixes
+        _apply_fixes()
+    except Exception as _ppf_err:
+        _log.warning("post_parse_fixes skipped: %s", _ppf_err)
+
     return 0
 
 

@@ -96,3 +96,21 @@ export async function fetchStats() {
   if (!res.ok) throw new Error(`Failed to fetch stats: ${res.status}`)
   return res.json()
 }
+
+/**
+ * Bulk-download resumes as a ZIP archive.
+ * @param {number[]} candidateIds - Array of candidate IDs to download
+ * @returns {Promise<Blob>} ZIP file blob
+ */
+export async function bulkDownloadResumes(candidateIds) {
+  const res = await fetch(apiUrl('/candidates/bulk-download'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ candidate_ids: candidateIds }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(err.detail || `Bulk download failed: ${res.status}`)
+  }
+  return res.blob()
+}

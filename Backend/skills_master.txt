@@ -821,3 +821,103 @@ Gang of Four
 RESTful Architecture
 API First
 Twelve-Factor App
+# ─── HR / Staffing / Recruiting ───────────────────────────────────────
+ATS
+Applicant Tracking System
+VMS
+Vendor Management System
+Vendor Management
+Boolean Search
+Sourcing
+Talent Sourcing
+Talent Acquisition
+Recruiting
+Technical Recruiting
+Full Lifecycle Recruiting
+Onboarding
+Client Relationship Management
+Account Management
+Staffing
+Contract Staffing
+Workforce Management
+HRIS
+Workday
+BambooHR
+Greenhouse
+Lever
+iCIMS
+Taleo
+Bullhorn
+JobDiva
+Ceipal
+LinkedIn Recruiter
+Indeed
+Dice
+CareerBuilder
+Monster
+Beeline
+Fieldglass
+SAP Fieldglass
+Avature
+SmartRecruiters
+Payroll
+Compensation Analysis
+Benefits Administration
+Employee Relations
+Performance Management
+Succession Planning
+Diversity and Inclusion
+Employer Branding
+Candidate Experience
+Interview Scheduling
+Offer Management
+Background Check
+Reference Check
+Pre-screening
+Resume Screening
+Job Posting
+Career Fair
+Campus Recruiting
+
+# ─── Business / Management / Soft-Tech Skills ─────────────────────────
+Business Development
+Business Analysis
+Business Intelligence
+Business Process
+Process Improvement
+Stakeholder Management
+Client Management
+Vendor Relations
+Contract Negotiation
+SLA Management
+Risk Management
+Change Management
+Strategic Planning
+Budgeting
+Forecasting
+KPI
+OKR
+CRM
+Salesforce
+HubSpot
+SAP
+Oracle ERP
+MS Office
+Microsoft Office
+MS Excel
+MS Word
+MS PowerPoint
+Microsoft Teams
+Slack
+Zoom
+Google Workspace
+Six Sigma
+Lean
+PMP
+PRINCE2
+Agile Methodology
+Waterfall
+Kanban
+Scrum
+ITIL
+ITSM

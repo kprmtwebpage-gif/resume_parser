@@ -32,6 +32,17 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 CORRECTIONS: dict[str, tuple[str | None, str | None, str | None]] = {
     # fmt: (first_name, last_name, job_title)
     # None = leave unchanged, "" = clear last_name to NULL
+    #
+    # ── Audit fixes (2026-03-01) ──────────────────────────────────────────
+    # Missing last names (inferred from resume text / email / filename)
+    "resumes_cache/Madhav_Lead Data Engineer_15 Years_H1B.docx":               ("Madhav",     "Kanahosur",   None),
+    "resumes_cache/Resume_BI_Engineer_Nisar_Mohammad_CV.docx":                 ("Nisar",      "Mohammad",    None),
+    "resumes_cache/Nikhilsai Resume_2024.pdf":                                 ("Nikhilsai",  "Pachipulusu", None),
+    "resumes_cache/Sravanthi _DA_.docx":                                       ("Sravanthi",  "Myneni",      None),
+    # Missing job title
+    "resumes_cache/Ravi Palmieri Full-Time Resume .docx (1).pdf":              (None,         None,          "Data Scientist"),
+    # Vamshi: last_name "BA" is from filename, real name is "Vamshi Bandaru"
+    "resumes_cache/vamshi_BA_Resume.pdf":                                      ("Vamshi",     "Bandaru",     None),
     "resumes_cache/Abhiram full stack .Net Developer updated.docx": (None,            None,           "Full Stack .NET Developer"),
     "resumes_cache/Akshith_Dotnet Resume.docx":                    ("Akshith",       "Paspula",      "Senior .NET Full Stack Developer"),
     "resumes_cache/Aravind_.Net Developer.pdf":                    ("Aravind",       "Mallaiahgari", "Software Developer"),
@@ -107,6 +118,36 @@ CORRECTIONS: dict[str, tuple[str | None, str | None, str | None]] = {
     "resumes_cache/ResumeSuryaPrakash_1771934430.pdf":             (None,            None,           ".NET Full Stack Developer"),
 }
 
+# -----------------------------------------------------------------------
+# Extended corrections for fields beyond name/job_title.
+# resume_filename -> dict of column->value for candidate_profile or
+#   candidate_skills_profile updates.
+# Keys prefixed with "cp." update candidate_profile, "csp." for skills.
+# -----------------------------------------------------------------------
+EXTENDED_CORRECTIONS: dict[str, dict[str, object]] = {
+    # Shraddha Sharma: missing email + address (PDF split the text across lines)
+    "resumes_cache/Shraddha Sharma Resume PDF.pdf": {
+        "cp.email":   "sharmashraddha281@gmail.com",
+        "cp.address": "Ghaziabad, Uttar Pradesh, India",
+    },
+    # Poorvi Raut: 39.5 years is wrong, actual ~3.5 years
+    "resumes_cache/Poorvi_Raut_Updated (1).pdf": {
+        "csp.years_of_experience": 3.5,
+    },
+    # Brandon Dutcher: missing YOE (Apr 2024 – Present ≈ 2 years)
+    "resumes_cache/Brandon Dutcher-Data Analyst Resume.pdf": {
+        "csp.years_of_experience": 2.0,
+    },
+    # Charita Tummala: missing YOE (01/2019 – Present ≈ 7 years)
+    "resumes_cache/Charita.pdf": {
+        "csp.years_of_experience": 7.0,
+    },
+    # Yukti Doshi: missing YOE (intern-level, ~1 year total)
+    "resumes_cache/YUKTI DOSHI_Resume_Data.pdf": {
+        "csp.years_of_experience": 1.0,
+    },
+}
+
 
 def apply_fixes() -> None:
     """Apply all corrections to the database. Called after every ingestion pass."""
@@ -142,6 +183,38 @@ def apply_fixes() -> None:
                         cur.execute(
                             f"UPDATE {SKILLS_TABLE} SET job_title=%s WHERE candidate_id=%s",
                             (job or None, cid),
+                        )
+                    fixed += 1
+
+                # ── Extended corrections ──────────────────────────────────
+                for filename, updates in EXTENDED_CORRECTIONS.items():
+                    cur.execute(
+                        f"SELECT id FROM {PROFILE_TABLE} WHERE resume_filename = %s",
+                        (filename,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        continue
+                    cid = row["id"]
+                    cp_sets, cp_vals = [], []
+                    csp_sets, csp_vals = [], []
+                    for key, val in updates.items():
+                        tbl, col = key.split(".", 1)
+                        if tbl == "cp":
+                            cp_sets.append(f"{col} = %s")
+                            cp_vals.append(val)
+                        elif tbl == "csp":
+                            csp_sets.append(f"{col} = %s")
+                            csp_vals.append(val)
+                    if cp_sets:
+                        cur.execute(
+                            f"UPDATE {PROFILE_TABLE} SET {', '.join(cp_sets)} WHERE id = %s",
+                            cp_vals + [cid],
+                        )
+                    if csp_sets:
+                        cur.execute(
+                            f"UPDATE {SKILLS_TABLE} SET {', '.join(csp_sets)} WHERE candidate_id = %s",
+                            csp_vals + [cid],
                         )
                     fixed += 1
     finally:
