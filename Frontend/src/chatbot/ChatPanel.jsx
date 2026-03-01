@@ -12,7 +12,7 @@ const ROLES_CACHE_KEY = 'chatbot_roles_cache';
 const SESSION_KEY = 'chatbot_session_id';
 const MESSAGES_CACHE_KEY = 'chatbot_messages_cache';
 const CACHE_VERSION_KEY = 'chatbot_cache_version';
-const CURRENT_CACHE_VERSION = '5';  // bump this to invalidate all chatbot caches
+const CURRENT_CACHE_VERSION = '6';  // bump this to invalidate all chatbot caches
 
 // Clear stale caches from previous builds
 (function clearStaleCaches() {
