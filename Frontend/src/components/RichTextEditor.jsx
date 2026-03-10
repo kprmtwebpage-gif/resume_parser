@@ -2,22 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactQuill, { Quill } from 'react-quill-new'
 import 'react-quill-new/dist/quill.snow.css'
 
-/* ── Register ImageResize lazily to avoid CJS/ESM Symbol.toStringTag crash ── */
-let _imageResizeRegistered = false
-async function ensureImageResize() {
-  if (_imageResizeRegistered) return
-  _imageResizeRegistered = true
-  try {
-    const mod = await import('quill-image-resize-module-react')
-    const ImageResize = mod.default || mod
-    if (typeof Quill !== 'undefined' && !Quill.imports['modules/imageResize']) {
-      Quill.register('modules/imageResize', ImageResize)
-    }
-  } catch (e) {
-    console.warn('ImageResize module not available:', e)
-  }
-}
-
 /* ── Register custom undo / redo icons in Quill's icon registry ── */
 if (typeof Quill !== 'undefined') {
   const icons = Quill.import('ui/icons')
@@ -69,14 +53,6 @@ export default function RichTextEditor({
   const [showLinkModal, setShowLinkModal] = useState(false)
   const [linkText, setLinkText] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
-  const [imageResizeReady, setImageResizeReady] = useState(_imageResizeRegistered)
-
-  /* ── Lazy-load ImageResize module on first mount ── */
-  useEffect(() => {
-    if (!_imageResizeRegistered) {
-      ensureImageResize().then(() => setImageResizeReady(true))
-    }
-  }, [])
 
   /* ── Safe accessor – getEditor() throws if called before mount ── */
   const getEditor = () => {
@@ -165,20 +141,11 @@ export default function RichTextEditor({
               link: linkHandler,
             },
           },
-      // Only enable imageResize after the async module has been registered.
-      // Passing it before registration causes Quill to crash at runtime.
-      imageResize: (!readOnly && imageResizeReady)
-        ? {
-            parchment: Quill.import('parchment'),
-            modules: ['Resize', 'DisplaySize', 'Toolbar'],
-          }
-        : false,
       history: { delay: 500, maxStack: 100, userOnly: true },
       clipboard: { matchVisual: false },
     }),
-    // Re-run when readOnly changes OR when imageResize module becomes available
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [readOnly, imageResizeReady],
+    [readOnly],
   )
 
   /* ── Image click → show delete overlay ── */
