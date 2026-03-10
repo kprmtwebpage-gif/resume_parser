@@ -112,7 +112,7 @@ export default function JobCard({ job, onEdit, onReview, onPublish, onCopy, onHo
       <div className="jc-logo-col">
         {job.photo_url ? (
           <img 
-            src={`http://localhost:8000${job.photo_url}`} 
+            src={`${import.meta.env.VITE_API_BASE_URL || ''}${job.photo_url}`} 
             alt="" 
             className="jc-logo-img" 
             onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
@@ -138,7 +138,7 @@ export default function JobCard({ job, onEdit, onReview, onPublish, onCopy, onHo
         <p className="jc-company">{job.company || '—'}</p>
 
         <div className="jc-meta">
-          {job.location && <span className="jc-meta-item">{job.location}</span>}
+          {job.location && <span className="jc-meta-item">{String(job.location).replace(/ \| /g, ', ')}</span>}
           {job.employment_type && <span className="jc-meta-item">{job.employment_type}</span>}
           {salaryText() && <span className="jc-meta-item">{salaryText()}</span>}
           {dateText() && <span className="jc-meta-item jc-meta-date">{dateText()}</span>}

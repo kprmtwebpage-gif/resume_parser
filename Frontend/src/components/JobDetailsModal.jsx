@@ -40,7 +40,9 @@ export default function JobDetailsModal({ job, isSaved, onClose, onSave, onApply
   // Parse skills
   const getSkills = () => {
     if (!job.skills) return []
-    return job.skills.split(',').map(s => s.trim()).filter(s => s)
+    const raw = job.skills
+    const sep = raw.includes(' | ') ? ' | ' : ','
+    return raw.split(sep).map(s => s.trim()).filter(s => s)
   }
 
   // Get company logo or fallback
@@ -135,7 +137,7 @@ export default function JobDetailsModal({ job, isSaved, onClose, onSave, onApply
               </div>
               <div>
                 <p className="text-xs text-gray-500">Location</p>
-                <p className="text-sm font-medium text-gray-900">{job.location || 'Not specified'}</p>
+                <p className="text-sm font-medium text-gray-900">{(job.location || 'Not specified').replace(/ \| /g, ', ')}</p>
               </div>
             </div>
             

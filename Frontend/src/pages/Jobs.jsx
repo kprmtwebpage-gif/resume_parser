@@ -331,9 +331,9 @@ export default function Jobs() {
           // Always send rich-text fields (even if empty) so the server clears them on edit
           formData.append(apiKey, String(value ?? ''))
         } else if (Array.isArray(value)) {
-          // Arrays (location, skills): join as comma-separated; skip genuinely empty arrays
+          // Arrays (location, skills): join with pipe separator to preserve commas in values
           if (value.length > 0) {
-            formData.append(apiKey, value.join(', '))
+            formData.append(apiKey, value.join(' | '))
           }
         } else if (value !== null && value !== undefined && value !== '') {
           formData.append(apiKey, String(value))

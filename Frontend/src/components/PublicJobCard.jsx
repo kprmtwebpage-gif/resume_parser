@@ -174,7 +174,7 @@ export default function PublicJobCard({ job, isSaved, onSave, onClick, onApply }
             <div className="pjc-section">
               <h4>Skills</h4>
               <div className="pjc-skills-list">
-                {job.skills.split(',').map((skill, i) => (
+                {(job.skills.includes(' | ') ? job.skills.split(' | ') : job.skills.split(',')).map((skill, i) => (
                   <span key={i} className="pjc-skill-tag">{skill.trim()}</span>
                 ))}
               </div>

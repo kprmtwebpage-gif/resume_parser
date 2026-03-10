@@ -472,13 +472,18 @@ def get_filter_companies(db: Session = Depends(get_db)):
 def get_filter_locations(db: Session = Depends(get_db)):
     """Get unique locations from the database for filter suggestions."""
     locations = db.query(Job.location).filter(Job.location.isnot(None)).distinct().all()
-    # Parse locations that might contain multiple values (comma-separated)
+    # Parse locations that might contain multiple values (pipe or comma separated)
     all_locations = set()
     for loc in locations:
         if loc[0]:
-            # Handle comma-separated locations
-            for l in loc[0].split(','):
-                cleaned = l.strip()
+            # Split by pipe first (new format), then fall back to raw value
+            if ' | ' in loc[0]:
+                for l in loc[0].split(' | '):
+                    cleaned = l.strip()
+                    if cleaned:
+                        all_locations.add(cleaned)
+            else:
+                cleaned = loc[0].strip()
                 if cleaned:
                     all_locations.add(cleaned)
     return {"success": True, "data": sorted(list(all_locations))}
@@ -511,11 +516,12 @@ def get_filter_categories(db: Session = Depends(get_db)):
 def get_filter_skills(db: Session = Depends(get_db)):
     """Get unique skills from the database for filter suggestions."""
     skills_rows = db.query(Job.skills).filter(Job.skills.isnot(None)).distinct().all()
-    # Parse skills that are comma-separated
+    # Parse skills separated by pipe or comma
     all_skills = set()
     for row in skills_rows:
         if row[0]:
-            for skill in row[0].split(','):
+            sep = ' | ' if ' | ' in row[0] else ','
+            for skill in row[0].split(sep):
                 cleaned = skill.strip()
                 if cleaned:
                     all_skills.add(cleaned)

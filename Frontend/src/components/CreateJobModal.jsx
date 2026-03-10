@@ -289,7 +289,7 @@ const DEPARTMENTS = [
 
 const PRIORITIES = ['High', 'Normal', 'Low']
 
-const STATUSES = ['New', 'Assigned', 'In Progress', 'Needs Approval', 'Stopped', 'Closed', 'Published']
+const STATUSES = ['DRAFT', 'POSTED', 'HOLD', 'CLOSED']
 
 const EMPLOYMENT_TYPES = [
   'Full Time',
@@ -319,7 +319,7 @@ const INITIAL_FORM = {
   title: '',
   company: '',
   priority: 'Normal',
-  status: 'New',
+  status: 'DRAFT',
   location: [], // Changed to array for multi-select
   department: '',
   category: '',
@@ -407,11 +407,11 @@ export default function CreateJobModal({
             if (Array.isArray(initialData[key])) {
               merged[key] = initialData[key]
             } else if (typeof initialData[key] === 'string') {
-              // Parse comma-separated strings
-              merged[key] = initialData[key]
-                .split(',')
-                .map((s) => s.trim())
-                .filter((s) => s)
+              // Split by pipe separator (new); fall back to comma for old data
+              const raw = initialData[key]
+              merged[key] = raw.includes(' | ')
+                ? raw.split(' | ').map((s) => s.trim()).filter((s) => s)
+                : raw.split(',').map((s) => s.trim()).filter((s) => s)
             } else {
               merged[key] = []
             }
@@ -422,7 +422,7 @@ export default function CreateJobModal({
       })
       setFormData(merged)
       // Load existing photo from backend if available
-      setLogoPreview(initialData.photo_url ? `http://localhost:8000${initialData.photo_url}` : null)
+      setLogoPreview(initialData.photo_url ? `${import.meta.env.VITE_API_BASE_URL || ''}${initialData.photo_url}` : null)
       setLogoFile(null)
       setSalaryError('')
       setErrors({})
@@ -485,29 +485,30 @@ export default function CreateJobModal({
         positions: 'open_positions',
       }
       
-      const payload = {}
+      // Backend draft endpoints use Form() params, so send FormData
+      const fd = new FormData()
       for (const [key, value] of Object.entries(formData)) {
         if (key === 'removePhoto') continue
         const apiKey = fieldMapping[key] || key
         if (Array.isArray(value)) {
-          payload[apiKey] = value.join(', ')
-        } else {
-          payload[apiKey] = value || null
+          if (value.length > 0) fd.append(apiKey, value.join(' | '))
+        } else if (value !== null && value !== undefined && value !== '') {
+          fd.append(apiKey, String(value))
         }
       }
-      payload.job_description = jobDescription
-      payload.comments = comments
+      fd.append('job_description', jobDescription || '')
+      fd.append('comments', comments || '')
       
       if (mode === 'create' && !draftId) {
         // Create new draft
-        const { data } = await api.post('/api/job-projects/draft', payload)
+        const { data } = await api.post('/api/job-projects/draft', fd)
         setDraftId(data.id)
       } else if (mode === 'create' && draftId) {
         // Update existing draft
-        await api.post(`/api/job-projects/${draftId}/draft`, payload)
+        await api.post(`/api/job-projects/${draftId}/draft`, fd)
       } else if (isEdit && initialData?.id) {
         // Update existing job as draft
-        await api.post(`/api/job-projects/${initialData.id}/draft`, payload)
+        await api.post(`/api/job-projects/${initialData.id}/draft`, fd)
       }
       
       setLastAutosave(new Date())
@@ -557,7 +558,7 @@ export default function CreateJobModal({
       ? 'Review Job'
       : isEdit
         ? 'Edit Job'
-        : 'Create a new project'
+        : 'Create a new job'
 
   /* ── Handlers ── */
 
@@ -569,9 +570,15 @@ export default function CreateJobModal({
     setIsDirty(true)
   }
 
-  const handleFieldChange = (fieldName) => (val) => {
+  const handleFieldChange = (fieldName) => (valOrEvent) => {
     if (isReview) return
-    setFormData((prev) => ({ ...prev, [fieldName]: val }))
+    // Autocomplete & Dropdown pass event-like {target:{value}} objects;
+    // TagInput passes arrays directly. Handle both.
+    const value =
+      valOrEvent && typeof valOrEvent === 'object' && !Array.isArray(valOrEvent) && valOrEvent.target
+        ? valOrEvent.target.value
+        : valOrEvent
+    setFormData((prev) => ({ ...prev, [fieldName]: value }))
     if (touched[fieldName]) setErrors((prev) => ({ ...prev, [fieldName]: undefined }))
     setIsDirty(true)
   }
