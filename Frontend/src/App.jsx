@@ -69,10 +69,11 @@ function AppContent() {
 }
 
 export default function App() {
+  const basePath = import.meta.env.VITE_BASE_PATH || ''
   return (
     <AuthProvider>
       <ThemeProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={basePath || '/'}>
           <AppContent />
         </BrowserRouter>
       </ThemeProvider>
