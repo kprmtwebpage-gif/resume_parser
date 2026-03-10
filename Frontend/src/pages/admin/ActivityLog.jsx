@@ -6,7 +6,10 @@ import { apiUrl } from '../../config'
 function timeAgo(iso) {
   if (!iso) return ''
   const now = new Date()
-  const then = new Date(iso)
+  // Postgres returns UTC timestamps without 'Z'; append it so the browser
+  // doesn't misinterpret them as local time (causes ~5h offset in IST).
+  const isoUtc = (typeof iso === 'string' && !iso.endsWith('Z') && !iso.includes('+')) ? iso + 'Z' : iso
+  const then = new Date(isoUtc)
   const diffMs = now - then
   const diffSec = Math.floor(diffMs / 1000)
   const diffMin = Math.floor(diffSec / 60)

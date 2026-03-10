@@ -60,6 +60,12 @@ export default function RichTextEditor({
   const [linkText, setLinkText] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
 
+  /* ── Safe accessor – getEditor() throws if called before mount ── */
+  const getEditor = () => {
+    try { return quillRef.current?.getEditor() }
+    catch { return null }
+  }
+
   /**
    * ReactQuill fires onChange with source='api' during initialization
    * (before the value prop is applied), which would reset the parent's
@@ -76,10 +82,10 @@ export default function RichTextEditor({
 
   /* ── Undo / Redo handlers ── */
   const undoHandler = () => {
-    quillRef.current?.getEditor()?.history.undo()
+    getEditor()?.history.undo()
   }
   const redoHandler = () => {
-    quillRef.current?.getEditor()?.history.redo()
+    getEditor()?.history.redo()
   }
 
   /* ── Image handler – embeds base64 data directly ── */
@@ -95,7 +101,7 @@ export default function RichTextEditor({
 
       const reader = new FileReader()
       reader.onload = () => {
-        const quill = quillRef.current?.getEditor()
+        const quill = getEditor()
         if (!quill) return
         const range = quill.getSelection(true)
         quill.insertEmbed(range ? range.index : 0, 'image', reader.result)
@@ -109,7 +115,7 @@ export default function RichTextEditor({
 
   /* ── Link handler – opens custom modal ── */
   const linkHandler = () => {
-    const editor = quillRef.current?.getEditor()
+    const editor = getEditor()
     if (!editor) return
     const range = editor.getSelection()
     const selectedText =
@@ -157,7 +163,7 @@ export default function RichTextEditor({
 
   /* ── Image click → show delete overlay ── */
   useEffect(() => {
-    const quill = quillRef.current?.getEditor()
+    const quill = getEditor()
     if (!quill || readOnly) return
 
     const editorRoot = quill.root
@@ -291,7 +297,7 @@ export default function RichTextEditor({
                 type="button"
                 className="cjm-btn-submit"
                 onClick={() => {
-                  const editor = quillRef.current?.getEditor()
+                  const editor = getEditor()
                   if (!editor) return
                   const url = linkUrl?.trim()
                   if (!url) return
