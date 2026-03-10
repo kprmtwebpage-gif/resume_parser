@@ -33,7 +33,7 @@ export default class ErrorBoundary extends Component {
             <button className="btn-primary" onClick={() => window.location.reload()}>
               Reload
             </button>
-            <a className="btn-secondary" href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">
+            <a className="btn-secondary" href="http://localhost:8000/docs" target="_blank" rel="noreferrer">
               Open API docs
             </a>
           </div>

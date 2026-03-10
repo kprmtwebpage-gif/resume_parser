@@ -1,0 +1,8 @@
+<svg viewBox="0 0 240 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Best Buy logo with white text and yellow tag -->
+  <g>
+    <text x="10" y="55" font-family="Arial, sans-serif" font-size="32" font-weight="900" fill="white" letter-spacing="-1">BEST</text>
+    <text x="10" y="85" font-family="Arial, sans-serif" font-size="32" font-weight="900" fill="white" letter-spacing="-1">BUY</text>
+    <rect x="120" y="65" width="50" height="25" rx="3" fill="#FFF200"/>
+  </g>
+</svg>

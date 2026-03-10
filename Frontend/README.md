@@ -18,7 +18,7 @@ This starts both backend and frontend servers in separate windows and opens the 
 
 #### 2) Start frontend (Vite)
 
-- URL: `http://127.0.0.1:5173/`
+- URL: `http://127.0.0.1:5175/`
 
 **⚠️ IMPORTANT - Windows PowerShell Blank UI Fix:**
 
@@ -44,7 +44,7 @@ If the UI appears blank, it's because the frontend dev server didn't start. This
    ```
 
 **Troubleshooting Blank UI:**
-1. Check if frontend server is running: `Test-NetConnection 127.0.0.1 -Port 5173`
+1. Check if frontend server is running: `Test-NetConnection 127.0.0.1 -Port 5175`
 2. If `False`, the server isn't running - use one of the solutions above
 3. Check browser console (F12) for errors
 4. Ensure backend is running: `Test-NetConnection 127.0.0.1 -Port 8000`

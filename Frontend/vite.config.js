@@ -14,6 +14,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/candidates': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/upload-resume': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/stats': { target: 'http://127.0.0.1:8000', changeOrigin: true },
@@ -24,6 +25,10 @@ export default defineConfig({
       '/chatbot': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/chat': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/job-titles': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/saved-jobs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/search-history': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/job-applications': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/uploads': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })

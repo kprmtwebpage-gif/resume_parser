@@ -1,0 +1,93 @@
+====================================================================
+  HOW TO QUERY THE DATABASE ON THE DEV / UAT / PROD SERVER
+====================================================================
+
+SERVER IP  : 89.167.60.41
+SSH LOGIN  : ssh root@89.167.60.41
+
+--------------------------------------------------------------------
+ENVIRONMENTS
+--------------------------------------------------------------------
+| Env  | DB Container      | Database Name |
+|------|-------------------|---------------|
+| Dev  | resume-db-dev     | resume_dev    |
+| UAT  | resume-db-uat     | resume_uat    |
+| Prod | resume-db-prod    | resume_prod   |
+
+--------------------------------------------------------------------
+OPTION 1 — Interactive (step by step)
+--------------------------------------------------------------------
+
+Step 1: SSH into the server
+    ssh root@89.167.60.41
+
+Step 2: Open psql inside the container (example: dev)
+    docker exec -it resume-db-dev psql -U postgres -d resume_dev
+
+Step 3: Run SQL queries at the psql prompt
+
+    -- Total resume count
+    SELECT COUNT(*) FROM candidate_profile;
+
+    -- Count by date parsed
+    SELECT DATE(parsed_at), COUNT(*)
+    FROM candidate_profile
+    GROUP BY DATE(parsed_at)
+    ORDER BY 1 DESC;
+
+    -- Count by user who uploaded
+    SELECT uploaded_by, COUNT(*)
+    FROM candidate_profile
+    GROUP BY uploaded_by
+    ORDER BY 2 DESC;
+
+    -- List all tables
+    \dt
+
+    -- Exit psql
+    \q
+
+--------------------------------------------------------------------
+OPTION 2 — One-liner from your Windows terminal (no SSH session)
+--------------------------------------------------------------------
+
+Dev:
+    ssh root@89.167.60.41 "docker exec resume-db-dev psql -U postgres -d resume_dev -c 'SELECT COUNT(*) FROM candidate_profile;'"
+
+UAT:
+    ssh root@89.167.60.41 "docker exec resume-db-uat psql -U postgres -d resume_uat -c 'SELECT COUNT(*) FROM candidate_profile;'"
+
+Prod:
+    ssh root@89.167.60.41 "docker exec resume-db-prod psql -U postgres -d resume_prod -c 'SELECT COUNT(*) FROM candidate_profile;'"
+
+--------------------------------------------------------------------
+USEFUL QUERIES
+--------------------------------------------------------------------
+
+-- Total resumes
+SELECT COUNT(*) AS total FROM candidate_profile;
+
+-- Resumes per day (last 10 days)
+SELECT DATE(parsed_at) AS date, COUNT(*) AS count
+FROM candidate_profile
+WHERE parsed_at IS NOT NULL
+GROUP BY DATE(parsed_at)
+ORDER BY 1 DESC
+LIMIT 10;
+
+-- Resumes uploaded by each user
+SELECT COALESCE(uploaded_by, 'legacy/unknown') AS uploaded_by,
+       COUNT(*) AS total
+FROM candidate_profile
+GROUP BY uploaded_by
+ORDER BY 2 DESC;
+
+-- Resumes with missing name or email
+SELECT COUNT(*) AS missing_name FROM candidate_profile WHERE name IS NULL OR name = '';
+SELECT COUNT(*) AS missing_email FROM candidate_profile WHERE email IS NULL OR email = '';
+
+-- Resumes added in the last 7 days
+SELECT COUNT(*) FROM candidate_profile
+WHERE parsed_at >= NOW() - INTERVAL '7 days';
+
+====================================================================

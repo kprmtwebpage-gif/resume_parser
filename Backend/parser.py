@@ -244,6 +244,11 @@ try:
 except Exception:
     Document = None
 
+try:
+    import olefile as _olefile  # type: ignore
+except Exception:
+    _olefile = None
+
 # Optional OCR fallback for image-based PDFs.
 # IMPORTANT: do not import pytesseract eagerly; it can pull heavy dependencies
 # (e.g., pandas) and may fail/hang in some Windows environments.
@@ -1017,6 +1022,69 @@ _RESUME_SECTION_RE = re.compile(
     r")\s*(?::|$)",
     re.IGNORECASE | re.MULTILINE,
 )
+
+
+def extract_text_from_doc(path: str) -> str:
+    """Extract plain text from a legacy .doc (OLE/Word97) file.
+
+    Strategy (in order of preference):
+    1. olefile: read the WordDocument stream and strip binary/control bytes.
+    2. zipfile fallback: some .doc files are actually .docx in disguise.
+    3. Raw binary: strip non-printable bytes as a last resort.
+    """
+    # Strategy 2: some .doc files are really .docx (ZIP) in disguise
+    try:
+        import zipfile as _zf
+        if _zf.is_zipfile(path):
+            return extract_text_from_docx(path)
+    except Exception:
+        pass
+
+    # Strategy 1: OLE Word97 stream via olefile
+    if _olefile is not None:
+        try:
+            with _olefile.OleFileIO(path) as ole:
+                if ole.exists("WordDocument"):
+                    raw = ole.openstream("WordDocument").read()
+                    # The Word stream encodes text in a mix of UTF-16LE and Latin-1.
+                    # Extract readable ASCII/Latin-1 runs (length >= 3) from the bytes.
+                    text_chunks: list[str] = []
+                    i = 0
+                    while i < len(raw) - 1:
+                        # Try UTF-16LE two-byte char
+                        ch = raw[i] | (raw[i + 1] << 8)
+                        if 0x20 <= ch <= 0x7E or ch in (0x0A, 0x0D):
+                            buf: list[str] = []
+                            j = i
+                            while j < len(raw) - 1:
+                                c = raw[j] | (raw[j + 1] << 8)
+                                if 0x20 <= c <= 0x7E or c in (0x0A, 0x0D):
+                                    buf.append(chr(c))
+                                    j += 2
+                                else:
+                                    break
+                            if len(buf) >= 3:
+                                text_chunks.append("".join(buf))
+                            i = j if j > i else i + 2
+                        else:
+                            i += 1
+                    extracted = " ".join(text_chunks)
+                    if len(extracted.strip()) > 50:
+                        return extracted
+        except Exception:
+            pass
+
+    # Strategy 3: raw binary fallback — strip non-printable bytes
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        printable = bytes(b for b in raw if 0x20 <= b <= 0x7E or b in (0x09, 0x0A, 0x0D))
+        text = printable.decode("ascii", errors="ignore")
+        # Filter out short garbage tokens
+        words = [w for w in text.split() if len(w) >= 2]
+        return " ".join(words)
+    except Exception:
+        return ""
 
 
 def _extract_docx_header_block(text: str) -> str:
@@ -7825,7 +7893,7 @@ def main() -> int:
         if not os.getenv("QUIET", "0") == "1":
             print(f"Google Drive sync: scanned={scanned} downloaded={downloaded} dir={cache_dir}")
         resume_dir = cache_dir
-    supported_exts = {".pdf", ".docx"}
+    supported_exts = {".pdf", ".docx", ".doc"}
 
     # Seconds; set to 0 to disable. Helps avoid hangs on malformed PDFs.
     try:
@@ -7876,6 +7944,11 @@ def main() -> int:
                     if not quiet:
                         print(f"Parsing: {file}")
                     resume_text, links, first_page_text = extract_pdf_with_timeout(path, timeout_seconds=pdf_timeout_seconds)
+                elif suffix == ".doc":
+                    if not quiet:
+                        print(f"Parsing: {file}")
+                    resume_text = extract_text_from_doc(path)
+                    first_page_text = _extract_docx_header_block(resume_text)
                 else:
                     resume_text = extract_text_from_docx(path)
                     # Simulate "first page" for DOCX by cutting at the first section heading.
@@ -8434,46 +8507,120 @@ def main() -> int:
             experience_years = extract_role_experience_years(resume_text_norm, job_title) or extract_experience_years(resume_text_norm)
             certifications = extract_standard_certifications(resume_text, job_title=job_title, skills=skills)
 
-            # ── LLM enrichment layer (opt-in via LLM_EXTRACT_ENABLED=true) ────────
-            _llm = _llm_extract(resume_text, ocr_text="")
-            if _llm:
-                # Job title: prefer LLM when it has high confidence or rule-based missed
-                _llm_jt = _llm.get("job_title")
-                _llm_jt_conf = _llm.get("job_title_confidence") or 0.0
-                if _llm_jt and (_llm_jt_conf >= 0.85 or not job_title):
-                    job_title = _llm_jt
+            # ── Scenario A: Confidence-based Hybrid Extraction ────────────────
+            # Calculate confidence score for regex-based extraction
+            # Only call LLM when confidence is low (<0.75) = 90% regex, 10% LLM fallback
+            from confidence_scorer import (
+                calculate_extraction_confidence,
+                should_use_llm_fallback,
+                get_confidence_category
+            )
+            from llm_usage_tracker import record_llm_call, check_llm_limit
+            
+            # Count missing critical fields
+            missing_critical = sum([
+                1 if not first_name or not last_name else 0,
+                1 if not email else 0,
+                1 if not job_title else 0
+            ])
+            
+            confidence_score = calculate_extraction_confidence(
+                name=(first_name, last_name),
+                email=email,
+                phone=phone,
+                job_title=job_title,
+                address=address,
+                education=qualification,
+                certifications=certifications,
+                skills=skills,
+                experience_years=experience_years
+            )
+            
+            extraction_method = "regex"  # Default
+            use_llm = should_use_llm_fallback(
+                confidence_score,
+                threshold=float(os.getenv("LLM_CONFIDENCE_THRESHOLD", "0.75")),
+                missing_critical_fields=missing_critical
+            )
+            
+            _log.info(
+                "CONFIDENCE [%s] score=%.2f (%s) missing_critical=%d use_llm=%s",
+                file, confidence_score, get_confidence_category(confidence_score),
+                missing_critical, use_llm
+            )
+            
+            # ── LLM enrichment layer (triggered by low confidence or env flag) ─
+            _llm = None
+            llm_explicitly_enabled = os.getenv("LLM_EXTRACT_ENABLED", "").strip().casefold() in {"true", "1", "yes"}
+            
+            # Check daily limit before calling LLM
+            llm_allowed, llm_status_msg = check_llm_limit()
+            if not llm_allowed:
+                _log.warning("LLM_LIMIT [%s] %s", file, llm_status_msg)
+                use_llm = False
+            elif use_llm or llm_explicitly_enabled:
+                if "Warning" in llm_status_msg:
+                    _log.warning("LLM_USAGE [%s] %s", file, llm_status_msg)
+            
+            if use_llm or llm_explicitly_enabled:
+                _llm = _llm_extract(resume_text, ocr_text="")
+                if _llm:
+                    extraction_method = "hybrid" if confidence_score >= 0.5 else "llm"
+                    
+                    # Job title: prefer LLM when it has high confidence or rule-based missed
+                    _llm_jt = _llm.get("job_title")
+                    _llm_jt_conf = _llm.get("job_title_confidence") or 0.0
+                    if _llm_jt and (_llm_jt_conf >= 0.85 or not job_title):
+                        _log.info("LLM_ENRICH [%s] job_title: %s -> %s (conf=%.2f)", 
+                                  file, job_title or "(empty)", _llm_jt, _llm_jt_conf)
+                        job_title = _llm_jt
 
-                # LinkedIn: fill in when rule-based extraction missed it
-                _llm_li = _llm.get("linkedin_url")
-                if _llm_li and not linkedin:
-                    linkedin = _llm_li
+                    # LinkedIn: fill in when rule-based extraction missed it
+                    _llm_li = _llm.get("linkedin_url")
+                    if _llm_li and not linkedin:
+                        _log.info("LLM_ENRICH [%s] linkedin: %s", file, _llm_li[:60])
+                        linkedin = _llm_li
 
-                # Certifications: use LLM list when rule-based returned nothing
-                _llm_certs = _llm.get("certifications") or []
-                if _llm_certs and not certifications:
-                    certifications = ", ".join(
-                        c.get("normalized_name") or c.get("name", "")
-                        for c in _llm_certs if c.get("name")
-                    ) or None
+                    # Certifications: use LLM list when rule-based returned nothing
+                    _llm_certs = _llm.get("certifications") or []
+                    if _llm_certs and not certifications:
+                        certifications = ", ".join(
+                            c.get("normalized_name") or c.get("name", "")
+                            for c in _llm_certs if c.get("name")
+                        ) or None
+                        _log.info("LLM_ENRICH [%s] certifications: %s",
+                                  file, (certifications or "")[:80])
 
-                # Education: enrich structured entries when rule-based returned none
-                _llm_edu = _llm.get("education") or []
-                if _llm_edu and not education_entries:
-                    education_entries = [
-                        {
-                            "degree":            e.get("normalized_degree") or e.get("degree") or "",
-                            "specialization":    e.get("field_of_study") or "",
-                            "university":        e.get("university") or "",
-                            "grad_year":         e.get("grad_year") or "",
-                            "level":             e.get("level") or "",
-                            "confidence":        e.get("confidence") or 0.0,
-                        }
-                        for e in _llm_edu if isinstance(e, dict)
-                    ]
-                    import json as _json2
-                    _edu_structured = _json2.dumps(
-                        [{k: v for k, v in e.items() if k != "raw_line"} for e in education_entries]
-                    ) if education_entries else _edu_structured
+                    # Education: enrich structured entries when rule-based returned none
+                    _llm_edu = _llm.get("education") or []
+                    if _llm_edu and not education_entries:
+                        education_entries = [
+                            {
+                                "degree":            e.get("normalized_degree") or e.get("degree") or "",
+                                "specialization":    e.get("field_of_study") or "",
+                                "university":        e.get("university") or "",
+                                "grad_year":         e.get("grad_year") or "",
+                                "level":             e.get("level") or "",
+                                "confidence":        e.get("confidence") or 0.0,
+                            }
+                            for e in _llm_edu if isinstance(e, dict)
+                        ]
+                        import json as _json2
+                        _edu_structured = _json2.dumps(
+                            [{k: v for k, v in e.items() if k != "raw_line"} for e in education_entries]
+                        ) if education_entries else _edu_structured
+                        _log.info("LLM_ENRICH [%s] education: %d entries",
+                                  file, len(education_entries))
+            
+            # Record usage statistics
+            record_llm_call(
+                used_llm=(_llm is not None),
+                extraction_method=extraction_method,
+                confidence_score=confidence_score
+            )
+            
+            _log.info("EXTRACTION_METHOD [%s] method=%s confidence=%.2f", 
+                      file, extraction_method, confidence_score)
             # ── end LLM enrichment ────────────────────────────────────────────
 
             # ── Validation layer (post-processing, applied after extraction) ──
@@ -8489,6 +8636,41 @@ def main() -> int:
                 if not job_title and _pre_val_title:
                     job_title = _pre_val_title
             # ── end validation layer ──────────────────────────────────────────
+
+            # ── Hybrid Enhancer: Per-field validation + targeted LLM ──────────
+            try:
+                from hybrid_enhancer import enhance_extraction as _hybrid_enhance
+                _hybrid_result = _hybrid_enhance(
+                    resume_text=resume_text,
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    phone=phone,
+                    job_title=job_title,
+                    address=address,
+                    linkedin=linkedin,
+                    source_file=file,
+                )
+                # Apply enhanced fields
+                first_name = _hybrid_result["first_name"]
+                last_name = _hybrid_result["last_name"]
+                email = _hybrid_result["email"]
+                phone = _hybrid_result["phone"]
+                job_title = _hybrid_result["job_title"]
+                address = _hybrid_result["address"]
+                linkedin = _hybrid_result["linkedin"]
+                if _hybrid_result.get("enhancement_log"):
+                    _log.info(
+                        "HYBRID_ENHANCED [%s] changes=%d weak=%s enhancements=%s",
+                        file, len(_hybrid_result["enhancement_log"]),
+                        _hybrid_result.get("weak_fields", []),
+                        _hybrid_result["enhancement_log"],
+                    )
+            except ImportError:
+                _log.debug("hybrid_enhancer not available, skipping per-field validation")
+            except Exception as _he_err:
+                _log.warning("hybrid_enhancer error for [%s]: %s", file, _he_err)
+            # ── end hybrid enhancer ───────────────────────────────────────────
 
             # ── Per-candidate extraction log ──────────────────────────────────
             _log.info(

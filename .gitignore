@@ -72,6 +72,7 @@ Backend/resumes_cache/
 Backend/resumes_cache_test/
 Backend/resumes_cache_prod/
 Backend/resumes_gdrive/
+Backend/unprocessed_resumes/
 
 # Node (Frontend)
 node_modules/

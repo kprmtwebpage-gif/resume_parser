@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import { Linkedin } from 'lucide-react'
 import mammoth from 'mammoth'
 
 import ProfileTabs from './ProfileTabs.jsx'
 import PdfScrollViewer from './PdfScrollViewer.jsx'
 import { notifyModalOpened, notifyModalClosed, onChatbotOpened } from '../chatbot/modalEvents.js'
 import { useTheme } from '../contexts/ThemeContext'
-import { apiUrl } from '../config.js'
+import { api } from '../services/api'
+import './CommentModal.css'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -55,14 +57,16 @@ export default function ProfileModal({
   const [docxLoading, setDocxLoading] = useState(false)
   const [docxError, setDocxError] = useState(false)
   const [pdfError, setPdfError] = useState(false)
+  const [comments, setComments] = useState([])
+  const [commentsLoading, setCommentsLoading] = useState(false)
   
   // Use global theme context
   const { isDark, colors } = useTheme()
 
   // Construct resume URL similar to ProfileCard
   const hasResume = candidate?.resume_filename
-  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume`) : null
-  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume?inline=true`) : null
+  const baseResumeUrl = hasResume ? `/candidates/${candidate.id}/resume` : null
+  const viewResumeUrl = hasResume ? `/candidates/${candidate.id}/resume?inline=true` : null
   const resumeIsDocx = hasResume && (candidate.resume_filename.toLowerCase().endsWith('.docx') || candidate.resume_filename.toLowerCase().endsWith('.doc'))
   const resumeIsPdf = hasResume && candidate.resume_filename.toLowerCase().endsWith('.pdf')
   const resumeIsImage = hasResume && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(candidate.resume_filename)
@@ -103,6 +107,21 @@ export default function ProfileModal({
         setDocxLoading(false)
       })
   }, [open, resumeIsDocx, baseResumeUrl])
+
+  // Fetch comments when Comments tab is active
+  useEffect(() => {
+    if (!open || !candidate || tab !== 'comments') return
+    setCommentsLoading(true)
+    api.get(`/standalone-comments/${candidate.id}`)
+      .then((res) => {
+        setComments(Array.isArray(res.data) ? res.data : [])
+        setCommentsLoading(false)
+      })
+      .catch(() => {
+        setComments([])
+        setCommentsLoading(false)
+      })
+  }, [open, candidate, tab])
 
 
 
@@ -270,7 +289,20 @@ export default function ProfileModal({
                               </div>
                             </div>
                             <div>
-                              <div className="text-2xl font-semibold text-neutral-900">{fullName}</div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-2xl font-semibold text-neutral-900">{fullName}</div>
+                                {candidate.linkedin && (
+                                  <a
+                                    href={sanitizeLinkedInUrl(candidate.linkedin)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center flex-shrink-0 transition-transform hover:scale-110 duration-200"
+                                    title="View LinkedIn Profile"
+                                  >
+                                    <Linkedin size={20} color="#0A66C2" />
+                                  </a>
+                                )}
+                              </div>
                               <div className="mt-2 flex items-center gap-2 text-base text-neutral-600">
                                 {candidate.job_title || '—'}
                                 {candidate.company ? <span className="text-neutral-400"> · </span> : null}
@@ -435,6 +467,39 @@ export default function ProfileModal({
                             )}
                           </div>
                         </div>
+
+                        {/* Comments tab — rendered full-width below the grid to avoid layout issues */}
+                        {tab === 'comments' && (
+                          <div className="mt-4">
+                            <div className="rounded-lg bg-white p-6 border border-neutral-200">
+                              <h3 className="text-lg font-semibold text-neutral-900 mb-5">Comments</h3>
+                              {commentsLoading ? (
+                                <div className="text-sm text-neutral-500 py-6 text-center">Loading comments…</div>
+                              ) : comments.length === 0 ? (
+                                <div className="text-sm text-neutral-500 py-6 text-center">No comments yet</div>
+                              ) : (
+                                <div className="comments-timeline" style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                                  {comments.map((c) => {
+                                    const d = new Date(c.created_at)
+                                    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                                    const dateStr = `${monthNames[d.getMonth()]} ${d.getFullYear()}`
+                                    const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+                                    return (
+                                      <div key={c.id} className="comments-timeline-item">
+                                        <div className="comments-timeline-dot" />
+                                        <div className="comments-timeline-text">{c.comment_text}</div>
+                                        <div className="comments-timeline-meta">
+                                          <span>{dateStr}</span>
+                                          <span>{timeStr}</span>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* RIGHT SIDE - Resume Viewer */}
@@ -468,7 +533,7 @@ export default function ProfileModal({
                           {/* Export Button in Header */}
                           {hasResume && (
                             <a
-                              href={apiUrl(`/candidates/${candidate.id}/resume`)}
+                              href={`/candidates/${candidate.id}/resume`}
                               download
                               className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300"
                               style={{

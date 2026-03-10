@@ -1,16 +1,19 @@
-﻿import { Fragment, useEffect, useState, useCallback } from 'react'
+import { Fragment, useEffect, useState, useCallback } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import {
   XMarkIcon,
   PlusIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
-import { useTheme } from '../contexts/ThemeContext'
+import { api } from '../services/api'
+import './CommentModal.css'
+
+const COMMENTS_API = '/standalone-comments'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
   const b = (last || '').trim()[0] || ''
-  return (a + b).toUpperCase() || 'â€”'
+  return (a + b).toUpperCase() || '—'
 }
 
 export default function EditProfileModal({
@@ -20,7 +23,6 @@ export default function EditProfileModal({
   onSave,
   saving,
 }) {
-  const { isDark, colors } = useTheme()
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -35,6 +37,45 @@ export default function EditProfileModal({
   })
 
   const [errors, setErrors] = useState({})
+  const [comments, setComments] = useState([])
+  const [commentsLoading, setCommentsLoading] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const userRole = 'HR' // TODO: replace with real auth role
+
+  // Fetch comments for candidate
+  const fetchComments = useCallback(async (candidateId) => {
+    if (!candidateId) return
+    setCommentsLoading(true)
+    try {
+      const res = await api.get(`${COMMENTS_API}/${candidateId}`)
+      setComments(Array.isArray(res.data) ? res.data : [])
+    } catch {
+      setComments([])
+    } finally {
+      setCommentsLoading(false)
+    }
+  }, [])
+
+  const handleDeleteComment = useCallback(async (commentId) => {
+    try {
+      await api.delete(`${COMMENTS_API}/${commentId}`)
+      setComments(prev => prev.filter(c => c.id !== commentId))
+    } catch (err) {
+      console.error('[EditProfile] Failed to delete comment:', err)
+    }
+  }, [])
+
+  const handleClearAllComments = useCallback(async () => {
+    if (!candidate) return
+    try {
+      await Promise.all(comments.map(c => api.delete(`${COMMENTS_API}/${c.id}`)))
+      setComments([])
+    } catch (err) {
+      console.error('[EditProfile] Failed to clear comments:', err)
+    } finally {
+      setShowClearConfirm(false)
+    }
+  }, [candidate, comments])
 
   // Initialize form data when candidate changes
   useEffect(() => {
@@ -52,8 +93,9 @@ export default function EditProfileModal({
         education: parseEducation(candidate.education),
       })
       setErrors({})
+      fetchComments(candidate.id)
     }
-  }, [candidate])
+  }, [candidate, fetchComments])
 
   // Parse experience data from various formats
   const parseExperience = (exp) => {
@@ -226,21 +268,9 @@ export default function EditProfileModal({
               leaveFrom="opacity-100 translate-y-0 scale-100"
               leaveTo="opacity-0 translate-y-2 scale-95"
             >
-              <Dialog.Panel 
-                className="w-full max-w-3xl overflow-hidden rounded-lg shadow-modal transition-colors duration-300"
-                style={{
-                  backgroundColor: isDark ? '#1e293b' : '#ffffff',
-                  border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
-                }}
-              >
+              <Dialog.Panel className="w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-modal border border-neutral-200">
                 {/* Header */}
-                <div 
-                  className="flex items-center justify-between border-b px-6 py-4 transition-colors duration-300"
-                  style={{
-                    backgroundColor: isDark ? '#0f172a' : '#ffffff',
-                    borderColor: isDark ? '#334155' : '#e5e7eb',
-                  }}
-                >
+                <div className="flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-4">
                   <div className="flex items-center gap-4">
                     <div className="relative h-12 w-12 rounded-lg overflow-hidden bg-brand-500">
                       <div className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-white">
@@ -248,16 +278,15 @@ export default function EditProfileModal({
                       </div>
                     </div>
                     <div>
-                      <Dialog.Title className="text-lg font-semibold" style={{ color: isDark ? '#f1f5f9' : '#111827' }}>
+                      <Dialog.Title className="text-lg font-semibold text-neutral-900">
                         Edit Profile
                       </Dialog.Title>
-                      <p className="text-sm" style={{ color: isDark ? '#94a3b8' : '#6b7280' }}>{fullName}</p>
+                      <p className="text-sm text-neutral-500">{fullName}</p>
                     </div>
                   </div>
                   <button
                     type="button"
-                    className="rounded-button p-2 transition-all"
-                    style={{ color: isDark ? '#94a3b8' : '#4b5563' }}
+                    className="rounded-button p-2 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-all"
                     onClick={handleCancel}
                     title="Close"
                   >
@@ -269,12 +298,12 @@ export default function EditProfileModal({
                 <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
                   {/* Basic Profile Details */}
                   <section className="mb-6">
-                    <h3 className="text-sm font-semibold mb-4 pb-2 border-b" style={{ color: isDark ? '#f1f5f9' : '#111827', borderColor: isDark ? '#334155' : '#e5e7eb' }}>
+                    <h3 className="text-sm font-semibold text-neutral-900 mb-4 pb-2 border-b border-neutral-200">
                       Basic Information
                     </h3>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                        <label className="block text-xs font-medium text-neutral-700 mb-1">
                           First Name <span className="text-red-500">*</span>
                         </label>
                         <input
@@ -289,7 +318,7 @@ export default function EditProfileModal({
                         )}
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                        <label className="block text-xs font-medium text-neutral-700 mb-1">
                           Last Name
                         </label>
                         <input
@@ -301,7 +330,7 @@ export default function EditProfileModal({
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                        <label className="block text-xs font-medium text-neutral-700 mb-1">
                           Job Title
                         </label>
                         <input
@@ -313,7 +342,7 @@ export default function EditProfileModal({
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                        <label className="block text-xs font-medium text-neutral-700 mb-1">
                           Location
                         </label>
                         <input
@@ -325,7 +354,7 @@ export default function EditProfileModal({
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                        <label className="block text-xs font-medium text-neutral-700 mb-1">
                           Email
                         </label>
                         <input
@@ -340,7 +369,7 @@ export default function EditProfileModal({
                         )}
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                        <label className="block text-xs font-medium text-neutral-700 mb-1">
                           Phone
                         </label>
                         <input
@@ -352,7 +381,7 @@ export default function EditProfileModal({
                         />
                       </div>
                       <div className="col-span-2">
-                        <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                        <label className="block text-xs font-medium text-neutral-700 mb-1">
                           LinkedIn Profile
                         </label>
                         <input
@@ -368,8 +397,8 @@ export default function EditProfileModal({
 
                   {/* Skills */}
                   <section className="mb-6">
-                    <div className="flex items-center justify-between mb-4 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e5e7eb' }}>
-                      <h3 className="text-sm font-semibold" style={{ color: isDark ? '#f1f5f9' : '#111827' }}>Skills</h3>
+                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-200">
+                      <h3 className="text-sm font-semibold text-neutral-900">Skills</h3>
                       <button
                         type="button"
                         onClick={addSkill}
@@ -381,15 +410,15 @@ export default function EditProfileModal({
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {formData.skills.length === 0 ? (
-                        <p className="text-sm text-neutral-400 dark:text-neutral-500">No skills added yet</p>
+                        <p className="text-sm text-neutral-400">No skills added yet</p>
                       ) : (
                         formData.skills.map((skill, index) => (
-                          <div key={index} className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-700 rounded-full pl-3 pr-1 py-1">
+                          <div key={index} className="flex items-center gap-1 bg-neutral-100 rounded-full pl-3 pr-1 py-1">
                             <input
                               type="text"
                               value={skill}
                               onChange={(e) => handleSkillChange(index, e.target.value)}
-                              className="bg-transparent border-none text-sm text-neutral-700 dark:text-neutral-200 w-24 focus:outline-none focus:ring-0"
+                              className="bg-transparent border-none text-sm text-neutral-700 w-24 focus:outline-none focus:ring-0"
                               placeholder="Skill"
                             />
                             <button
@@ -407,8 +436,8 @@ export default function EditProfileModal({
 
                   {/* Work Experience */}
                   <section className="mb-6">
-                    <div className="flex items-center justify-between mb-4 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e5e7eb' }}>
-                      <h3 className="text-sm font-semibold" style={{ color: isDark ? '#f1f5f9' : '#111827' }}>Work Experience</h3>
+                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-200">
+                      <h3 className="text-sm font-semibold text-neutral-900">Work Experience</h3>
                       <button
                         type="button"
                         onClick={addExperience}
@@ -420,12 +449,12 @@ export default function EditProfileModal({
                     </div>
                     <div className="space-y-4">
                       {formData.experience.length === 0 ? (
-                        <p className="text-sm text-neutral-400 dark:text-neutral-500">No work experience added yet</p>
+                        <p className="text-sm text-neutral-400">No work experience added yet</p>
                       ) : (
                         formData.experience.map((exp, index) => (
-                          <div key={exp.id || index} className="p-4 bg-neutral-50 dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-600">
+                          <div key={exp.id || index} className="p-4 bg-neutral-50 rounded-lg border border-neutral-200">
                             <div className="flex justify-between items-start mb-3">
-                              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Position {index + 1}</span>
+                              <span className="text-xs font-medium text-neutral-500">Position {index + 1}</span>
                               <button
                                 type="button"
                                 onClick={() => removeExperience(index)}
@@ -437,7 +466,7 @@ export default function EditProfileModal({
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div>
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Job Title</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Job Title</label>
                                 <input
                                   type="text"
                                   value={exp.title || ''}
@@ -447,7 +476,7 @@ export default function EditProfileModal({
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Company</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Company</label>
                                 <input
                                   type="text"
                                   value={exp.company || ''}
@@ -457,7 +486,7 @@ export default function EditProfileModal({
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Location</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Location</label>
                                 <input
                                   type="text"
                                   value={exp.location || ''}
@@ -468,7 +497,7 @@ export default function EditProfileModal({
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <div>
-                                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Start Date</label>
+                                  <label className="block text-xs font-medium text-neutral-600 mb-1">Start Date</label>
                                   <input
                                     type="text"
                                     value={exp.start_date || ''}
@@ -478,7 +507,7 @@ export default function EditProfileModal({
                                   />
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">End Date</label>
+                                  <label className="block text-xs font-medium text-neutral-600 mb-1">End Date</label>
                                   <input
                                     type="text"
                                     value={exp.end_date || ''}
@@ -489,7 +518,7 @@ export default function EditProfileModal({
                                 </div>
                               </div>
                               <div className="col-span-2">
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Description</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Description</label>
                                 <textarea
                                   value={exp.description || ''}
                                   onChange={(e) => handleExperienceChange(index, 'description', e.target.value)}
@@ -507,8 +536,8 @@ export default function EditProfileModal({
 
                   {/* Education */}
                   <section>
-                    <div className="flex items-center justify-between mb-4 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e5e7eb' }}>
-                      <h3 className="text-sm font-semibold" style={{ color: isDark ? '#f1f5f9' : '#111827' }}>Education</h3>
+                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-200">
+                      <h3 className="text-sm font-semibold text-neutral-900">Education</h3>
                       <button
                         type="button"
                         onClick={addEducation}
@@ -520,12 +549,12 @@ export default function EditProfileModal({
                     </div>
                     <div className="space-y-4">
                       {formData.education.length === 0 ? (
-                        <p className="text-sm text-neutral-400 dark:text-neutral-500">No education added yet</p>
+                        <p className="text-sm text-neutral-400">No education added yet</p>
                       ) : (
                         formData.education.map((edu, index) => (
-                          <div key={edu.id || index} className="p-4 bg-neutral-50 dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-600">
+                          <div key={edu.id || index} className="p-4 bg-neutral-50 rounded-lg border border-neutral-200">
                             <div className="flex justify-between items-start mb-3">
-                              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Education {index + 1}</span>
+                              <span className="text-xs font-medium text-neutral-500">Education {index + 1}</span>
                               <button
                                 type="button"
                                 onClick={() => removeEducation(index)}
@@ -537,7 +566,7 @@ export default function EditProfileModal({
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div className="col-span-2">
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Institution</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Institution</label>
                                 <input
                                   type="text"
                                   value={edu.institution || edu.school || ''}
@@ -547,7 +576,7 @@ export default function EditProfileModal({
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Degree</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Degree</label>
                                 <input
                                   type="text"
                                   value={edu.degree || ''}
@@ -557,7 +586,7 @@ export default function EditProfileModal({
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Field of Study</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Field of Study</label>
                                 <input
                                   type="text"
                                   value={edu.field_of_study || edu.field || ''}
@@ -567,7 +596,7 @@ export default function EditProfileModal({
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">Start Year</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">Start Year</label>
                                 <input
                                   type="text"
                                   value={edu.start_year || ''}
@@ -577,7 +606,7 @@ export default function EditProfileModal({
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">End Year</label>
+                                <label className="block text-xs font-medium text-neutral-600 mb-1">End Year</label>
                                 <input
                                   type="text"
                                   value={edu.end_year || ''}
@@ -592,10 +621,92 @@ export default function EditProfileModal({
                       )}
                     </div>
                   </section>
+
+                  {/* Comments */}
+                  <section className="mt-6">
+                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-200">
+                      <h3 className="text-sm font-semibold text-neutral-900">Comments</h3>
+                      {userRole === 'HR' && comments.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowClearConfirm(true)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50 rounded-button transition-colors"
+                        >
+                          <TrashIcon className="h-3.5 w-3.5" />
+                          Clear All
+                        </button>
+                      )}
+                    </div>
+
+                    {commentsLoading ? (
+                      <p className="text-sm text-neutral-400 py-4 text-center">Loading comments…</p>
+                    ) : comments.length === 0 ? (
+                      <p className="text-sm text-neutral-400 py-4 text-center">No comments available.</p>
+                    ) : (
+                      <div className="comments-timeline" style={{ maxHeight: '320px', overflowY: 'auto', paddingRight: '4px' }}>
+                        {comments.map((c) => {
+                          const d = new Date(c.created_at)
+                          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                          const dateStr = `${months[d.getMonth()]} ${d.getFullYear()}`
+                          const hours = d.getHours()
+                          const ampm = hours >= 12 ? 'PM' : 'AM'
+                          const h12 = hours % 12 || 12
+                          const timeStr = `${String(h12).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`
+                          return (
+                            <div key={c.id} className="comments-timeline-item">
+                              <div className="comments-timeline-dot" />
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="comments-timeline-text">{c.comment_text}</div>
+                                  <div className="comments-timeline-meta">
+                                    <span>{dateStr}</span>
+                                    <span>{timeStr}</span>
+                                  </div>
+                                </div>
+                                {userRole === 'HR' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteComment(c.id)}
+                                    className="flex-shrink-0 p-1 text-neutral-400 hover:text-red-500 transition-colors mt-0.5"
+                                    title="Delete comment"
+                                  >
+                                    <TrashIcon className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {/* Clear All Confirmation */}
+                    {showClearConfirm && (
+                      <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200">
+                        <p className="text-sm text-red-700 mb-2">Delete all comments for this candidate?</p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={handleClearAllComments}
+                            className="px-3 py-1.5 text-xs font-medium text-white bg-red-500 hover:bg-red-600 rounded-button transition-colors"
+                          >
+                            Yes, delete all
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowClearConfirm(false)}
+                            className="px-3 py-1.5 text-xs font-medium text-neutral-600 bg-white border border-neutral-300 hover:bg-neutral-50 rounded-button transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </section>
                 </div>
 
                 {/* Footer */}
-                <div className="flex items-center justify-end gap-3 border-t border-neutral-200 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-6 py-4">
+                <div className="flex items-center justify-end gap-3 border-t border-neutral-200 bg-neutral-50 px-6 py-4">
                   <button
                     type="button"
                     onClick={handleCancel}

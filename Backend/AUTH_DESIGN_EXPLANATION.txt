@@ -1,0 +1,236 @@
+================================================================================
+AUTH DESIGN EXPLANATION — Minimal Approach: 1 New Table + 1 Column
+================================================================================
+Date: March 3, 2026
+Project: Resume Parsing - Updated UI
+================================================================================
+
+
+THE TWO CHANGES
+---------------
+
+Change 1 — New "users" table
+Change 2 — Add "uploaded_by" column to existing "candidate_profile" table
+
+
+================================================================================
+CHANGE 1: NEW "users" TABLE
+================================================================================
+
+This is where login credentials live.
+
+TABLE STRUCTURE:
+┌────┬──────────┬───────────────────┬───────────────┬────────┬───────────┬──────────────┬────────────┬──────────┬─────────────────────┐
+│ id │ username │ email             │ password_hash │  role  │ is_active │ total_logins │ last_login │ last_ip  │ created_at          │
+├────┼──────────┼───────────────────┼───────────────┼────────┼───────────┼──────────────┼────────────┼──────────┼─────────────────────┤
+│  1 │ admin    │ admin@company.com │ $2b$12$xxx... │ admin  │   true    │     47       │ 2026-03-03 │ 10.0.0.1 │ 2026-03-03 09:00:00 │
+│  2 │ praveen  │ praveen@co.com    │ $2b$12$yyy... │ user   │   true    │     12       │ 2026-03-02 │ 10.0.0.2 │ 2026-03-03 10:00:00 │
+│  3 │ sarah    │ sarah@co.com      │ $2b$12$zzz... │ user   │   true    │      5       │ 2026-03-01 │ 10.0.0.3 │ 2026-03-03 11:00:00 │
+└────┴──────────┴───────────────────┴───────────────┴────────┴───────────┴──────────────┴────────────┴──────────┴─────────────────────┘
+
+EACH COLUMN EXPLAINED:
+  id            → Auto-incrementing unique ID (1, 2, 3...)
+  username      → Login name (e.g., "praveen")
+  email         → Email address (e.g., "praveen@co.com")
+  password_hash → bcrypt-hashed password — NEVER store plain text!
+                  Plain text "Admin@123" becomes "$2b$12$abc..." in DB
+  role          → "admin" or "user" — controls what they can see/do
+  is_active     → Can disable a user without deleting them (true/false)
+  total_logins  → Incremented +1 each successful login (e.g., 47)
+  last_login    → Timestamp of last successful login
+  last_ip       → IP address of last login (for security awareness)
+  created_at    → When the account was created
+
+SQL TO CREATE:
+  CREATE TABLE users (
+      id              SERIAL PRIMARY KEY,
+      username        VARCHAR(100) UNIQUE NOT NULL,
+      email           VARCHAR(255) UNIQUE NOT NULL,
+      password_hash   VARCHAR(255) NOT NULL,
+      role            VARCHAR(20)  NOT NULL DEFAULT 'user',
+      is_active       BOOLEAN      NOT NULL DEFAULT true,
+      total_logins    INTEGER      NOT NULL DEFAULT 0,
+      last_login      TIMESTAMP    NULL,
+      last_ip         VARCHAR(50)  NULL,
+      created_at      TIMESTAMP    NOT NULL DEFAULT NOW()
+  );
+
+
+================================================================================
+CHANGE 2: ADD "uploaded_by" COLUMN TO "candidate_profile"
+================================================================================
+
+Your existing table currently looks like this (BEFORE):
+
+  candidate_profile (BEFORE — 162 rows)
+  ┌─────┬────────────┬───────────┬─────────────────────┬──────────────┐
+  │ id  │ first_name │ last_name │ resume_filename      │ ... (others) │
+  ├─────┼────────────┼───────────┼─────────────────────┼──────────────┤
+  │  1  │ Chad       │ Parr      │ resumes/Chad_Parr... │     ...      │
+  │  2  │ Keerthi    │ V         │ resumes/Keerthi_V.. │     ...      │
+  │ ... │ ...        │ ...       │ ...                 │     ...      │
+  │ 162 │ Manikandan │ Lingi     │ resumes/Manikanda.. │     ...      │
+  └─────┴────────────┴───────────┴─────────────────────┴──────────────┘
+
+After adding one column (AFTER):
+
+  candidate_profile (AFTER)
+  ┌─────┬────────────┬───────────┬─────────────────────┬──────────────┬─────────────┐
+  │ id  │ first_name │ last_name │ resume_filename      │ ... (others) │ uploaded_by │
+  ├─────┼────────────┼───────────┼─────────────────────┼──────────────┼─────────────┤
+  │  1  │ Chad       │ Parr      │ resumes/Chad_Parr... │     ...      │    NULL     │ ← existing row
+  │  2  │ Keerthi    │ V         │ resumes/Keerthi_V.. │     ...      │    NULL     │ ← existing row
+  │ ... │ ...        │ ...       │ ...                 │     ...      │    NULL     │ ← existing rows
+  │ 162 │ Manikandan │ Lingi     │ resumes/Manikanda.. │     ...      │    NULL     │ ← existing row
+  │ 163 │ John       │ Doe       │ resumes/John_Doe... │     ...      │      2      │ ← praveen uploaded
+  │ 164 │ Jane       │ Smith     │ resumes/Jane_Smi... │     ...      │      2      │ ← praveen uploaded
+  │ 165 │ Bob        │ Jones     │ resumes/Bob_Jone... │     ...      │      3      │ ← sarah uploaded
+  └─────┴────────────┴───────────┴─────────────────────┴──────────────┴─────────────┘
+                                                                            ↑
+                                                             This is users.id (foreign key)
+
+IMPORTANT: NULL means "uploaded before the login system existed"
+           It is NOT an error. Old data is fully preserved and visible.
+
+SQL TO ADD COLUMN:
+  ALTER TABLE candidate_profile
+  ADD COLUMN uploaded_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL;
+
+
+================================================================================
+HOW THE TWO TABLES LINK TOGETHER
+================================================================================
+
+  users                          candidate_profile
+  ┌────┬──────────┐              ┌─────┬────────────┬─────────────┐
+  │ id │ username │              │ id  │ first_name │ uploaded_by │
+  ├────┼──────────┤              ├─────┼────────────┼─────────────┤
+  │  1 │ admin    │◄─────────────│ 163 │ John       │      1      │
+  │  2 │ praveen  │◄─────┐       │ 164 │ Jane       │      2      │
+  │  3 │ sarah    │◄───┐ └───────│ 165 │ Bob        │      2      │
+  └────┴──────────┘    └─────────│ 166 │ Alice      │      3      │
+                                 └─────┴────────────┴─────────────┘
+
+
+================================================================================
+USEFUL QUERIES FROM JUST THESE TWO TABLES
+================================================================================
+
+1. How many resumes did each user upload?
+   ----------------------------------------
+   SELECT u.username, COUNT(cp.id) AS total_uploads
+   FROM users u
+   LEFT JOIN candidate_profile cp ON cp.uploaded_by = u.id
+   GROUP BY u.username
+   ORDER BY total_uploads DESC;
+
+   Result:
+     praveen  → 45
+     sarah    → 12
+     admin    →  0
+     (NULL)   → 162  ← uploaded before auth existed
+
+2. Last login + upload count for one user:
+   -----------------------------------------
+   SELECT username, last_login, total_logins,
+          (SELECT COUNT(*) FROM candidate_profile WHERE uploaded_by = u.id) AS uploads
+   FROM users u
+   WHERE username = 'praveen';
+
+3. Admin dashboard — all users with stats:
+   ------------------------------------------
+   SELECT u.username, u.email, u.role, u.last_login,
+          u.total_logins,
+          COUNT(cp.id) AS resumes_uploaded
+   FROM users u
+   LEFT JOIN candidate_profile cp ON cp.uploaded_by = u.id
+   GROUP BY u.id
+   ORDER BY u.created_at;
+
+
+================================================================================
+FULL FLOW: LOGIN → UPLOAD → TRACK
+================================================================================
+
+  USER              FRONTEND          BACKEND               DATABASE
+   │                    │                 │                      │
+   │── username/pw ────►│                 │                      │
+   │                    │── POST /login ─►│                      │
+   │                    │                 │── SELECT from users ►│
+   │                    │                 │◄─ returns user row ──│
+   │                    │                 │── UPDATE last_login ►│
+   │                    │                 │── UPDATE total_logins►│
+   │                    │◄── JWT token ───│                      │
+   │◄── redirect to UI ─│                 │                      │
+   │                    │                 │                      │
+   │── uploads resumes ►│                 │                      │
+   │                    │── POST /upload ►│                      │
+   │                    │  (token header) │                      │
+   │                    │                 │── INSERT candidate ──►│
+   │                    │                 │   uploaded_by=user.id │
+   │                    │◄── success ─────│                      │
+
+
+================================================================================
+WHY 1 TABLE IS BETTER THAN 3 TABLES (FOR THIS USE CASE)
+================================================================================
+
+  Need                        3-table approach       1-table approach
+  ──────────────────────────  ───────────────────    ────────────────────
+  Who uploaded a resume?      JOIN 3 tables          JOIN 2 tables
+  Last login time             Query login_sessions   Column in users
+  Total upload count          COUNT from uploads     COUNT from candidate_profile
+  Login count                 COUNT from sessions    Column in users
+  Complexity                  High                   Low
+  New tables to maintain      3                      1
+
+  The only thing you LOSE vs 3 tables:
+    Full per-session history (e.g., "praveen logged in at 9am, uploaded
+    5 resumes, logged out at 10am, then logged in again at 2pm...")
+    → Not needed for this use case.
+
+
+================================================================================
+WHEN WOULD YOU NEED 3 TABLES?
+================================================================================
+
+  Only if you need:
+  - Full login history (every login/logout with timestamp, not just last one)
+  - Per-session upload tracking (which resumes per session)
+  - Enterprise audit/compliance logging
+  - Security incident investigation ("who accessed what when")
+
+  For an internal resume parsing tool → 1 table is perfectly sufficient.
+
+
+================================================================================
+HOW TO RUN THE MIGRATION
+================================================================================
+
+  Run ONCE before deploying auth code:
+
+    cd "Resume_Parsing -Latest -Updated_UI\Backend"
+    python migrate_auth.py
+
+  The script is IDEMPOTENT — safe to run multiple times.
+  It skips anything already done.
+  It NEVER deletes or modifies existing data.
+
+
+================================================================================
+DEPLOY ORDER (EVERY TIME)
+================================================================================
+
+  Does this push change the database?
+
+    YES → 1. pg_dump backup
+          2. python migrate_auth.py
+          3. Deploy backend
+          4. Deploy frontend
+
+    NO  → Just deploy code. No risk to data.
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

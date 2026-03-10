@@ -1,24 +1,16 @@
 import { useEffect, useState } from 'react'
-import { apiUrl } from '../config'
-
-// This component is a local-dev helper only.
-// On deployed servers (UAT, DEV, PROD) it must not render — the backend
-// is managed by Docker and nginx, not started manually.
-export const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 
 export default function ServerStatus() {
   const [backendStatus, setBackendStatus] = useState('checking')
-  const [frontendStatus] = useState('running')
+  const [frontendStatus, setFrontendStatus] = useState('running')
   const [retryCount, setRetryCount] = useState(0)
-
-  // All hooks must be called unconditionally — guard is in App.jsx and at render time below
 
   const checkBackend = async () => {
     try {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 3000)
       
-      const response = await fetch(apiUrl('/health'), { 
+      const response = await fetch('/', { 
         method: 'GET',
         mode: 'cors',
         signal: controller.signal
@@ -87,10 +79,10 @@ export default function ServerStatus() {
           <div className="rounded-lg bg-neutral-50 p-3 font-mono text-xs border border-neutral-200">
             <div className="mb-1 font-semibold text-neutral-700">Status:</div>
             <div className="text-neutral-600">
-              Frontend: <span className="text-green-600">✓ Running</span> (http://127.0.0.1:5173)
+              Frontend: <span className="text-green-600">✓ Running</span> (http://localhost:5175)
             </div>
             <div className="text-neutral-600">
-              Backend: <span className="text-red-600">✗ {backendStatus === 'checking' ? 'Checking...' : 'Offline'}</span> (http://127.0.0.1:8000)
+              Backend: <span className="text-red-600">✗ {backendStatus === 'checking' ? 'Checking...' : 'Offline'}</span> (http://localhost:8000)
             </div>
           </div>
 
@@ -111,7 +103,7 @@ export default function ServerStatus() {
             Retry Connection
           </button>
           <a 
-            href="http://127.0.0.1:8000/docs" 
+            href="http://localhost:8000/docs" 
             target="_blank" 
             rel="noreferrer"
             className="btn-secondary"

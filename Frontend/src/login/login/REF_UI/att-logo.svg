@@ -1,0 +1,10 @@
+<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- AT&T logo with blue globe -->
+  <g>
+    <circle cx="60" cy="50" r="35" fill="none" stroke="#00A8E1" stroke-width="3"/>
+    <line x1="28" y1="50" x2="92" y2="50" stroke="#00A8E1" stroke-width="2"/>
+    <line x1="32" y1="38" x2="88" y2="38" stroke="#00A8E1" stroke-width="2"/>
+    <line x1="32" y1="62" x2="88" y2="62" stroke="#00A8E1" stroke-width="2"/>
+    <text x="120" y="60" font-family="Arial, sans-serif" font-size="28" font-weight="bold" fill="#00A8E1">AT&T</text>
+  </g>
+</svg>

@@ -51,6 +51,15 @@ except ImportError as e:
     CHATBOT_AVAILABLE = False
     create_resume_chatbot = None
 
+# Import auth module
+try:
+    from auth import router as auth_router, get_current_user, get_current_admin
+    AUTH_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] Auth module not available: {e}")
+    AUTH_AVAILABLE = False
+    auth_router = None
+
 # Load environment variables
 load_dotenv()
 
@@ -68,6 +77,8 @@ _extra_origins = [o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split("
 _cors_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "http://89.167.60.41:8000",
@@ -102,6 +113,162 @@ class APINoCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(APINoCacheMiddleware)
+
+# Register auth router (login, logout, me, admin user management)
+if AUTH_AVAILABLE and auth_router is not None:
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+
+# ── Jobs CRUD router (SQLAlchemy) ──────────────────────────────
+try:
+    from jobs_module import jobs_router, public_jobs_router          # noqa: E402
+    app.include_router(jobs_router)
+    app.include_router(public_jobs_router)  # Public job portal routes
+except Exception as e:
+    print(f"[WARN] Jobs module not available: {e}")
+
+# ── Standalone Comments router ─────────────────────────────────
+try:
+    from comment_standalone_module import standalone_comments_router  # noqa: E402
+    app.include_router(standalone_comments_router)
+except Exception as e:
+    print(f"[WARN] Standalone comments module not available: {e}")
+
+# ── Candidate Comments router ──────────────────────────────────
+try:
+    from candidate_comments_module import candidate_comments_router   # noqa: E402
+    app.include_router(candidate_comments_router)
+except Exception as e:
+    print(f"[WARN] Candidate comments module not available: {e}")
+
+# ── Company Jobs router ────────────────────────────────────────
+try:
+    from company_jobs_module import company_jobs_router               # noqa: E402
+    app.include_router(company_jobs_router)
+except Exception as e:
+    print(f"[WARN] Company jobs module not available: {e}")
+
+# ── Job Applications API ───────────────────────────────────────
+from fastapi import Form as FastAPIForm
+from typing import Optional as OptionalType
+import uuid as uuid_module
+
+@app.post("/api/applications/apply", tags=["Applications"])
+async def apply_for_job_api(
+    job_id: str = FastAPIForm(...),
+    first_name: str = FastAPIForm(...),
+    last_name: str = FastAPIForm(...),
+    candidate_email: str = FastAPIForm(...),
+    candidate_phone: str = FastAPIForm(...),
+    address: OptionalType[str] = FastAPIForm(None),
+    education: OptionalType[str] = FastAPIForm(None),
+    citizenship: OptionalType[str] = FastAPIForm(None),
+    experience: OptionalType[str] = FastAPIForm(None),
+    linkedin_url: OptionalType[str] = FastAPIForm(None),
+    resume: OptionalType[UploadFile] = File(None),
+):
+    """Submit a job application with all candidate details."""
+    from jobs_module.database import SessionLocal
+    from jobs_module.models import Job, JobApplication
+    from pathlib import Path as _Path
+    import uuid as _uuid
+
+    db = SessionLocal()
+    try:
+        try:
+            job_uuid = _uuid.UUID(job_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid job_id format")
+
+        job = db.query(Job).filter(Job.id == job_uuid).first()
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+        if not first_name.strip() or not last_name.strip():
+            raise HTTPException(status_code=422, detail="first_name and last_name are required")
+        if not candidate_email.strip():
+            raise HTTPException(status_code=422, detail="email is required")
+        if not candidate_phone.strip():
+            raise HTTPException(status_code=422, detail="phone is required")
+
+        existing = db.query(JobApplication).filter(
+            JobApplication.job_id == job_uuid,
+            JobApplication.candidate_email == candidate_email.strip(),
+        ).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="This candidate has already applied for this job")
+
+        exp_int = None
+        if experience and experience.strip():
+            try:
+                exp_int = int(float(experience.strip()))
+            except (ValueError, TypeError):
+                exp_int = None
+
+        resume_url = None
+        resume_filename = None
+        upload_dir = _Path("uploads/applications")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        if resume and resume.filename:
+            file_ext = _Path(resume.filename).suffix or ".pdf"
+            unique_filename = f"{_uuid.uuid4()}{file_ext}"
+            file_path = upload_dir / unique_filename
+            with open(file_path, "wb") as f:
+                content = await resume.read()
+                f.write(content)
+            resume_url = f"/uploads/applications/{unique_filename}"
+            resume_filename = resume.filename
+
+        application = JobApplication(
+            job_id=job_uuid,
+            candidate_name=f"{first_name.strip()} {last_name.strip()}",
+            candidate_email=candidate_email.strip(),
+            candidate_phone=candidate_phone.strip(),
+            first_name=first_name.strip(),
+            last_name=last_name.strip(),
+            address=address,
+            education=education,
+            citizenship=citizenship,
+            experience=exp_int,
+            linkedin_url=linkedin_url,
+            resume_url=resume_url,
+            resume_filename=resume_filename,
+        )
+
+        db.add(application)
+        db.commit()
+        db.refresh(application)
+
+        return {"message": "Application submitted successfully"}
+    finally:
+        db.close()
+
+# ── Static file serving for uploads ────────────────────────────
+from pathlib import Path as _UploadPath
+_UPLOAD_DIR = _UploadPath("uploads")
+_UPLOAD_DIR.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+@app.post("/upload")
+async def upload_editor_image(image: UploadFile = File(...)):
+    """Upload an editor image and return a public URL."""
+    from pathlib import Path as _EdPath
+    import uuid
+
+    allowed = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    suffix = _EdPath(image.filename or "").suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    editor_dir = _EdPath("uploads/editor")
+    editor_dir.mkdir(parents=True, exist_ok=True)
+
+    unique_name = f"{uuid.uuid4()}{suffix}"
+    file_path = editor_dir / unique_name
+    contents = await image.read()
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    return {"url": f"/uploads/editor/{unique_name}"}
 
 
 # Serve built frontend in production (mount after API routes defined)
@@ -959,7 +1126,7 @@ async def update_candidate(candidate_id: int, data: CandidateUpdate):
 
 
 @app.post("/upload-resume")
-async def upload_resume_endpoint(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_resume_endpoint(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Upload a resume file, parse it, and add to the database."""
     import subprocess
     import sys
@@ -1114,6 +1281,48 @@ async def upload_resume_endpoint(background_tasks: BackgroundTasks, file: Upload
             "name": None, "email": None, "job_title": None,
         }
 
+    # ── Stamp uploaded_by if the caller is authenticated ──────────────────────
+    candidate_id = row["id"]
+    if AUTH_AVAILABLE:
+        try:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                from auth import decode_token, get_user_by_username
+                payload = decode_token(auth_header[7:])
+                uploader_username = payload.get("sub")
+                if uploader_username:
+                    uploader = get_user_by_username(uploader_username)
+                    if uploader and uploader.get("id"):
+                        uploader_id = uploader["id"]
+                        with get_db() as conn:
+                            with conn.cursor() as cursor:
+                                # Update candidate uploaded_by
+                                cursor.execute(
+                                    f"UPDATE {CANDIDATES_TABLE} SET uploaded_by = %s WHERE id = %s",
+                                    (uploader_id, candidate_id),
+                                )
+                                # Increment resumes_uploaded counter for this user
+                                cursor.execute(
+                                    "UPDATE users SET resumes_uploaded = resumes_uploaded + 1 WHERE id = %s",
+                                    (uploader_id,)
+                                )
+                                # Update current session's resume count (latest session for this user)
+                                # NOTE: PostgreSQL requires subquery for ORDER BY + LIMIT in UPDATE
+                                cursor.execute("""
+                                    UPDATE login_sessions
+                                    SET resumes_uploaded_this_session = resumes_uploaded_this_session + 1
+                                    WHERE id = (
+                                        SELECT id FROM login_sessions
+                                        WHERE user_id = %s
+                                        ORDER BY logged_in_at DESC
+                                        LIMIT 1
+                                    )
+                                """, (uploader_id,))
+                            conn.commit()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()  # Log errors — never block upload
+
     full_name = " ".join(filter(None, [row.get("first_name"), row.get("last_name")])) or None
     return {
         "status": "completed",
@@ -1256,7 +1465,7 @@ async def gdrive_sync_and_parse(background_tasks: BackgroundTasks):
                         env["RESUME_INPUT_DIR"] = str(download_dir)
                         env["SKIP_EXISTING"] = "1"
                         
-                        print(f"🔄 Starting background parse of {downloaded} new resumes...")
+                        print(f"[OK] Starting background parse of {downloaded} new resumes...")
                         process = await asyncio.create_subprocess_exec(
                             sys.executable, str(parser_script),
                             cwd=str(backend_dir),
@@ -1273,7 +1482,7 @@ async def gdrive_sync_and_parse(background_tasks: BackgroundTasks):
                             print(f"Output: {stdout.decode()}")
                             print(f"Errors: {stderr.decode()}")
                     except Exception as e:
-                        print(f"❌ Background parser failed: {e}")
+                        print(f"[ERROR] Background parser failed: {e}")
                 
                 background_tasks.add_task(run_parser_async)
                 parsed_count = downloaded  # Will be parsed in background
@@ -1291,7 +1500,7 @@ async def gdrive_sync_and_parse(background_tasks: BackgroundTasks):
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        print(f"❌ Sync error: {error_details}")
+        print(f"[ERROR] Sync error: {error_details}")
         raise HTTPException(status_code=500, detail=f"Sync and parse failed: {str(e)}")
 
 
@@ -1771,6 +1980,80 @@ if os.path.exists(frontend_dist) and os.getenv("SERVE_FRONTEND", "0") == "1":
         raise HTTPException(status_code=404, detail="Not found")
 
 
+# ── Admin: User stats endpoint ────────────────────────────────────────────────
+@app.get("/api/admin/users")
+async def admin_get_users(request: Request):
+    """
+    Admin dashboard query — returns all users with their upload counts,
+    login counts, and last login time.
+
+    This runs the query:
+        SELECT u.username, u.email, u.role, u.last_login,
+               u.total_logins, COUNT(cp.id) AS resumes_uploaded
+        FROM users u
+        LEFT JOIN candidate_profile cp ON cp.uploaded_by = u.id
+        GROUP BY u.id
+        ORDER BY u.created_at;
+
+    Used by: Frontend AdminDashboard page → axios.get("/api/admin/users")
+    Called when: Admin opens the user management / stats page.
+
+    Production note:
+        - uploads done via /upload-resume set cp.uploaded_by = user_id
+        - uploads done before auth existed have cp.uploaded_by = NULL (not counted here)
+        - COUNT(cp.id) only counts resumes uploaded AFTER auth was introduced
+    """
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            # Check users table exists (migration may not have run yet)
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'users'
+                )
+            """)
+            if not cursor.fetchone()["exists"]:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Auth tables not set up yet. Run: python migrate_auth.py"
+                )
+
+            cursor.execute("""
+                SELECT
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.role,
+                    u.is_active,
+                    u.total_logins,
+                    u.last_login,
+                    u.last_ip,
+                    u.created_at,
+                    COUNT(cp.id) AS resumes_uploaded
+                FROM users u
+                LEFT JOIN candidate_profile cp ON cp.uploaded_by = u.id
+                GROUP BY u.id
+                ORDER BY u.created_at
+            """)
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "id":               r["id"],
+            "username":         r["username"],
+            "email":            r["email"],
+            "role":             r["role"],
+            "is_active":        r["is_active"],
+            "total_logins":     r["total_logins"],
+            "last_login":       r["last_login"].isoformat() if r["last_login"] else None,
+            "last_ip":          r["last_ip"],
+            "created_at":       r["created_at"].isoformat() if r["created_at"] else None,
+            "resumes_uploaded": r["resumes_uploaded"],
+        }
+        for r in rows
+    ]
+
+
 if __name__ == "__main__":
     import uvicorn
     
@@ -1804,7 +2087,7 @@ if __name__ == "__main__":
     
     api_host = os.getenv("API_HOST", "127.0.0.1")
     api_port = int(os.getenv("API_PORT", "8000"))
-    print(f"🚀 Starting API server on http://{api_host}:{api_port}")
-    print(f"📖 API Documentation: http://{api_host}:{api_port}/docs")
+    print(f"[OK] Starting API server on http://{api_host}:{api_port}")
+    print(f"[OK] API Documentation: http://{api_host}:{api_port}/docs")
     
     uvicorn.run(app, host=api_host, port=api_port)

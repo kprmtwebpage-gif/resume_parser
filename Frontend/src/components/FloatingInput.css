@@ -1,0 +1,125 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   FloatingInput.css — Floating label input styles (SignalHire-inspired)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.fi-wrapper {
+  position: relative;
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.fi-input {
+  width: 100%;
+  height: 44px;
+  padding: 16px 12px 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.fi-input:hover {
+  border-color: #d1d5db;
+  background: #fff;
+}
+
+.fi-input:focus {
+  border-color: #6366f1;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.fi-label {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  pointer-events: none;
+  transition: all 0.2s ease;
+  background: transparent;
+  padding: 0 2px;
+}
+
+/* Floating state - label moves up */
+.fi-wrapper--floating .fi-label {
+  top: 6px;
+  transform: translateY(0);
+  font-size: 10px;
+  font-weight: 600;
+  color: #6366f1;
+  letter-spacing: 0.02em;
+}
+
+/* Border animation line (optional, for extra polish) */
+.fi-border {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background: #6366f1;
+  border-radius: 0 0 8px 8px;
+  transition: all 0.3s ease;
+  transform: translateX(-50%);
+}
+
+.fi-input:focus ~ .fi-border {
+  width: calc(100% - 2px);
+}
+
+/* ── Select variant ── */
+.fi-select {
+  width: 100%;
+  height: 44px;
+  padding: 16px 12px 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  outline: none;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+}
+
+.fi-select:hover {
+  border-color: #d1d5db;
+  background-color: #fff;
+}
+
+.fi-select:focus {
+  border-color: #6366f1;
+  background-color: #fff;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+/* ── Range inputs (salary min-max) ── */
+.fi-range-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fi-range-wrapper .fi-wrapper {
+  flex: 1;
+}
+
+.fi-range-divider {
+  color: #9ca3af;
+  font-size: 14px;
+  font-weight: 500;
+  padding-top: 8px;
+}

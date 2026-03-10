@@ -1,6 +1,140 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ChevronDownIcon, ChevronUpIcon, XMarkIcon, ArchiveBoxIcon, ArrowPathIcon, TrashIcon, MagnifyingGlassIcon, ArrowDownTrayIcon, FunnelIcon } from '@heroicons/react/24/outline'
+import { api } from '../services/api'
+import CreateJobModal from '../components/CreateJobModal'
+import JobCard from '../components/JobCard'
+import AppliedCandidatesModal from '../components/AppliedCandidatesModal'
+import FloatingInput from '../components/FloatingInput'
+import TagInput from '../components/TagInput'
+import '../components/FloatingInput.css'
+
+/* ── Field-name mapping between frontend form keys and API (DB) keys ── */
+const FRONTEND_TO_API = {
+  title: 'job_title',
+  description: 'job_description',
+  qualification: 'required_qualification',
+  positions: 'open_positions',
+}
+const API_TO_FRONTEND = Object.fromEntries(
+  Object.entries(FRONTEND_TO_API).map(([k, v]) => [v, k]),
+)
+const LOGO_KEYS = new Set(['logoFile', 'logoPreview'])
+
+/** Convert a frontend form object → API payload */
+function toApiPayload(formObj) {
+  const out = {}
+  for (const [k, v] of Object.entries(formObj)) {
+    if (LOGO_KEYS.has(k)) continue            // skip client-only logo fields
+    const apiKey = FRONTEND_TO_API[k] || k
+    if (apiKey === 'open_positions') {
+      out[apiKey] = v ? Number(v) : null
+    } else if (apiKey === 'salary_start' || apiKey === 'salary_end') {
+      out[apiKey] = v ? String(v) : null
+    } else {
+      out[apiKey] = v || null
+    }
+  }
+  return out
+}
+
+/** Convert an API response object → frontend-friendly object */
+function fromApiRecord(rec) {
+  const out = {}
+  for (const [k, v] of Object.entries(rec)) {
+    const feKey = API_TO_FRONTEND[k] || k
+    if (feKey === 'positions') {
+      out[feKey] = v != null ? String(v) : ''
+    } else {
+      out[feKey] = v ?? ''
+    }
+  }
+  // aliases the JobCard still reads directly
+  out.createdAt = rec.created_at
+  return out
+}
+
+// Collapsible Section Component
+function CollapsibleSection({ title, children, defaultOpen = true, isMainFilter = false }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+  
+  if (isMainFilter) {
+    return (
+      <div className="mb-4">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className={`w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors rounded-lg ${
+            isOpen 
+              ? 'bg-brand-500 text-white' 
+              : 'bg-brand-500 text-white hover:bg-brand-600'
+          }`}
+        >
+          <span className="text-sm font-medium">{title}</span>
+          {isOpen ? (
+            <ChevronUpIcon className="w-4 h-4" />
+          ) : (
+            <ChevronDownIcon className="w-4 h-4" />
+          )}
+        </button>
+        <div
+          className={`overflow-hidden transition-all duration-300 ease-in-out ${
+            isOpen ? 'max-h-[3000px] opacity-100 mt-4' : 'max-h-0 opacity-0'
+          }`}
+        >
+          {children}
+        </div>
+      </div>
+    )
+  }
+  
+  return (
+    <div className="border-b border-neutral-200 last:border-b-0">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between py-3 px-1 text-left hover:bg-neutral-50 transition-colors rounded-md"
+      >
+        <span className="text-sm font-semibold text-neutral-800">{title}</span>
+        {isOpen ? (
+          <ChevronUpIcon className="w-4 h-4 text-neutral-500" />
+        ) : (
+          <ChevronDownIcon className="w-4 h-4 text-neutral-500" />
+        )}
+      </button>
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-in-out ${
+          isOpen ? 'max-h-[2000px] opacity-100 pb-4' : 'max-h-0 opacity-0'
+        }`}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
 
 export default function Jobs() {
+  const navigate = useNavigate()
+  
+  /* ── Jobs state ── */
+  const [jobs, setJobs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  /* ── Archive state ── */
+  const [archivedJobs, setArchivedJobs] = useState([])
+  const [showArchive, setShowArchive] = useState(false)
+  const [archiveLoading, setArchiveLoading] = useState(false)
+
+  /* ── Modal state ── */
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [modalMode, setModalMode] = useState('create')   // 'create' | 'edit' | 'review'
+  const [modalJob, setModalJob] = useState(null)          // job being edited / reviewed
+
+  /* ── Applied Candidates Modal state ── */
+  const [isAppliedModalOpen, setIsAppliedModalOpen] = useState(false)
+  const [appliedModalJob, setAppliedModalJob] = useState(null)
+
   const [filters, setFilters] = useState({
     title: '',
     location: '',
@@ -9,229 +143,943 @@ export default function Jobs() {
     priority: '',
     createdBy: '',
     assignees: '',
-    skills: '',
+    skills: [],  // Changed to array for tag input
+    category: '',
+    reason: '',
+    department: '',
+    salaryMin: '',
+    salaryMax: '',
+    employmentType: '',
   })
 
+  /* ── Filter suggestions from API ── */
+  const [filterSuggestions, setFilterSuggestions] = useState({
+    jobTitles: [],
+    companies: [],
+    locations: [],
+    departments: [],
+    categories: [],
+    skills: [],
+  })
+
+  /* ── Fetch filter suggestions from API ── */
+  const fetchFilterSuggestions = useCallback(async () => {
+    try {
+      const [titlesRes, companiesRes, locationsRes, depsRes, catsRes, skillsRes] = await Promise.all([
+        api.get('/api/job-projects/filters/job-titles').catch(() => ({ data: { data: [] } })),
+        api.get('/api/job-projects/filters/companies').catch(() => ({ data: { data: [] } })),
+        api.get('/api/job-projects/filters/locations').catch(() => ({ data: { data: [] } })),
+        api.get('/api/job-projects/filters/departments').catch(() => ({ data: { data: [] } })),
+        api.get('/api/job-projects/filters/categories').catch(() => ({ data: { data: [] } })),
+        api.get('/api/job-projects/filters/skills').catch(() => ({ data: { data: [] } })),
+      ])
+      setFilterSuggestions({
+        jobTitles: titlesRes.data?.data || [],
+        companies: companiesRes.data?.data || [],
+        locations: locationsRes.data?.data || [],
+        departments: depsRes.data?.data || [],
+        categories: catsRes.data?.data || [],
+        skills: skillsRes.data?.data || [],
+      })
+    } catch (err) {
+      console.error('Failed to load filter suggestions:', err)
+    }
+  }, [])
+
+  /* ── Fetch all jobs from API ── */
+  const fetchJobs = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const { data } = await api.get('/api/job-projects', { params: { limit: 500 } })
+      setJobs(data.map(fromApiRecord))
+    } catch (err) {
+      console.error('Failed to load jobs:', err)
+      setError('Could not load jobs. Is the backend running?')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  /* ── Fetch archived jobs from API ── */
+  const fetchArchivedJobs = useCallback(async () => {
+    try {
+      setArchiveLoading(true)
+      const { data } = await api.get('/api/job-projects/archived', { params: { limit: 500 } })
+      setArchivedJobs(data.map(fromApiRecord))
+    } catch (err) {
+      console.error('Failed to load archived jobs:', err)
+    } finally {
+      setArchiveLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchJobs(); fetchFilterSuggestions(); }, [fetchJobs, fetchFilterSuggestions])
+  
+  // Fetch archived jobs when switching to archive view
+  useEffect(() => {
+    if (showArchive) {
+      fetchArchivedJobs()
+    }
+  }, [showArchive, fetchArchivedJobs])
+
+  const handleClearFilters = () => {
+    setFilters({
+      title: '',
+      location: '',
+      company: '',
+      status: '',
+      priority: '',
+      createdBy: '',
+      assignees: '',
+      skills: [],  // Reset to empty array for tag input
+      category: '',
+      reason: '',
+      department: '',
+      salaryMin: '',
+      salaryMax: '',
+      employmentType: '',
+    })
+  }
+
+  // Count active filters (handle both string and array values)
+  const activeFiltersCount = Object.values(filters).filter(v => {
+    if (Array.isArray(v)) return v.length > 0
+    return v !== ''
+  }).length
+
   const handleSearch = () => {
-    // Search functionality to be implemented
+    // Search functionality - triggers filter update
     console.log('Searching with filters:', filters)
   }
 
-  const handleExport = () => {
-    // Export functionality to be implemented
-    alert('Export functionality coming soon')
+  const handleExport = async () => {
+    try {
+      // Build query params from current filters
+      const params = new URLSearchParams()
+      if (filters.title) params.append('title', filters.title)
+      if (filters.location) params.append('location', filters.location)
+      if (filters.company) params.append('company', filters.company)
+      if (filters.status) params.append('status', filters.status)
+      if (filters.category) params.append('category', filters.category)
+      if (filters.department) params.append('department', filters.department)
+      if (filters.employmentType) params.append('employment_type', filters.employmentType)
+
+      const response = await api.get(`/api/job-projects/export/excel?${params.toString()}`, {
+        responseType: 'blob'
+      })
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      const timestamp = new Date().toISOString().slice(0, 10)
+      link.setAttribute('download', `jobs_export_${timestamp}.xlsx`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Export failed:', err)
+      alert('Failed to export jobs. Please try again.')
+    }
   }
 
+  /* ── Open modal in different modes ── */
   const handleCreateJob = () => {
-    // Create job functionality to be implemented
-    alert('Create new job functionality coming soon')
+    setModalMode('create')
+    setModalJob(null)
+    setIsCreateModalOpen(true)
   }
+
+  const handleEditJob = (job) => {
+    setModalMode('edit')
+    setModalJob(job)
+    setIsCreateModalOpen(true)
+  }
+
+  const handleReviewJob = (job) => {
+    setModalMode('review')
+    setModalJob(job)
+    setIsCreateModalOpen(true)
+  }
+
+  /* ── Save handler (create or edit) — persists to API ── */
+  const handleSaveJob = async (payload, mode) => {
+    try {
+      const formData = new FormData()
+      
+      // Map frontend field names to API field names and append to FormData
+      const fieldMapping = {
+        title: 'job_title',
+        description: 'job_description',
+        comments: 'comments',
+        qualification: 'required_qualification',
+        positions: 'open_positions',
+      }
+      
+      // Append all form fields (skip logoFile and logoPreview)
+      for (const [key, value] of Object.entries(payload)) {
+        if (key === 'logoFile' || key === 'logoPreview') continue
+
+        const apiKey = fieldMapping[key] || key
+        if (apiKey === 'job_description' || apiKey === 'comments') {
+          formData.append(apiKey, String(value ?? ''))
+        } else if (value !== null && value !== undefined && value !== '') {
+          formData.append(apiKey, String(value))
+        }
+      }
+      
+      // Append photo file if it exists
+      if (payload.logoFile && payload.logoFile instanceof File) {
+        formData.append('photo', payload.logoFile)
+      }
+      
+      // Append remove_photo flag if logo should be deleted
+      if (payload.removePhoto) {
+        formData.append('remove_photo', 'true')
+      }
+      
+      if (mode === 'create') {
+        await api.post('/api/job-projects', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        })
+      } else if (mode === 'edit' && modalJob) {
+        await api.put(`/api/job-projects/${modalJob.id}`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        })
+      }
+      await fetchJobs()                 // refresh list from DB
+    } catch (err) {
+      console.error('Save failed:', err)
+      alert('Failed to save job. Please try again.')
+    }
+  }
+
+  /* ── Publish / Unpost handler — toggles status via API ── */
+  const updateJobInState = (updated) => {
+    const mapped = fromApiRecord(updated)
+    setJobs(prev => prev.map(existing => (existing.id === mapped.id ? { ...existing, ...mapped } : existing)))
+  }
+
+  const handlePublishJob = async (job) => {
+    const isPosted = job.status === 'POSTED'
+    console.log('[JOB_PROJECTS] Publish toggle clicked', { jobId: job.id, status: job.status })
+
+    if (isPosted) {
+      // Unpost
+      const confirmed = window.confirm(
+        `Unpost "${job.title || 'this job'}" from Public?\n\nThis will remove it from the public job portal.`,
+      )
+      if (!confirmed) return
+      try {
+        const { data } = await api.post(`/api/job-projects/${job.id}/unpost`)
+        console.log('[JOB_PROJECTS] Unpost API success', { jobId: job.id })
+        updateJobInState(data)
+      } catch (err) {
+        console.error('Unpost failed:', err)
+        alert('Failed to unpost job.')
+      }
+    } else {
+      // Post
+      const confirmed = window.confirm(
+        `Post "${job.title || 'this job'}" to Public?\n\nThis will make it visible on the public job portal.`,
+      )
+      if (!confirmed) return
+      try {
+        const { data } = await api.post(`/api/job-projects/${job.id}/post`)
+        console.log('[JOB_PROJECTS] Post API success', { jobId: job.id })
+        updateJobInState(data)
+      } catch (err) {
+        console.error('Post failed:', err)
+        alert('Failed to post job.')
+      }
+    }
+  }
+
+  /* ── Archive handler (moves job to archive via API) ── */
+  const handleArchiveJob = async (job) => {
+    try {
+      await api.post(`/api/job-projects/${job.id}/archive`)
+      await fetchJobs()  // Refresh active jobs list
+      // Close modal after archiving
+      closeModal()
+      // Show success message
+      setTimeout(() => {
+        alert('Job moved to archive successfully!')
+      }, 100)
+    } catch (err) {
+      console.error('Archive failed:', err)
+      alert('Failed to archive job.')
+    }
+  }
+
+  /* ── Restore handler (restores job from archive via API) ── */
+  const handleRestoreJob = async (job) => {
+    try {
+      await api.post(`/api/job-projects/${job.id}/restore`)
+      // Refresh both lists
+      await fetchArchivedJobs()
+      await fetchJobs()
+    } catch (err) {
+      console.error('Restore failed:', err)
+      alert('Failed to restore job. Please try again.')
+    }
+  }
+
+  /* ── Delete forever handler (permanently deletes from DB) ── */
+  const handleDeleteForever = async (job) => {
+    const confirmed = window.confirm(`Permanently delete "${job.title || 'this job'}"?\n\nThis action cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/api/job-projects/${job.id}/permanent-delete`)
+      await fetchArchivedJobs()  // Refresh archived jobs list
+    } catch (err) {
+      console.error('Delete failed:', err)
+      alert('Failed to delete job. Please try again.')
+    }
+  }
+
+  /* ── Multi-select state for bulk delete (Issue 2) ── */
+  const [selectedJobs, setSelectedJobs] = useState([])
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
+
+  const handleSelectJob = (jobId) => {
+    setSelectedJobs(prev => 
+      prev.includes(jobId) 
+        ? prev.filter(id => id !== jobId)
+        : [...prev, jobId]
+    )
+  }
+
+  const handleSelectAll = () => {
+    if (selectedJobs.length === archivedJobs.length) {
+      setSelectedJobs([])
+    } else {
+      setSelectedJobs(archivedJobs.map(job => job.id))
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedJobs.length === 0) return
+    
+    const confirmed = window.confirm(
+      `Permanently delete ${selectedJobs.length} job(s)?\n\nThis action cannot be undone.`
+    )
+    if (!confirmed) return
+    
+    try {
+      setBulkDeleteLoading(true)
+      await api.post('/api/job-projects/bulk-delete', { job_ids: selectedJobs })
+      setSelectedJobs([])  // Clear selection
+      await fetchArchivedJobs()  // Refresh archived jobs list
+    } catch (err) {
+      console.error('Bulk delete failed:', err)
+      alert('Failed to delete selected jobs. Please try again.')
+    } finally {
+      setBulkDeleteLoading(false)
+    }
+  }
+
+  // Clear selection when leaving archive view
+  useEffect(() => {
+    if (!showArchive) {
+      setSelectedJobs([])
+    }
+  }, [showArchive])
+
+  /* ── Duplicate job handler (creates copy via API) ── */
+  const handleDuplicateJob = async (job) => {
+    try {
+      const { data } = await api.post(`/api/job-projects/${job.id}/duplicate`)
+      // Refresh the jobs list to include the new duplicate
+      await fetchJobs()
+      // Convert the API response to frontend format
+      const newJob = fromApiRecord(data)
+      // Close the current modal first
+      closeModal()
+      // Small delay to ensure modal closes before reopening with the new job
+      setTimeout(() => {
+        setModalMode('edit')
+        setModalJob(newJob)
+        setIsCreateModalOpen(true)
+      }, 150)
+    } catch (err) {
+      console.error('Duplicate failed:', err)
+      console.error('Error details:', err.response?.data || err.message)
+      alert('Failed to duplicate job. Please check the console for details.')
+    }
+  }
+
+  /* ── Copy job handler (same as duplicate, triggered from card menu) ── */
+  const handleCopyJob = async (job) => {
+    await handleDuplicateJob(job)
+  }
+
+  /* ── Hold job handler (pauses the job) ── */
+  const handleHoldJob = async (job) => {
+    try {
+      const { data } = await api.post(`/api/job-projects/${job.id}/hold`)
+      updateJobInState(data)
+    } catch (err) {
+      console.error('Hold failed:', err)
+      alert('Failed to hold job.')
+    }
+  }
+
+  /* ── Unhold job handler (resumes the job) ── */
+  const handleUnholdJob = async (job) => {
+    try {
+      const { data } = await api.post(`/api/job-projects/${job.id}/unhold`)
+      updateJobInState(data)
+    } catch (err) {
+      console.error('Unhold failed:', err)
+      alert('Failed to resume job.')
+    }
+  }
+
+  /* ── Close job handler (closes and archives the job) ── */
+  const handleCloseJob = async (job) => {
+    const confirmed = window.confirm(
+      `Close "${job.title || 'this job'}"?\n\nThis will mark the job as closed and move it to archive.`
+    )
+    if (!confirmed) return
+    try {
+      await api.post(`/api/job-projects/${job.id}/close`)
+      await fetchJobs()  // Refresh to remove from active list
+    } catch (err) {
+      console.error('Close failed:', err)
+      alert('Failed to close job.')
+    }
+  }
+
+  /* ── Applied candidates handler (opens modal) ── */
+  const handleAppliedClick = (job) => {
+    setAppliedModalJob(job)
+    setIsAppliedModalOpen(true)
+  }
+
+  const closeAppliedModal = () => {
+    setIsAppliedModalOpen(false)
+    setAppliedModalJob(null)
+    // Refresh job list to update applied count after modal closes
+    fetchJobs()
+  }
+
+  const closeModal = () => {
+    setIsCreateModalOpen(false)
+    setModalJob(null)
+  }
+
+  /* ── Filter jobs ── */
+  const filteredJobs = jobs.filter((job) => {
+    const f = filters
+    if (f.title && !job.title?.toLowerCase().includes(f.title.toLowerCase())) return false
+    if (f.location && !job.location?.toLowerCase().includes(f.location.toLowerCase())) return false
+    if (f.company && !job.company?.toLowerCase().includes(f.company.toLowerCase())) return false
+    if (f.status && !job.status?.toLowerCase().includes(f.status.toLowerCase())) return false
+    if (f.priority && !job.priority?.toLowerCase().includes(f.priority.toLowerCase())) return false
+    if (f.department && !job.department?.toLowerCase().includes(f.department.toLowerCase())) return false
+    // Skills is now an array - check if job has ALL selected skills
+    if (f.skills && f.skills.length > 0) {
+      const jobSkills = job.skills?.toLowerCase() || ''
+      for (const skill of f.skills) {
+        if (!jobSkills.includes(skill.toLowerCase())) return false
+      }
+    }
+    if (f.category && !job.category?.toLowerCase().includes(f.category.toLowerCase())) return false
+    if (f.employmentType && !job.employment_type?.toLowerCase().includes(f.employmentType.toLowerCase())) return false
+    if (f.salaryMin && job.salary_start && Number(job.salary_start) < Number(f.salaryMin)) return false
+    if (f.salaryMax && job.salary_end && Number(job.salary_end) > Number(f.salaryMax)) return false
+    return true
+  })
 
   return (
     <div className="h-screen overflow-hidden">
-      {/* Left Sidebar - Filters */}
-      <aside className="fixed left-0 top-16 w-64 bg-white border-r border-neutral-200 h-[calc(100vh-4rem)] overflow-y-auto z-20">
-        <div className="p-4 flex flex-col h-full">
+      {/* Left Sidebar - Filters (Feature 6 & 7: Floating labels + Fixed buttons) */}
+      <aside className="fixed left-0 top-14 w-72 bg-white border-r border-neutral-200 h-[calc(100vh-3.5rem)] z-20 shadow-sm flex flex-col">
+        {/* Scrollable Filter Content */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Filter Header */}
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-neutral-900">Filters</h2>
-            <button 
-              type="button" 
-              className="text-xs text-neutral-500 hover:text-neutral-700"
-              onClick={() => setFilters({
-                title: '',
-                location: '',
-                company: '',
-                status: '',
-                priority: '',
-                createdBy: '',
-                assignees: '',
-                skills: '',
-              })}
-            >
-              Clear filters ×
-            </button>
+            <div className="flex items-center gap-2">
+              <FunnelIcon className="w-5 h-5 text-brand-500" />
+              <h2 className="text-sm font-semibold text-neutral-900">Filters</h2>
+              {activeFiltersCount > 0 && (
+                <span className="px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-700 rounded-full">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </div>
+            {activeFiltersCount > 0 && (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="text-xs font-medium text-neutral-500 hover:text-brand-600 transition-colors"
+              >
+                Clear all
+              </button>
+            )}
           </div>
 
-          <div className="space-y-4 flex-1 overflow-y-auto">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Title</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                value={filters.title}
-                onChange={(e) => setFilters({ ...filters, title: e.target.value })}
-                placeholder=""
-              />
-            </div>
+          {/* Filter Fields with Floating Labels */}
+          <div className="space-y-3">
+            {/* Title */}
+            <FloatingInput
+              label="Job Title"
+              name="title"
+              value={filters.title}
+              onChange={(e) => setFilters({ ...filters, title: e.target.value })}
+              list="title-suggestions"
+              suggestions={filterSuggestions.jobTitles}
+            />
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Location</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                value={filters.location}
-                onChange={(e) => setFilters({ ...filters, location: e.target.value })}
-                placeholder=""
-              />
-            </div>
+            {/* Company */}
+            <FloatingInput
+              label="Company"
+              name="company"
+              value={filters.company}
+              onChange={(e) => setFilters({ ...filters, company: e.target.value })}
+              list="company-suggestions"
+              suggestions={filterSuggestions.companies}
+            />
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Company</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                value={filters.company}
-                onChange={(e) => setFilters({ ...filters, company: e.target.value })}
-                placeholder=""
-              />
-            </div>
+            {/* Location */}
+            <FloatingInput
+              label="Location"
+              name="location"
+              value={filters.location}
+              onChange={(e) => setFilters({ ...filters, location: e.target.value })}
+              list="location-suggestions"
+              suggestions={filterSuggestions.locations}
+            />
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Status</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            {/* Status */}
+            <div className="fi-wrapper">
+              <select
+                className="fi-select"
                 value={filters.status}
                 onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                placeholder=""
-              />
+                style={{ paddingTop: filters.status ? '16px' : '10px', paddingBottom: filters.status ? '4px' : '10px' }}
+              >
+                <option value="">All Statuses</option>
+                <option value="DRAFT">Draft</option>
+                <option value="POSTED">Posted</option>
+                <option value="HOLD">On Hold</option>
+                <option value="CLOSED">Closed</option>
+              </select>
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Priority</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            {/* Priority */}
+            <div className="fi-wrapper">
+              <select
+                className="fi-select"
                 value={filters.priority}
                 onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-                placeholder=""
+                style={{ paddingTop: filters.priority ? '16px' : '10px', paddingBottom: filters.priority ? '4px' : '10px' }}
+              >
+                <option value="">All Priorities</option>
+                <option value="High">High</option>
+                <option value="Normal">Normal</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+
+            {/* Department */}
+            <FloatingInput
+              label="Department"
+              name="department"
+              value={filters.department}
+              onChange={(e) => setFilters({ ...filters, department: e.target.value })}
+              list="department-suggestions"
+              suggestions={filterSuggestions.departments}
+            />
+
+            {/* Category */}
+            <FloatingInput
+              label="Category"
+              name="category"
+              value={filters.category}
+              onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+              list="category-suggestions"
+              suggestions={filterSuggestions.categories}
+            />
+
+            {/* Skills - Tag Input with suggestions */}
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+                Skills
+              </label>
+              <TagInput
+                tags={filters.skills}
+                onChange={(skills) => setFilters({ ...filters, skills })}
+                suggestions={filterSuggestions.skills}
+                placeholder="Type skill name (e.g., JavaScript, Python, React...)"
               />
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Created by</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                value={filters.createdBy}
-                onChange={(e) => setFilters({ ...filters, createdBy: e.target.value })}
-                placeholder=""
-              />
+            {/* Employment Type */}
+            <div className="fi-wrapper">
+              <select
+                className="fi-select"
+                value={filters.employmentType}
+                onChange={(e) => setFilters({ ...filters, employmentType: e.target.value })}
+                style={{ paddingTop: filters.employmentType ? '16px' : '10px', paddingBottom: filters.employmentType ? '4px' : '10px' }}
+              >
+                <option value="">All Employment Types</option>
+                <option value="Full Time">Full Time</option>
+                <option value="Part Time">Part Time</option>
+                <option value="Contract">Contract</option>
+                <option value="Temporary">Temporary</option>
+                <option value="Remote Work">Remote Work</option>
+              </select>
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Assignees</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                value={filters.assignees}
-                onChange={(e) => setFilters({ ...filters, assignees: e.target.value })}
-                placeholder=""
-              />
+            {/* Salary Range */}
+            <div className="pt-2">
+              <label className="block text-xs font-semibold text-neutral-500 mb-2 uppercase tracking-wide">
+                Salary Range ($/year)
+              </label>
+              <div className="fi-range-wrapper">
+                <FloatingInput
+                  label="Min"
+                  name="salaryMin"
+                  type="number"
+                  value={filters.salaryMin}
+                  onChange={(e) => setFilters({ ...filters, salaryMin: e.target.value })}
+                />
+                <span className="fi-range-divider">—</span>
+                <FloatingInput
+                  label="Max"
+                  name="salaryMax"
+                  type="number"
+                  value={filters.salaryMax}
+                  onChange={(e) => setFilters({ ...filters, salaryMax: e.target.value })}
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-neutral-600">Skills</label>
-              <input
-                className="w-full rounded-button border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                value={filters.skills}
-                onChange={(e) => setFilters({ ...filters, skills: e.target.value })}
-                placeholder=""
-              />
-            </div>
+            {/* Created By */}
+            <FloatingInput
+              label="Created By"
+              name="createdBy"
+              value={filters.createdBy}
+              onChange={(e) => setFilters({ ...filters, createdBy: e.target.value })}
+            />
+
+            {/* Assignees */}
+            <FloatingInput
+              label="Assignees"
+              name="assignees"
+              value={filters.assignees}
+              onChange={(e) => setFilters({ ...filters, assignees: e.target.value })}
+            />
           </div>
+        </div>
 
-          {/* Bottom Buttons */}
-          <div className="mt-4 space-y-2 pt-4 border-t border-neutral-200">
+        {/* Fixed Search & Export Buttons (Feature 7) */}
+        <div className="flex-shrink-0 p-4 border-t border-neutral-200 bg-white">
+          <div className="space-y-2">
             <button
               type="button"
-              className="w-full btn-primary"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-brand-500 hover:bg-brand-600 text-white font-semibold text-sm rounded-lg shadow-sm transition-all duration-200"
               onClick={handleSearch}
             >
+              <MagnifyingGlassIcon className="w-4 h-4" />
               Search
             </button>
+            
             <button
               type="button"
-              className="w-full rounded-button border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white hover:bg-neutral-50 text-neutral-700 font-medium text-sm rounded-lg border border-neutral-300 transition-all duration-200"
               onClick={handleExport}
             >
-              Export
+              <ArrowDownTrayIcon className="w-4 h-4" />
+              Export to Excel
             </button>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="ml-64 h-screen overflow-y-auto overflow-x-hidden px-6 py-4 space-y-4">
+      <main className="ml-72 h-screen overflow-y-auto overflow-x-hidden bg-neutral-50">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-semibold text-neutral-900">Job Projects</h1>
-            <label className="flex items-center gap-2 text-sm text-neutral-600">
-              <input type="checkbox" className="rounded border-neutral-300" />
-              Show my jobs only
-            </label>
+        <div className="bg-white border-b border-neutral-200 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {/* Back to Jobs button - only show in archive view */}
+              {showArchive && (
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-sm text-neutral-600 hover:text-neutral-900 transition-colors"
+                  onClick={() => setShowArchive(false)}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Back to Jobs
+                </button>
+              )}
+              <h1 className="text-lg font-semibold text-neutral-900">
+                {showArchive ? 'Archived Jobs' : 'Job Projects'}
+              </h1>
+              
+              {/* Find Job Link - Candidate Portal */}
+              {!showArchive && (
+                <>
+                  <span className="text-neutral-300">|</span>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 transition-colors"
+                    onClick={() => navigate('/find-jobs')}
+                  >
+                    <MagnifyingGlassIcon className="w-4 h-4" />
+                    Find Job
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Archive button - only show when NOT in archive view */}
+              {!showArchive && (
+                <button
+                  type="button"
+                  className="flex items-center gap-2 px-4 py-2 font-medium text-sm rounded-lg transition-all duration-200 bg-neutral-100 text-neutral-600 hover:bg-neutral-200 border border-neutral-300"
+                  onClick={() => setShowArchive(true)}
+                >
+                  <ArchiveBoxIcon className="w-4 h-4" />
+                  Archive
+                  {archivedJobs.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full">
+                      {archivedJobs.length}
+                    </span>
+                  )}
+                </button>
+              )}
+              {!showArchive && (
+                <button
+                  type="button"
+                  className="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white font-medium text-sm rounded-lg shadow-sm transition-all duration-200"
+                  onClick={handleCreateJob}
+                >
+                  + Create new job
+                </button>
+              )}
+            </div>
           </div>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={handleCreateJob}
-          >
-            Create new job
-          </button>
         </div>
 
-        {/* Table Header */}
-        <div className="bg-white rounded-lg border border-neutral-200 shadow-sm overflow-hidden">
-          <table className="min-w-full divide-y divide-neutral-200">
-            <thead className="bg-neutral-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Job/Company/Department
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Opened ↓
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Open days ↑
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Status ↑
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Level
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Priority ↑
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Quantity ↑
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  On board
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
-                  Hired ↑
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-neutral-200">
+        {/* Content Area */}
+        <div className="px-6 py-4">
+          {/* Archive Panel */}
+          {showArchive && (
+            <div className="space-y-3">
+              {/* Loading state for archived jobs */}
+              {archiveLoading && (
+                <div className="bg-white rounded-lg border border-neutral-200 min-h-[400px] flex items-center justify-center">
+                  <p className="text-sm text-neutral-500">Loading archived jobs…</p>
+                </div>
+              )}
+              
               {/* Empty state */}
-              <tr>
-                <td colSpan="9" className="px-4 py-16 text-center text-neutral-500">
-                  Data not found
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+              {!archiveLoading && archivedJobs.length === 0 && (
+                <div className="bg-white rounded-lg border border-neutral-200 min-h-[400px] flex flex-col items-center justify-center">
+                  <ArchiveBoxIcon className="w-12 h-12 text-neutral-300 mb-4" />
+                  <h3 className="text-lg font-medium text-neutral-700 mb-2">Archive is empty</h3>
+                  <p className="text-sm text-neutral-500">Deleted jobs will appear here for recovery.</p>
+                </div>
+              )}
+              
+              {/* Archived jobs list */}
+              {!archiveLoading && archivedJobs.length > 0 && (
+                <>
+                  {/* Header with count and bulk actions */}
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-neutral-500">
+                      {archivedJobs.length} archived job{archivedJobs.length !== 1 ? 's' : ''}
+                    </p>
+                    
+                    {/* Bulk actions toolbar - shows when items selected */}
+                    {selectedJobs.length > 0 && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-neutral-600">
+                          {selectedJobs.length} selected
+                        </span>
+                        <button
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200 transition-colors disabled:opacity-50"
+                          onClick={handleBulkDelete}
+                          disabled={bulkDeleteLoading}
+                        >
+                          <TrashIcon className="w-3.5 h-3.5" />
+                          {bulkDeleteLoading ? 'Deleting...' : 'Delete Selected'}
+                        </button>
+                        <button
+                          className="text-xs text-neutral-500 hover:text-neutral-700"
+                          onClick={() => setSelectedJobs([])}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Select all checkbox */}
+                  <div className="flex items-center gap-2 mb-3 px-4 py-2 bg-neutral-100 rounded-lg">
+                    <input
+                      type="checkbox"
+                      checked={selectedJobs.length === archivedJobs.length && archivedJobs.length > 0}
+                      onChange={handleSelectAll}
+                      className="w-4 h-4 text-brand-500 border-neutral-300 rounded focus:ring-brand-500"
+                    />
+                    <span className="text-sm text-neutral-600">
+                      Select All
+                    </span>
+                  </div>
+                  
+                  {archivedJobs.map((job) => (
+                    <div 
+                      key={job.id} 
+                      className={`flex items-center gap-4 p-4 bg-white border rounded-lg hover:border-neutral-300 transition-all ${
+                        selectedJobs.includes(job.id) ? 'border-brand-500 bg-brand-50' : 'border-neutral-200'
+                      }`}
+                    >
+                      {/* Checkbox for multi-select */}
+                      <input
+                        type="checkbox"
+                        checked={selectedJobs.includes(job.id)}
+                        onChange={() => handleSelectJob(job.id)}
+                        className="w-4 h-4 text-brand-500 border-neutral-300 rounded focus:ring-brand-500"
+                      />
+                      
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-semibold text-neutral-900 truncate">{job.title || 'Untitled Job'}</h3>
+                        <p className="text-xs text-neutral-500">{job.company || '—'}</p>
+                        <p className="text-xs text-neutral-400 mt-1">
+                          Archived: {job.archived_at ? new Date(job.archived_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200 transition-colors"
+                          onClick={() => handleRestoreJob(job)}
+                        >
+                          <ArrowPathIcon className="w-3.5 h-3.5" />
+                          Restore
+                        </button>
+                        <button
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200 transition-colors"
+                          onClick={() => handleDeleteForever(job)}
+                        >
+                          <TrashIcon className="w-3.5 h-3.5" />
+                          Delete Forever
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
 
-        {/* Footer */}
-        <div className="flex items-center justify-between text-sm text-neutral-500">
-          <span>Total 0 profiles</span>
-          <div className="flex items-center gap-2">
-            <button className="p-1 rounded hover:bg-neutral-100 disabled:opacity-50" disabled>
-              &lt;
-            </button>
-            <button className="p-1 rounded hover:bg-neutral-100 disabled:opacity-50" disabled>
-              &gt;
-            </button>
-          </div>
+          {/* Normal Jobs Content */}
+          {!showArchive && (
+            <>
+              {/* Loading state */}
+              {loading && (
+                <div className="bg-white rounded-lg border border-neutral-200 min-h-[500px] flex items-center justify-center">
+                  <p className="text-sm text-neutral-500">Loading jobs…</p>
+                </div>
+              )}
+
+              {/* Error state */}
+              {!loading && error && (
+                <div className="bg-white rounded-lg border border-red-200 min-h-[200px] flex flex-col items-center justify-center gap-3 p-8">
+                  <p className="text-sm text-red-600">{error}</p>
+                  <button
+                    type="button"
+                    className="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white font-medium text-sm rounded-lg"
+                    onClick={fetchJobs}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!loading && !error && filteredJobs.length === 0 && (
+                <div className="bg-white rounded-lg border border-neutral-200 overflow-hidden min-h-[500px] flex flex-col items-center justify-center">
+                  <div className="text-center py-16">
+                    <h3 className="text-lg font-medium text-neutral-700 mb-2">
+                      {jobs.length === 0 ? "You don't have any job yet" : 'No jobs match your filters'}
+                    </h3>
+                    <p className="text-sm text-neutral-500 mb-6">
+                      {jobs.length === 0
+                        ? 'To start using jobs click Create new job'
+                        : 'Try adjusting your filter criteria'}
+                    </p>
+                    {jobs.length === 0 && (
+                      <button
+                        type="button"
+                        className="px-6 py-2.5 bg-brand-500 hover:bg-brand-600 text-white font-medium text-sm rounded-lg shadow-sm transition-all duration-200"
+                        onClick={handleCreateJob}
+                      >
+                        Create new job
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Jobs list */}
+              {!loading && !error && filteredJobs.length > 0 && (
+                <div className="space-y-2">
+                  {/* Jobs header bar */}
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-neutral-500">
+                      {filteredJobs.length} job{filteredJobs.length !== 1 ? 's' : ''}
+                      {filteredJobs.length !== jobs.length && ` (of ${jobs.length} total)`}
+                    </p>
+                  </div>
+
+                  {/* Job cards */}
+                  {filteredJobs.map((job) => (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      onEdit={handleEditJob}
+                      onReview={handleReviewJob}
+                      onPublish={handlePublishJob}
+                      onCopy={handleCopyJob}
+                      onHold={handleHoldJob}
+                      onUnhold={handleUnholdJob}
+                      onClose={handleCloseJob}
+                      onApplied={handleAppliedClick}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </main>
+
+      {/* Create / Edit / Review Job Modal */}
+      <CreateJobModal
+        isOpen={isCreateModalOpen}
+        onClose={closeModal}
+        mode={modalMode}
+        initialData={modalJob}
+        onSave={handleSaveJob}
+        onDelete={handleArchiveJob}
+        onDuplicate={handleDuplicateJob}
+      />
+
+      {/* Applied Candidates Modal */}
+      <AppliedCandidatesModal
+        isOpen={isAppliedModalOpen}
+        onClose={closeAppliedModal}
+        job={appliedModalJob}
+      />
     </div>
   )
 }

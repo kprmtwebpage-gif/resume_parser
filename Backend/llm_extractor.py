@@ -272,6 +272,10 @@ Return ONLY JSON."""
 # ---------------------------------------------------------------------------
 
 def _is_enabled() -> bool:
+    # Master switch — USE_LLM=false disables ALL LLM calls regardless of other settings
+    master = os.getenv("USE_LLM", "false").strip().casefold()
+    if master not in {"1", "true", "yes", "on"}:
+        return False
     return os.getenv("LLM_EXTRACT_ENABLED", "false").strip().casefold() in {
         "1", "true", "yes", "on"
     }

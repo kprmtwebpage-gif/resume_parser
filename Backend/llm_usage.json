@@ -1,0 +1,16 @@
+{
+  "daily_stats": {
+    "2026-03-09": {
+      "llm_calls": 53,
+      "high_confidence_skips": 393,
+      "total_resumes": 446,
+      "extraction_methods": {
+        "regex": 226,
+        "hybrid": 0,
+        "llm": 0
+      }
+    }
+  },
+  "total_lifetime_calls": 53,
+  "last_reset": "2026-03-09T18:24:31.898960"
+}

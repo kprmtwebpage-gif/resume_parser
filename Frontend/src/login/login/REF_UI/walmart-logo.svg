@@ -1,0 +1,18 @@
+<svg viewBox="0 0 220 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Walmart logo -->
+  <g>
+    <text x="10" y="60" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#0071CE">Walmart</text>
+    <!-- Yellow spark -->
+    <g transform="translate(175, 35)">
+      <circle cx="0" cy="0" r="3" fill="#FFC220"/>
+      <circle cx="0" cy="-12" r="2" fill="#FFC220"/>
+      <circle cx="0" cy="12" r="2" fill="#FFC220"/>
+      <circle cx="-12" cy="0" r="2" fill="#FFC220"/>
+      <circle cx="12" cy="0" r="2" fill="#FFC220"/>
+      <circle cx="-8" cy="-8" r="2" fill="#FFC220"/>
+      <circle cx="8" cy="-8" r="2" fill="#FFC220"/>
+      <circle cx="-8" cy="8" r="2" fill="#FFC220"/>
+      <circle cx="8" cy="8" r="2" fill="#FFC220"/>
+    </g>
+  </g>
+</svg>
