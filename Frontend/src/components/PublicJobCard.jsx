@@ -38,9 +38,8 @@ export default function PublicJobCard({ job, isSaved, onSave, onClick, onApply }
 
   const descriptionPlain = stripHtml(job.job_description)
   const qualificationPlain = stripHtml(job.required_qualification)
-  const commentsPlain = stripHtml(job.comments)
   const previewText = descriptionPlain.length > 150 ? descriptionPlain.substring(0, 150) + '...' : descriptionPlain
-  const hasMoreContent = descriptionPlain.length > 150 || qualificationPlain || job.skills || commentsPlain
+  const hasMoreContent = descriptionPlain.length > 150 || qualificationPlain || job.skills
 
   // Get company logo or fallback
   const getLogoUrl = () => {
@@ -178,12 +177,6 @@ export default function PublicJobCard({ job, isSaved, onSave, onClick, onApply }
                   <span key={i} className="pjc-skill-tag">{skill.trim()}</span>
                 ))}
               </div>
-            </div>
-          )}
-          {commentsPlain && (
-            <div className="pjc-section">
-              <h4>Responsibilities</h4>
-              <div dangerouslySetInnerHTML={{ __html: job.comments }} />
             </div>
           )}
           <button className="pjc-read-less" onClick={(e) => { e.stopPropagation(); setExpanded(false) }}>

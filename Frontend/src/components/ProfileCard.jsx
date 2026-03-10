@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { FaLinkedin } from 'react-icons/fa'
 import { useTheme } from '../contexts/ThemeContext'
+import { apiUrl } from '../config'
 import ResumeViewer from './ResumeViewer.jsx'
 import EmailProviderModal from './EmailProviderModal.jsx'
 import CommentModal from './CommentModal.jsx'
@@ -108,8 +109,8 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const location = row.location || row.address || '—'
   const linkedinUrl = row.linkedin || row.linkedin_url
   const hasResume = row.resume_filename
-  const baseResumeUrl = hasResume ? `/candidates/${row.id}/resume` : null
-  const viewResumeUrl = hasResume ? `/candidates/${row.id}/resume?inline=true` : null
+  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume`) : null
+  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${row.id}/resume?inline=true`) : null
   const downloadResumeUrl = hasResume ? baseResumeUrl : null
 
 

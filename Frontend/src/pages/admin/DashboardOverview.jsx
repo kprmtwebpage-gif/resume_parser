@@ -514,8 +514,23 @@ export default function DashboardOverview() {
 
       {/* ─── 6. RECENT ACTIVITY FEED ─────────────────── */}
       <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${COLORS.border}` }}>
-        <div className="px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+        <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
           <h3 className="text-[15px] font-extrabold tracking-tight" style={{ color: COLORS.text, fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}>Recent Activity</h3>
+          <div className="flex items-center gap-3">
+            {lastRefresh && (
+              <span className="text-[11px]" style={{ color: COLORS.secondary }}>
+                Updated {timeAgo(lastRefresh.toISOString())}
+              </span>
+            )}
+            <button
+              onClick={fetchStats}
+              className="text-[11px] px-2 py-1 rounded hover:bg-gray-100 transition-colors"
+              style={{ color: COLORS.primary }}
+              title="Refresh activity"
+            >
+              ↻ Refresh
+            </button>
+          </div>
         </div>
         <div className="divide-y" style={{ borderColor: COLORS.border + '40' }}>
           {d.recentActivity.length > 0 ? d.recentActivity.slice(0, 10).map((a, i) => {

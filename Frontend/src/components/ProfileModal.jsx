@@ -7,6 +7,7 @@ import PdfScrollViewer from './PdfScrollViewer.jsx'
 import { notifyModalOpened, notifyModalClosed, onChatbotOpened } from '../chatbot/modalEvents.js'
 import { useTheme } from '../contexts/ThemeContext'
 import { api } from '../services/api'
+import { apiUrl } from '../config'
 import './CommentModal.css'
 
 function initials(first, last) {
@@ -64,8 +65,8 @@ export default function ProfileModal({
 
   // Construct resume URL similar to ProfileCard
   const hasResume = candidate?.resume_filename
-  const baseResumeUrl = hasResume ? `/candidates/${candidate.id}/resume` : null
-  const viewResumeUrl = hasResume ? `/candidates/${candidate.id}/resume?inline=true` : null
+  const baseResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume`) : null
+  const viewResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume?inline=true`) : null
   const resumeIsDocx = hasResume && (candidate.resume_filename.toLowerCase().endsWith('.docx') || candidate.resume_filename.toLowerCase().endsWith('.doc'))
   const resumeIsPdf = hasResume && candidate.resume_filename.toLowerCase().endsWith('.pdf')
   const resumeIsImage = hasResume && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(candidate.resume_filename)
@@ -521,7 +522,7 @@ export default function ProfileModal({
                           {/* Export Button in Header */}
                           {hasResume && (
                             <a
-                              href={`/candidates/${candidate.id}/resume`}
+                              href={apiUrl(`/candidates/${candidate.id}/resume`)}
                               download
                               className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300"
                               style={{

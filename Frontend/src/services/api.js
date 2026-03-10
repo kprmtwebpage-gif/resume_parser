@@ -89,7 +89,7 @@ export async function fetchStats() {
 }
 
 export async function bulkDownloadResumes(candidateIds) {
-  const res = await api.post('/candidates/bulk-download', { ids: candidateIds }, {
+  const res = await api.post('/candidates/bulk-download', { candidate_ids: candidateIds }, {
     responseType: 'blob'
   })
   return res.data
