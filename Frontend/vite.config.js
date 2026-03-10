@@ -9,6 +9,14 @@ export default defineConfig({
   // Public base path — ensures asset URLs include the env prefix
   base: basePath ? `${basePath}/` : '/',
   plugins: [react()],
+  optimizeDeps: {
+    include: ['react-quill-new', 'quill-image-resize-module-react'],
+  },
+  build: {
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 5173,
