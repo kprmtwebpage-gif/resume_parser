@@ -69,6 +69,7 @@ function AppContent() {
 }
 
 export default function App() {
+  // v2 – basename ensures React Router matches /dev/* routes correctly
   const basePath = import.meta.env.VITE_BASE_PATH || ''
   return (
     <AuthProvider>
