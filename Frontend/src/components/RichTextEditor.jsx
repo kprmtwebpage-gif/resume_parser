@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactQuill, { Quill } from 'react-quill-new'
-import ImageResize from 'quill-image-resize-module-react'
 import 'react-quill-new/dist/quill.snow.css'
 
-/* ── Register ImageResize once at module load ── */
-if (typeof Quill !== 'undefined' && !Quill.imports['modules/imageResize']) {
-  Quill.register('modules/imageResize', ImageResize)
+/* ── Register ImageResize lazily to avoid CJS/ESM Symbol.toStringTag crash ── */
+let _imageResizeRegistered = false
+async function ensureImageResize() {
+  if (_imageResizeRegistered) return
+  _imageResizeRegistered = true
+  try {
+    const mod = await import('quill-image-resize-module-react')
+    const ImageResize = mod.default || mod
+    if (typeof Quill !== 'undefined' && !Quill.imports['modules/imageResize']) {
+      Quill.register('modules/imageResize', ImageResize)
+    }
+  } catch (e) {
+    console.warn('ImageResize module not available:', e)
+  }
 }
 
 /* ── Register custom undo / redo icons in Quill's icon registry ── */
@@ -59,6 +69,14 @@ export default function RichTextEditor({
   const [showLinkModal, setShowLinkModal] = useState(false)
   const [linkText, setLinkText] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
+  const [imageResizeReady, setImageResizeReady] = useState(_imageResizeRegistered)
+
+  /* ── Lazy-load ImageResize module on first mount ── */
+  useEffect(() => {
+    if (!_imageResizeRegistered) {
+      ensureImageResize().then(() => setImageResizeReady(true))
+    }
+  }, [])
 
   /* ── Safe accessor – getEditor() throws if called before mount ── */
   const getEditor = () => {
