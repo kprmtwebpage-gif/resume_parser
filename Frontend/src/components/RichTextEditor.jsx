@@ -165,18 +165,20 @@ export default function RichTextEditor({
               link: linkHandler,
             },
           },
-      imageResize: readOnly
-        ? false
-        : {
+      // Only enable imageResize after the async module has been registered.
+      // Passing it before registration causes Quill to crash at runtime.
+      imageResize: (!readOnly && imageResizeReady)
+        ? {
             parchment: Quill.import('parchment'),
             modules: ['Resize', 'DisplaySize', 'Toolbar'],
-          },
+          }
+        : false,
       history: { delay: 500, maxStack: 100, userOnly: true },
       clipboard: { matchVisual: false },
     }),
-    // handlers read from refs at call-time, so no extra deps needed
+    // Re-run when readOnly changes OR when imageResize module becomes available
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [readOnly],
+    [readOnly, imageResizeReady],
   )
 
   /* ── Image click → show delete overlay ── */

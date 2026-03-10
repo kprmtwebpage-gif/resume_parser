@@ -580,23 +580,26 @@ export default function Jobs() {
   }
 
   /* ── Filter jobs ── */
+  // Helper: safely convert a job field to lowercase string (handles arrays and non-strings)
+  const toStr = (v) => (Array.isArray(v) ? v.join(', ') : String(v == null ? '' : v)).toLowerCase()
+
   const filteredJobs = jobs.filter((job) => {
     const f = filters
-    if (f.title && !job.title?.toLowerCase().includes(f.title.toLowerCase())) return false
-    if (f.location && !job.location?.toLowerCase().includes(f.location.toLowerCase())) return false
-    if (f.company && !job.company?.toLowerCase().includes(f.company.toLowerCase())) return false
-    if (f.status && !job.status?.toLowerCase().includes(f.status.toLowerCase())) return false
-    if (f.priority && !job.priority?.toLowerCase().includes(f.priority.toLowerCase())) return false
-    if (f.department && !job.department?.toLowerCase().includes(f.department.toLowerCase())) return false
+    if (f.title && !toStr(job.title).includes(f.title.toLowerCase())) return false
+    if (f.location && !toStr(job.location).includes(f.location.toLowerCase())) return false
+    if (f.company && !toStr(job.company).includes(f.company.toLowerCase())) return false
+    if (f.status && !toStr(job.status).includes(f.status.toLowerCase())) return false
+    if (f.priority && !toStr(job.priority).includes(f.priority.toLowerCase())) return false
+    if (f.department && !toStr(job.department).includes(f.department.toLowerCase())) return false
     // Skills is now an array - check if job has ALL selected skills
     if (f.skills && f.skills.length > 0) {
-      const jobSkills = job.skills?.toLowerCase() || ''
+      const jobSkills = toStr(job.skills)
       for (const skill of f.skills) {
-        if (!jobSkills.includes(skill.toLowerCase())) return false
+        if (!jobSkills.includes(String(skill).toLowerCase())) return false
       }
     }
-    if (f.category && !job.category?.toLowerCase().includes(f.category.toLowerCase())) return false
-    if (f.employmentType && !job.employment_type?.toLowerCase().includes(f.employmentType.toLowerCase())) return false
+    if (f.category && !toStr(job.category).includes(f.category.toLowerCase())) return false
+    if (f.employmentType && !toStr(job.employment_type).includes(f.employmentType.toLowerCase())) return false
     if (f.salaryMin && job.salary_start && Number(job.salary_start) < Number(f.salaryMin)) return false
     if (f.salaryMax && job.salary_end && Number(job.salary_end) > Number(f.salaryMax)) return false
     return true

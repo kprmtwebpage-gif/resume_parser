@@ -17,9 +17,10 @@ export default function Autocomplete({
   const dropdownRef = useRef(null)
 
   useEffect(() => {
-    if (value) {
+    const valueLower = String(value || '').toLowerCase()
+    if (valueLower) {
       const filtered = suggestions.filter(item =>
-        item.toLowerCase().includes(value.toLowerCase())
+        String(item || '').toLowerCase().includes(valueLower)
       )
       setFilteredSuggestions(filtered)
     } else {
@@ -92,7 +93,7 @@ export default function Autocomplete({
             <div
               key={idx}
               className={`ac-item ${
-                highlightMatch && value && suggestion.toLowerCase().includes(value.toLowerCase())
+                highlightMatch && value && String(suggestion || '').toLowerCase().includes(String(value || '').toLowerCase())
                   ? 'ac-highlight'
                   : ''
               }`}

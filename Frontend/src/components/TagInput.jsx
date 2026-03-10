@@ -35,13 +35,14 @@ export default function TagInput({
   const listRef = useRef(null)
 
   // Filter suggestions based on input and exclude already selected tags
+  const safeStr = (v) => String(v == null ? '' : v).toLowerCase()
   const filtered = inputValue
     ? suggestions.filter(
         (s) =>
-          s.toLowerCase().includes(inputValue.toLowerCase()) &&
-          !tags.some((tag) => tag.toLowerCase() === s.toLowerCase())
+          safeStr(s).includes(safeStr(inputValue)) &&
+          !tags.some((tag) => safeStr(tag) === safeStr(s))
       )
-    : suggestions.filter((s) => !tags.some((tag) => tag.toLowerCase() === s.toLowerCase()))
+    : suggestions.filter((s) => !tags.some((tag) => safeStr(tag) === safeStr(s)))
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -71,7 +72,7 @@ export default function TagInput({
       if (!trimmed) return
       
       // Check if already exists (case-insensitive)
-      if (tags.some((tag) => tag.toLowerCase() === trimmed.toLowerCase())) {
+      if (tags.some((tag) => safeStr(tag) === safeStr(trimmed))) {
         setInputValue('')
         return
       }
@@ -164,13 +165,15 @@ export default function TagInput({
   // Highlight matching substring
   const renderHighlight = (text) => {
     if (!inputValue) return text
-    const idx = text.toLowerCase().indexOf(inputValue.toLowerCase())
+    const safeText = String(text || '')
+    const safeInput = String(inputValue || '').toLowerCase()
+    const idx = safeText.toLowerCase().indexOf(safeInput)
     if (idx === -1) return text
     return (
       <>
-        {text.slice(0, idx)}
-        <span className="ti-highlight">{text.slice(idx, idx + inputValue.length)}</span>
-        {text.slice(idx + inputValue.length)}
+        {safeText.slice(0, idx)}
+        <span className="ti-highlight">{safeText.slice(idx, idx + safeInput.length)}</span>
+        {safeText.slice(idx + safeInput.length)}
       </>
     )
   }
