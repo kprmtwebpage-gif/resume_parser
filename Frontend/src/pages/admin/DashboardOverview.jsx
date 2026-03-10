@@ -208,7 +208,7 @@ export default function DashboardOverview() {
 
   useEffect(() => {
     fetchStats()
-    const interval = setInterval(fetchStats, 60 * 60 * 1000) // auto-refresh every hour
+    const interval = setInterval(fetchStats, 30 * 1000) // auto-refresh every 30 seconds
     return () => clearInterval(interval)
   }, [fetchStats])
 

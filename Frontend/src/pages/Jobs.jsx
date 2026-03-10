@@ -317,14 +317,24 @@ export default function Jobs() {
         qualification: 'required_qualification',
         positions: 'open_positions',
       }
+
+      // Fields that are client-only and should never be sent to the API
+      const skipKeys = new Set(['logoFile', 'logoPreview', 'removePhoto'])
       
-      // Append all form fields (skip logoFile and logoPreview)
+      // Append all form fields
       for (const [key, value] of Object.entries(payload)) {
-        if (key === 'logoFile' || key === 'logoPreview') continue
+        if (skipKeys.has(key)) continue
 
         const apiKey = fieldMapping[key] || key
+
         if (apiKey === 'job_description' || apiKey === 'comments') {
+          // Always send rich-text fields (even if empty) so the server clears them on edit
           formData.append(apiKey, String(value ?? ''))
+        } else if (Array.isArray(value)) {
+          // Arrays (location, skills): join as comma-separated; skip genuinely empty arrays
+          if (value.length > 0) {
+            formData.append(apiKey, value.join(', '))
+          }
         } else if (value !== null && value !== undefined && value !== '') {
           formData.append(apiKey, String(value))
         }
@@ -340,14 +350,12 @@ export default function Jobs() {
         formData.append('remove_photo', 'true')
       }
       
+      // Do NOT manually set Content-Type — axios/browser sets
+      // multipart/form-data with the correct boundary automatically.
       if (mode === 'create') {
-        await api.post('/api/job-projects', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        })
+        await api.post('/api/job-projects', formData)
       } else if (mode === 'edit' && modalJob) {
-        await api.put(`/api/job-projects/${modalJob.id}`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        })
+        await api.put(`/api/job-projects/${modalJob.id}`, formData)
       }
       await fetchJobs()                 // refresh list from DB
     } catch (err) {

@@ -28,7 +28,50 @@ def init_db():
     # Import models to register them with Base
     from . import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _migrate_jobs_columns()
     _migrate_job_applications()
+
+
+def _migrate_jobs_columns():
+    """Ensure all jobs table columns exist (safe, idempotent migration)."""
+    from sqlalchemy import text
+    _JOBS_COLUMNS = [
+        ("priority",             "VARCHAR(50)",    None),
+        ("department",           "VARCHAR(255)",   None),
+        ("open_positions",       "INTEGER",        "1"),
+        ("reason",               "TEXT",           None),
+        ("currency",             "VARCHAR(10)",    "'USD'"),
+        ("salary_start",         "NUMERIC(12,2)",  None),
+        ("salary_end",           "NUMERIC(12,2)",  None),
+        ("category",             "VARCHAR(100)",   None),
+        ("employment_type",      "VARCHAR(50)",    None),
+        ("experience",           "VARCHAR(50)",    None),
+        ("skills",               "TEXT",           None),
+        ("required_qualification","TEXT",          None),
+        ("job_description",      "TEXT",           None),
+        ("comments",             "TEXT",           None),
+        ("photo_url",            "TEXT",           None),
+        ("job_id",               "VARCHAR(50)",    None),
+        ("posted_date",          "TIMESTAMPTZ",    None),
+        ("archived",             "BOOLEAN",        "FALSE"),
+        ("archived_at",          "TIMESTAMPTZ",    None),
+        ("draft_saved_at",       "TIMESTAMPTZ",    None),
+        ("is_draft_autosave",    "BOOLEAN",        "FALSE"),
+        ("held_at",              "TIMESTAMPTZ",    None),
+        ("closed_at",            "TIMESTAMPTZ",    None),
+        ("updated_at",           "TIMESTAMPTZ",    "NOW()"),
+    ]
+    try:
+        with engine.connect() as conn:
+            for col, col_type, default in _JOBS_COLUMNS:
+                default_clause = f" DEFAULT {default}" if default else ""
+                conn.execute(text(
+                    f"ALTER TABLE jobs ADD COLUMN IF NOT EXISTS "
+                    f"{col} {col_type}{default_clause}"
+                ))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB_MIGRATE] jobs column migration warning: {e}")
 
 
 def _migrate_job_applications():

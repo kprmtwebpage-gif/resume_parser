@@ -74,7 +74,7 @@ export default function ActivityLog() {
 
   useEffect(() => {
     fetchActivity()
-    const interval = setInterval(fetchActivity, 60 * 60 * 1000)
+    const interval = setInterval(fetchActivity, 30 * 1000) // auto-refresh every 30 seconds
     return () => clearInterval(interval)
   }, [fetchActivity])
 
