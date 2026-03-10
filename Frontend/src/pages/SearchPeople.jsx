@@ -174,7 +174,16 @@ export default function SearchPeople() {
       console.error('Load candidates error:', e)
       // Don't show error during sync operations, just log it
       if (!syncing) {
-        setError('Failed to load candidates. Check that the FastAPI backend is running.')
+        const status = e?.response?.status
+        if (status === 401 || status === 403) {
+          setError('Session expired. Please log in again.')
+        } else if (status >= 500) {
+          setError(`Server error (${status}). The backend is running but returned an error.`)
+        } else if (e?.isNetworkError || e?.code === 'ERR_NETWORK') {
+          setError('Cannot reach the server. Check your connection or try again in a moment.')
+        } else {
+          setError(`Failed to load candidates (${status || e?.message || 'unknown error'}). Check that the backend is running.`)
+        }
       }
       setAllRows([])
     } finally {
@@ -464,13 +473,22 @@ export default function SearchPeople() {
       >
           {error ? (
             <div 
-              className="mx-6 mt-4 px-4 py-3 text-sm rounded-md"
+              className="mx-6 mt-4 px-4 py-3 text-sm rounded-md flex items-center justify-between"
               style={{
                 color: isDark ? '#fca5a5' : '#b91c1c',
                 backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2',
                 border: `1px solid ${isDark ? 'rgba(239,68,68,0.3)' : '#fecaca'}`,
               }}
-            >{error}</div>
+            >
+              <span>{error}</span>
+              <button
+                onClick={() => { setError(''); load() }}
+                className="ml-4 px-3 py-1 rounded text-xs font-medium bg-white border border-red-300 hover:bg-red-50 transition-colors"
+                style={{ color: '#b91c1c' }}
+              >
+                Retry
+              </button>
+            </div>
           ) : null}
 
           {/* Top Search Section */}
