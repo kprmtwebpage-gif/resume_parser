@@ -6,8 +6,10 @@
 # 1. Backup production database
 # 2. Sync latest production resumes to UAT
 # 3. Run UAT tests
-# 4. Sync production resumes to DEV (for next dev cycle)
-# 5. Deploy to production
+# 4. Deploy to production
+#
+# Note: Prod→DEV resume sync is MANUAL only.
+#       Run: bash sync_prod_resumes_to_dev.sh
 #
 # Usage:
 #   bash safe_deploy_to_production.sh
@@ -88,7 +90,7 @@ echo "" | tee -a "$LOG_FILE"
 # ───────────────────────────────────────────────────────────────
 # STEP 1: BACKUP PRODUCTION DATABASE
 # ───────────────────────────────────────────────────────────────
-log "${YELLOW}[1/5] Backing up production database...${NC}"
+log "${YELLOW}[1/4] Backing up production database...${NC}"
 
 mkdir -p "$BACKUP_DIR"
 
@@ -105,7 +107,7 @@ echo "" | tee -a "$LOG_FILE"
 # ───────────────────────────────────────────────────────────────
 # STEP 2: SYNC RESUMES TO UAT
 # ───────────────────────────────────────────────────────────────
-log "${YELLOW}[2/5] Syncing latest production resumes to UAT...${NC}"
+log "${YELLOW}[2/4] Syncing latest production resumes to UAT...${NC}"
 
 if bash "$PROJECT_DIR/sync_prod_resumes_to_uat.sh" 2>&1 | tee -a "$LOG_FILE"; then
     success "UAT resumes synced"
@@ -118,7 +120,7 @@ echo "" | tee -a "$LOG_FILE"
 # ───────────────────────────────────────────────────────────────
 # STEP 3: UAT SANITY CHECK (optional)
 # ───────────────────────────────────────────────────────────────
-log "${YELLOW}[3/5] Checking UAT health...${NC}"
+log "${YELLOW}[3/4] Checking UAT health...${NC}"
 
 if curl -sf http://localhost:8001/health > /dev/null 2>&1; then
     success "UAT API is healthy"
@@ -133,21 +135,9 @@ fi
 echo "" | tee -a "$LOG_FILE"
 
 # ───────────────────────────────────────────────────────────────
-# STEP 4: SYNC RESUMES TO DEV
+# STEP 4: DEPLOY TO PRODUCTION
 # ───────────────────────────────────────────────────────────────
-log "${YELLOW}[4/5] Syncing production resumes to DEV...${NC}"
-
-if bash "$PROJECT_DIR/sync_prod_resumes_to_dev.sh" 2>&1 | tee -a "$LOG_FILE"; then
-    success "DEV resumes synced"
-else
-    fail "DEV resume sync failed (non-critical, continuing)"
-fi
-echo "" | tee -a "$LOG_FILE"
-
-# ───────────────────────────────────────────────────────────────
-# STEP 5: DEPLOY TO PRODUCTION
-# ───────────────────────────────────────────────────────────────
-log "${YELLOW}[5/5] Deploying to production...${NC}"
+log "${YELLOW}[4/4] Deploying to production...${NC}"
 log "  Starting rolling update (current containers stay up during build)"
 
 if bash "$PROJECT_DIR/deploy_prod.sh" 2>&1 | tee -a "$LOG_FILE"; then
