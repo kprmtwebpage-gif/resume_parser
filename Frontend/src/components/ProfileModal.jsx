@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
-import { Linkedin } from 'lucide-react'
 import mammoth from 'mammoth'
 
 import ProfileTabs from './ProfileTabs.jsx'
@@ -291,17 +290,6 @@ export default function ProfileModal({
                             <div>
                               <div className="flex items-center gap-2">
                                 <div className="text-2xl font-semibold text-neutral-900">{fullName}</div>
-                                {candidate.linkedin && (
-                                  <a
-                                    href={sanitizeLinkedInUrl(candidate.linkedin)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center flex-shrink-0 transition-transform hover:scale-110 duration-200"
-                                    title="View LinkedIn Profile"
-                                  >
-                                    <Linkedin size={20} color="#0A66C2" />
-                                  </a>
-                                )}
                               </div>
                               <div className="mt-2 flex items-center gap-2 text-base text-neutral-600">
                                 {candidate.job_title || '—'}

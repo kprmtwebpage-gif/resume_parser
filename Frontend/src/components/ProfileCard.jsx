@@ -17,6 +17,18 @@ function initials(first, last) {
   return (a + b).toUpperCase() || '—'
 }
 
+function sanitizeLinkedInUrl(url) {
+  if (!url) return null
+  url = url.trim()
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'https://' + url
+  }
+  if (url.startsWith('http://') && url.includes('linkedin.com')) {
+    url = url.replace('http://', 'https://')
+  }
+  return url
+}
+
 // Portal-based Actions Dropdown
 function ActionsDropdown({ anchorRef, isOpen, onClose, children, colors }) {
   const [position, setPosition] = useState({ top: 0, left: 0 })
@@ -122,7 +134,7 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     // Then trigger download
     const link = document.createElement('a')
     link.href = downloadResumeUrl
-    link.download = row.resume_filename || `resume_${row.id}.pdf`
+    link.download = (row.resume_filename || `resume_${row.id}`).split('/').pop()
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -255,7 +267,7 @@ Availability: ${row.availability || 'N/A'}`
               </div>
               {linkedinUrl && (
                 <a
-                  href={linkedinUrl}
+                  href={sanitizeLinkedInUrl(linkedinUrl)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="linkedin-bottom-icon"

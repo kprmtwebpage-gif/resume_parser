@@ -1034,8 +1034,23 @@ async def download_resume(candidate_id: int, inline: bool = Query(False, descrip
                 raise HTTPException(status_code=404, detail="Resume file does not exist on disk")
             
             filename = os.path.basename(resume_path)
-            is_pdf = resume_path.lower().endswith(".pdf")
-            media_type = "application/pdf" if is_pdf else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ext = os.path.splitext(resume_path)[1].lower()
+            mime_map = {
+                ".pdf": "application/pdf",
+                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".doc": "application/msword",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+                ".bmp": "image/bmp",
+                ".webp": "image/webp",
+                ".tif": "image/tiff",
+                ".tiff": "image/tiff",
+                ".txt": "text/plain",
+                ".rtf": "application/rtf",
+            }
+            media_type = mime_map.get(ext, "application/octet-stream")
             
             disposition = "inline" if inline else "attachment"
             headers = {"Content-Disposition": f'{disposition}; filename="{filename}"'}
