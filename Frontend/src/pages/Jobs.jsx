@@ -600,8 +600,15 @@ export default function Jobs() {
     }
     if (f.category && !toStr(job.category).includes(f.category.toLowerCase())) return false
     if (f.employmentType && !toStr(job.employment_type).includes(f.employmentType.toLowerCase())) return false
-    if (f.salaryMin && job.salary_start && Number(job.salary_start) < Number(f.salaryMin)) return false
-    if (f.salaryMax && job.salary_end && Number(job.salary_end) > Number(f.salaryMax)) return false
+    // Salary filter — range overlap: exclude only if job's range is completely outside user's range
+    if (f.salaryMin) {
+      const jobEnd = job.salary_end ? Number(job.salary_end) : (job.salary_start ? Number(job.salary_start) : null)
+      if (jobEnd !== null && jobEnd < Number(f.salaryMin)) return false
+    }
+    if (f.salaryMax) {
+      const jobStart = job.salary_start ? Number(job.salary_start) : (job.salary_end ? Number(job.salary_end) : null)
+      if (jobStart !== null && jobStart > Number(f.salaryMax)) return false
+    }
     return true
   })
 
@@ -609,8 +616,8 @@ export default function Jobs() {
     <div className="h-screen overflow-hidden">
       {/* Left Sidebar - Filters (Feature 6 & 7: Floating labels + Fixed buttons) */}
       <aside className="fixed left-0 top-14 w-72 bg-white border-r border-neutral-200 h-[calc(100vh-3.5rem)] z-20 shadow-sm flex flex-col">
-        {/* Scrollable Filter Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        {/* Scrollable Filter Content — hidden scrollbar */}
+        <div className="flex-1 overflow-y-auto p-4 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           {/* Filter Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">

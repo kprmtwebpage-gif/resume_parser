@@ -124,6 +124,22 @@ except Exception:
     pass
 
 
+def _migrate_admin_to_superuser():
+    """One-time migration: rename role 'admin' to 'superuser'."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET role = 'superuser' WHERE role = 'admin'")
+        conn.commit()
+    finally:
+        conn.close()
+
+try:
+    _migrate_admin_to_superuser()
+except Exception:
+    pass
+
+
 def record_login(user_id: int, ip: str):
     """Increment total_logins, update last_login / last_ip, and log session."""
     _ensure_login_sessions_table()
@@ -199,9 +215,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 
 
 async def get_current_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    """Dependency: same as get_current_user but requires role='admin'."""
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    """Dependency: same as get_current_user but requires role='superuser' (or legacy 'admin')."""
+    if current_user["role"] not in ("superuser", "admin"):
+        raise HTTPException(status_code=403, detail="Superuser access required")
     return current_user
 
 
@@ -367,11 +383,11 @@ async def admin_delete_user(
     conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         with conn.cursor() as cur:
-            # Prevent deleting the last admin
-            cur.execute("SELECT COUNT(*) as cnt FROM users WHERE role='admin' AND id != %s", (user_id,))
+            # Prevent deleting the last superuser
+            cur.execute("SELECT COUNT(*) as cnt FROM users WHERE role IN ('superuser','admin') AND id != %s", (user_id,))
             admin_count = cur.fetchone()["cnt"]
             if admin_count == 0:
-                raise HTTPException(status_code=403, detail="Cannot delete the last admin user")
+                raise HTTPException(status_code=403, detail="Cannot delete the last superuser")
             
             # Get user info before deletion
             cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))

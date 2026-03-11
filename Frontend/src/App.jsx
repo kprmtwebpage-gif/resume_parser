@@ -24,7 +24,7 @@ function AdminGuard({ children }) {
   try {
     const stored = localStorage.getItem('rp_user')
     const user = stored ? JSON.parse(stored) : null
-    if (user?.role === 'admin') return children
+    if (user?.role === 'superuser' || user?.role === 'admin') return children
   } catch {}
   return <Navigate to="/" replace />
 }

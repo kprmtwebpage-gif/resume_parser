@@ -48,7 +48,7 @@ export default function AdminLayout() {
             style={!sidebarOpen ? { objectPosition: 'left' } : undefined}
           />
           {sidebarOpen && (
-            <span className="text-[10px] font-medium tracking-[0.18em] uppercase text-gray-400 pl-0.5">Admin Panel</span>
+            <span className="text-[10px] font-medium tracking-[0.18em] uppercase text-gray-400 pl-0.5">Superuser Panel</span>
           )}
         </div>
       </div>

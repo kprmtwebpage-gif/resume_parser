@@ -30,7 +30,7 @@ Write-Host ('  Project: {0}  |  Env file: {1}' -f $PROJECT_NAME, $ENV_FILE) -For
 # ---------- 1. Create archive ----------
 Write-Host ''
 Write-Host '[1/4] Creating archive...' -ForegroundColor Yellow
-tar --exclude='.venv' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' --exclude='.git' --exclude='resumes_cache' --exclude='error' --exclude='logs' --exclude='parsed_resumes.csv' --exclude='database_backups' -czf $ARCHIVE .
+tar --exclude='.venv' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' --exclude='.git' --exclude='resumes_cache' --exclude='Backend/resumes' --exclude='Backend/unprocessed_resumes' --exclude='Backend/resumes_gdrive' --exclude='error' --exclude='logs' --exclude='parsed_resumes.csv' --exclude='database_backups' -czf $ARCHIVE .
 
 $archiveLen = (Get-Item $ARCHIVE).Length
 $archiveMegs = [math]::Round($archiveLen / 1048576, 1)

@@ -16,12 +16,14 @@ function formatDate(iso) {
 }
 
 function RoleBadge({ role }) {
-  const cls = role === 'admin'
+  const isSuperuser = role === 'superuser' || role === 'admin'
+  const cls = isSuperuser
     ? 'bg-violet-50 text-violet-700'
     : 'bg-gray-100 text-gray-600'
+  const label = isSuperuser ? 'superuser' : role
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cls}`}>
-      {role}
+      {label}
     </span>
   )
 }
@@ -85,7 +87,7 @@ function CreateUserModal({ onClose, onCreated, getAuthHeaders }) {
           </div>
           <select className={inp} value={form.role} onChange={e => setForm(f=>({...f, role: e.target.value}))}>
             <option value="user">user</option>
-            <option value="admin">admin</option>
+            <option value="superuser">superuser</option>
           </select>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-gray-200 py-2.5 text-[13px] font-medium text-gray-600 hover:bg-gray-50 transition">Cancel</button>
@@ -282,8 +284,12 @@ export default function UsersManagement() {
     if (!silent) { setLoading(true); setError(null) }
     try {
       const res = await fetch(apiUrl('/api/auth/admin/users'), { headers: getAuthHeaders() })
+      if (res.status === 401) {
+        logout()
+        navigate('/')
+        return
+      }
       const data = await res.json()
-      if (res.status === 401) { setError('Session expired. Please refresh the page.'); return }
       if (!res.ok) throw new Error(data.detail || 'Failed to load users')
       setUsers(data)
     } catch (e) { if (!silent) setError(e.message) }

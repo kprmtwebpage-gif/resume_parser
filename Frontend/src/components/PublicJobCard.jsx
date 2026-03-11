@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BookmarkIcon as BookmarkOutline } from '@heroicons/react/24/outline'
 import { BookmarkIcon as BookmarkSolid } from '@heroicons/react/24/solid'
 import { BriefcaseIcon, ShareIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import { apiUrl } from '../config'
 import './PublicJobCard.css'
 
 /**
@@ -44,8 +45,7 @@ export default function PublicJobCard({ job, isSaved, onSave, onClick, onApply }
   // Get company logo or fallback
   const getLogoUrl = () => {
     if (job.photo_url) {
-      if (job.photo_url.startsWith('/')) return job.photo_url
-      return job.photo_url
+      return apiUrl(job.photo_url)
     }
     return null
   }

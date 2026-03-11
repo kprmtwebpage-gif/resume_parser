@@ -111,13 +111,20 @@ export default function FindJobs() {
     
     setJobTypeCounts(typeCounts)
     
-    // For now, set default experience counts as we don't have experience data
-    setExperienceCounts({
-      'Under 1 Year': Math.floor(jobsData.length * 0.3),
-      '1 - 2 Year': Math.floor(jobsData.length * 0.25),
-      '2 - 6 Year': Math.floor(jobsData.length * 0.25),
-      'Over 6 Years': Math.floor(jobsData.length * 0.2)
+    // Calculate real experience counts from job data
+    const expCounts = {
+      'Under 1 Year': 0,
+      '1 - 2 Year': 0,
+      '2 - 6 Year': 0,
+      'Over 6 Years': 0
+    }
+    jobsData.forEach(job => {
+      const exp = job.experience
+      if (exp && expCounts[exp] !== undefined) {
+        expCounts[exp]++
+      }
     })
+    setExperienceCounts(expCounts)
   }
 
   // Fetch saved jobs
@@ -284,20 +291,29 @@ export default function FindJobs() {
       if (!job.location?.toLowerCase().includes(location)) return false
     }
     
-    // Salary filter
+    // Salary filter — range overlap: exclude only if job's range is completely outside user's range
     if (salaryRange.min) {
       const minSalary = parseFloat(salaryRange.min)
-      if (job.salary_start && parseFloat(job.salary_start) < minSalary) return false
+      // Exclude if job's max salary is below user's min (no overlap)
+      const jobEnd = job.salary_end ? parseFloat(job.salary_end) : (job.salary_start ? parseFloat(job.salary_start) : null)
+      if (jobEnd !== null && jobEnd < minSalary) return false
     }
     
     if (salaryRange.max) {
       const maxSalary = parseFloat(salaryRange.max)
-      if (job.salary_end && parseFloat(job.salary_end) > maxSalary) return false
+      // Exclude if job's min salary is above user's max (no overlap)
+      const jobStart = job.salary_start ? parseFloat(job.salary_start) : (job.salary_end ? parseFloat(job.salary_end) : null)
+      if (jobStart !== null && jobStart > maxSalary) return false
     }
     
     // Job type filter
     if (filters.jobType.length > 0) {
       if (!filters.jobType.includes(job.employment_type)) return false
+    }
+    
+    // Experience filter
+    if (filters.experience.length > 0) {
+      if (!filters.experience.includes(job.experience)) return false
     }
     
     return true
@@ -571,7 +587,7 @@ export default function FindJobs() {
           
           {/* Right Sidebar - Filters */}
           <aside className="w-72 flex-shrink-0">
-            <div className="bg-white rounded-xl border border-gray-200 p-6 sticky top-24">
+            <div className="bg-white rounded-xl border border-gray-200 p-6 fixed top-24 w-72 max-h-[calc(100vh-7rem)] overflow-y-auto">
               {/* Filters Header */}
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold text-gray-900">Job Filter</h3>
