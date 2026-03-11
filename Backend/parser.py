@@ -1931,6 +1931,34 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "certified",
         "certification",
         "infosys",
+        # ── Phase-13 additions – tech / non-name tokens that slipped through ──
+        "delivery",
+        "strategy",
+        "aiml",
+        "yrs",
+        "force",
+        "passport",
+        "agreement",
+        "lease",
+        "receipt",
+        "point",
+        "ui",
+        "ux",
+        "type",
+        "visit",
+        "verizon",
+        "gmail",
+        "entra",
+        "using",
+        "central",
+        "administration",
+        "my",
+        "share",
+        "enterprise",
+        "alcatel",
+        "lucent",
+        "sprint",
+        "comcast",
         # ── Tokens that were slipping through and becoming bogus names ──
         # Common English words that sometimes appear near names in resume headers.
         "remote",
@@ -2872,6 +2900,27 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "marketing",
         "phd",
         "mba",
+        # ── Phase-13 additions ──
+        "delivery",
+        "strategy",
+        "aiml",
+        "yrs",
+        "force",
+        "passport",
+        "agreement",
+        "lease",
+        "receipt",
+        "point",
+        "ui",
+        "ux",
+        "type",
+        "visit",
+        "share",
+        "central",
+        "administration",
+        "enterprise",
+        "alcatel",
+        "lucent",
     }
 
     # If the filename contains skills/roles or organization-ish tokens, don't trust it.
@@ -2980,6 +3029,27 @@ def infer_name_from_filename(file_name: str, *, email: str | None = None) -> tup
         "designer",
         "programmer",
         "tester",
+        # ── Phase-13 additions ──
+        "delivery",
+        "strategy",
+        "aiml",
+        "yrs",
+        "force",
+        "passport",
+        "agreement",
+        "lease",
+        "receipt",
+        "point",
+        "ui",
+        "ux",
+        "type",
+        "visit",
+        "share",
+        "central",
+        "administration",
+        "enterprise",
+        "alcatel",
+        "lucent",
     }
     # Suffixes: a token *ending* with any of these is also a role token
     # (e.g. "dotnetdeveloper", "javadeveloper", "fullstackengineer").
@@ -4228,16 +4298,41 @@ def extract_address(
         "remote", "settle", "metal", "analysis", "ms",
         "objective", "summary", "seeking", "looking",
         "visa", "sponsorship", "authorization",
+        # ── Phase-13 additions ──
+        "gmail", "verizon", "entra", "vision", "using", "address",
+        "receipt", "lease", "agreement", "passport", "share", "point",
+        "server", "administration", "central", "support", "alcatel",
+        "lucent", "sprint", "comcast", "delivery", "strategy",
+        "force", "type", "visit", "enterprise",
     }
 
     def _looks_like_sql_state_suffix(full_line: str, state_match_end: int) -> bool:
-        """Reject matches like 'Oracle, MS-SQL' where MS is not a state."""
+        """Reject matches like 'Oracle, MS-SQL' or 'MS Office' where MS/ID is not a state."""
         if not full_line or state_match_end <= 0:
             return False
-        tail = full_line[state_match_end : state_match_end + 20]
-        # Common tech tokens that immediately follow a 2-letter chunk.
-        # Examples: "MS-SQL", "MS SQL", "MS/SQL".
-        return re.match(r"(?is)^\s*[-/ ]\s*sql\b", tail) is not None
+        tail = full_line[state_match_end : state_match_end + 30]
+        # Common tech tokens that immediately follow a 2-letter state code.
+        # Examples: "MS-SQL", "MS SQL", "MS Office", "MS Teams", "MS Dynamics",
+        # "MS Access", "MS Project", "MS Azure", "MS Entra", "email ID".
+        if re.match(r"(?is)^\s*[-/ ]\s*sql\b", tail):
+            return True
+        # "MS Office", "MS Teams", "MS Dynamics", "MS Excel", "MS Access", etc.
+        if re.match(
+            r"(?is)^\s*[-/ ]?\s*(?:office|teams|dynamics|excel|access|project|"
+            r"azure|entra|word|outlook|visio|sharepoint|server|build|test)\b",
+            tail,
+        ):
+            return True
+        # Look behind: check if the text before the state code is tech context.
+        # Extract the city candidate (text before ", MS" or ", ID").
+        head = full_line[: state_match_end].rstrip()
+        # Find the city token (the word right before the comma+state match)
+        head_match = re.search(r"(\w+)\s*,?\s*$", head)
+        if head_match:
+            city_word = head_match.group(1).casefold()
+            if city_word in bad_location_tokens:
+                return True
+        return False
 
     def _sanitize_city_candidate(raw: str) -> str:
         s = re.sub(r"\s+", " ", (raw or "").strip())
@@ -4475,7 +4570,7 @@ def extract_address(
         # Strip common label prefixes that are not part of the actual location.
         # Examples: "Location: Pennsylvania, United States", "Vishal Location: ...".
         ln = re.sub(r"(?i)^\s*[A-Za-z]{2,}\s+location\s*[:\-]\s*", "", ln).strip()
-        ln = re.sub(r"(?i)^\s*(?:current\s+)?(?:location|address)\s*[:\-]\s*", "", ln).strip()
+        ln = re.sub(r"(?i)^\s*(?:current\s+)?(?:location|address)\s*[:\-,]\s*", "", ln).strip()
 
         # If this is clearly an employer/client label, don't treat the preceding token as a city.
         # Prefer country-only in that case.
@@ -4711,9 +4806,9 @@ def extract_address(
         # "Contact No: +91 9629693844 Current Location: Chennai, India."
         # → should yield "Chennai, India." not "+91 ... Chennai, India."
         _loc_label_m = re.search(
-            r"(?i)(?:present|current)\s+(?:location|address)\s*[:\-]\s*"
-            r"|\blocation\s*[:\-]\s*"
-            r"|\baddress\s*[:\-]\s*",
+            r"(?i)(?:present|current)\s+(?:location|address)\s*[:\-,]\s*"
+            r"|\blocation\s*[:\-,]\s*"
+            r"|\baddress\s*[:\-,]\s*",
             ln,
         )
         if _loc_label_m:
@@ -7939,14 +8034,16 @@ def main() -> int:
             path = str(entry)
             links: list[str] = []
             first_page_text = ""
+            # Sanitize filename for safe console printing (Windows cp1252 can't handle all Unicode)
+            safe_file = file.encode('ascii', 'replace').decode('ascii')
             try:
                 if suffix == ".pdf":
                     if not quiet:
-                        print(f"Parsing: {file}")
+                        print(f"Parsing: {safe_file}")
                     resume_text, links, first_page_text = extract_pdf_with_timeout(path, timeout_seconds=pdf_timeout_seconds)
                 elif suffix == ".doc":
                     if not quiet:
-                        print(f"Parsing: {file}")
+                        print(f"Parsing: {safe_file}")
                     resume_text = extract_text_from_doc(path)
                     first_page_text = _extract_docx_header_block(resume_text)
                 else:
@@ -7963,7 +8060,7 @@ def main() -> int:
                     }
                 )
                 if not quiet:
-                    print(f"Skipped (parse error): {file} ({e.__class__.__name__})")
+                    print(f"Skipped (parse error): {safe_file} ({e.__class__.__name__})")
                 _log.warning("SKIPPED [%s] reason=%s timeout=%s", file, e.__class__.__name__, is_timeout)
                 continue
 
@@ -8003,7 +8100,7 @@ def main() -> int:
                 )
                 if cursor.fetchone() is not None:
                     if not quiet:
-                        print(f"Skipped existing: {file}")
+                        print(f"Skipped existing: {safe_file}")
                     continue
 
             # Extract email early (header-first); it can improve name detection.
@@ -8283,6 +8380,34 @@ def main() -> int:
                 "html",
                 "css",
                 "xml",
+                # ── Phase-13 additions ──
+                "delivery",
+                "strategy",
+                "aiml",
+                "yrs",
+                "force",
+                "passport",
+                "agreement",
+                "lease",
+                "receipt",
+                "point",
+                "ui",
+                "ux",
+                "type",
+                "visit",
+                "verizon",
+                "gmail",
+                "entra",
+                "using",
+                "central",
+                "administration",
+                "my",
+                "share",
+                "enterprise",
+                "alcatel",
+                "lucent",
+                "sprint",
+                "comcast",
             }
             us_state_names = {v.casefold() for v in US_STATE_ABBR_TO_FULL.values()}
             # US state abbreviation codes (2-letter) that should not be last names.
@@ -8307,12 +8432,21 @@ def main() -> int:
             # If a name token is extremely long (>14 chars) it is almost certainly
             # glued OCR / garbled PDF text (e.g. "Minimizingmanual").  Blank it so
             # the filename fallback can provide something sensible.
+            _GARBLED_PARTIALS = {
+                # Truncated tech words from PDF column merging (leading char consumed)
+                "ngular", "latform", "elenium", "icrosoft", "ypeScript",
+                "ypescript", "avascript", "ackend", "rontend", "ostgres",
+                "ubernetes", "erraform", "icroservices", "achine",
+            }
             def _looks_garbled(tok: str) -> bool:
                 t = (tok or "").strip()
                 if len(t) > 14:
                     return True
                 # Token contains digits mixed with alpha (e.g., "19Ap12Dec")
                 if re.search(r"\d", t) and re.search(r"[A-Za-z]", t) and len(t) > 4:
+                    return True
+                # Known truncated tech words from garbled PDFs
+                if t.casefold() in _GARBLED_PARTIALS:
                     return True
                 return False
 
@@ -8726,7 +8860,7 @@ def main() -> int:
 
             # --- DEBUG: trace name values at DB write point ---
             if "vamshi" in file.lower():
-                print(f"DEBUG [{file}] first_name={first_name!r}, last_name={last_name!r}, _safe_fn={_safe_fn!r}, _safe_ln={_safe_ln!r}")
+                print(f"DEBUG [{safe_file}] first_name={first_name!r}, last_name={last_name!r}, _safe_fn={_safe_fn!r}, _safe_ln={_safe_ln!r}")
             # --- end DEBUG ---
 
             _existing_id = None
@@ -8843,7 +8977,7 @@ def main() -> int:
             _log.debug("DB-COMMIT [%s] candidate_id=%s", file, candidate_id)
             report["processed"].append(file)
             if not quiet:
-                print(f"Processed: {file}")
+                print(f"Processed: {safe_file}")
 
     finally:
         _n_ok = len(report.get("processed", []))

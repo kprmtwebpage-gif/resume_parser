@@ -57,6 +57,8 @@ export default function ProfileModal({
   const [docxLoading, setDocxLoading] = useState(false)
   const [docxError, setDocxError] = useState(false)
   const [pdfError, setPdfError] = useState(false)
+  const [docTextHtml, setDocTextHtml] = useState(null)
+  const [docTextLoading, setDocTextLoading] = useState(false)
   const [comments, setComments] = useState([])
   const [commentsLoading, setCommentsLoading] = useState(false)
   
@@ -67,7 +69,8 @@ export default function ProfileModal({
   const hasResume = candidate?.resume_filename
   const baseResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume`) : null
   const viewResumeUrl = hasResume ? apiUrl(`/candidates/${candidate.id}/resume?inline=true`) : null
-  const resumeIsDocx = hasResume && (candidate.resume_filename.toLowerCase().endsWith('.docx') || candidate.resume_filename.toLowerCase().endsWith('.doc'))
+  const resumeIsDocx = hasResume && candidate.resume_filename.toLowerCase().endsWith('.docx')
+  const resumeIsDoc = hasResume && candidate.resume_filename.toLowerCase().endsWith('.doc') && !candidate.resume_filename.toLowerCase().endsWith('.docx')
   const resumeIsPdf = hasResume && candidate.resume_filename.toLowerCase().endsWith('.pdf')
   const resumeIsImage = hasResume && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(candidate.resume_filename)
 
@@ -79,6 +82,7 @@ export default function ProfileModal({
       setDocxHtml(null)
       setDocxError(false)
       setPdfError(false)
+      setDocTextHtml(null)
     }
   }, [open, candidate])
 
@@ -107,6 +111,26 @@ export default function ProfileModal({
         setDocxLoading(false)
       })
   }, [open, resumeIsDocx, baseResumeUrl])
+
+  // Fetch extracted text for .doc files from backend
+  useEffect(() => {
+    if (!open || !resumeIsDoc || !candidate?.id) return
+    setDocTextLoading(true)
+    setDocTextHtml(null)
+    fetch(apiUrl(`/candidates/${candidate.id}/resume-text`))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch')
+        return r.json()
+      })
+      .then(data => {
+        setDocTextHtml(data.html || null)
+        setDocTextLoading(false)
+      })
+      .catch(() => {
+        setDocTextHtml(null)
+        setDocTextLoading(false)
+      })
+  }, [open, resumeIsDoc, candidate?.id])
 
   // Fetch comments when Comments tab is active
   useEffect(() => {
@@ -555,6 +579,41 @@ export default function ProfileModal({
                                 <p className="text-lg font-medium transition-colors duration-300" style={{ color: colors.text }}>No resume available</p>
                                 <p className="text-sm mt-2 transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>This candidate hasn't uploaded a resume yet</p>
                               </div>
+                            ) : resumeIsDoc ? (
+                              docTextLoading ? (
+                                <div className="flex items-center justify-center h-full">
+                                  <div className="flex flex-col items-center gap-3">
+                                    <div className="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" />
+                                    <p className="text-sm transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Extracting .doc content...</p>
+                                  </div>
+                                </div>
+                              ) : docTextHtml ? (
+                                <div
+                                  className="p-8 max-w-full w-full h-full overflow-y-auto"
+                                  style={{ color: colors.text, transition: 'color 0.3s ease' }}
+                                  dangerouslySetInnerHTML={{ __html: docTextHtml }}
+                                />
+                              ) : (
+                              <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                                <div className="mb-4" style={{ color: '#94a3b8' }}>
+                                  <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                <p className="text-lg font-medium mb-2 transition-colors duration-300" style={{ color: colors.text }}>Could not extract .doc preview</p>
+                                <p className="text-sm mb-4 transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Use the Export button to download this file.</p>
+                                {baseResumeUrl && (
+                                  <a
+                                    href={baseResumeUrl}
+                                    download
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    Download Resume
+                                  </a>
+                                )}
+                              </div>
+                              )
                             ) : (resumeLoadError || resumeIsDocx) ? (
                               docxLoading ? (
                                 <div className="flex items-center justify-center h-full">

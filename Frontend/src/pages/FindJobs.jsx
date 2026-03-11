@@ -6,10 +6,8 @@ import {
   CurrencyDollarIcon,
   ArrowLeftIcon,
   BookmarkIcon,
-  BellIcon,
   ClockIcon,
-  XMarkIcon,
-  UserCircleIcon
+  XMarkIcon
 } from '@heroicons/react/24/outline'
 import { BookmarkIcon as BookmarkSolidIcon } from '@heroicons/react/24/solid'
 import { api } from '../services/api'
@@ -22,6 +20,23 @@ import './FindJobs.css'
 
 export default function FindJobs() {
   const navigate = useNavigate()
+  
+  // Map stored experience values to filter categories
+  const mapExperienceToCategory = (exp) => {
+    if (!exp) return null
+    const lower = exp.toLowerCase().trim()
+    if (lower === 'fresher' || lower === 'intern' || lower === 'entry level') return 'Under 1 Year'
+    // Extract numeric value
+    const match = lower.match(/(\d+)/)
+    if (!match) return null
+    const years = parseInt(match[1], 10)
+    if (years < 1) return 'Under 1 Year'
+    if (years <= 2) return '1 - 2 Year'
+    if (years <= 6) return '2 - 6 Year'
+    if (years <= 10) return '6 - 10 Year'
+    if (years <= 15) return '10 - 15 Year'
+    return '15 - 20 Year'
+  }
   
   // Jobs state
   const [jobs, setJobs] = useState([])
@@ -59,7 +74,9 @@ export default function FindJobs() {
     'Under 1 Year': 0,
     '1 - 2 Year': 0,
     '2 - 6 Year': 0,
-    'Over 6 Years': 0
+    '6 - 10 Year': 0,
+    '10 - 15 Year': 0,
+    '15 - 20 Year': 0
   })
   
   // Modal state
@@ -116,12 +133,14 @@ export default function FindJobs() {
       'Under 1 Year': 0,
       '1 - 2 Year': 0,
       '2 - 6 Year': 0,
-      'Over 6 Years': 0
+      '6 - 10 Year': 0,
+      '10 - 15 Year': 0,
+      '15 - 20 Year': 0
     }
     jobsData.forEach(job => {
-      const exp = job.experience
-      if (exp && expCounts[exp] !== undefined) {
-        expCounts[exp]++
+      const category = mapExperienceToCategory(job.experience)
+      if (category && expCounts[category] !== undefined) {
+        expCounts[category]++
       }
     })
     setExperienceCounts(expCounts)
@@ -282,7 +301,8 @@ export default function FindJobs() {
       const query = searchQuery.toLowerCase()
       const matchesTitle = job.job_title?.toLowerCase().includes(query)
       const matchesCompany = job.company?.toLowerCase().includes(query)
-      if (!matchesTitle && !matchesCompany) return false
+      const matchesExperience = job.experience?.toLowerCase().includes(query)
+      if (!matchesTitle && !matchesCompany && !matchesExperience) return false
     }
     
     // Location filter
@@ -313,7 +333,8 @@ export default function FindJobs() {
     
     // Experience filter
     if (filters.experience.length > 0) {
-      if (!filters.experience.includes(job.experience)) return false
+      const category = mapExperienceToCategory(job.experience)
+      if (!category || !filters.experience.includes(category)) return false
     }
     
     return true
@@ -380,16 +401,6 @@ export default function FindJobs() {
                 </span>
               )}
             </button>
-            
-            {/* Notification Bell */}
-            <button className="p-2 text-gray-600 hover:text-blue-600 transition-colors">
-              <BellIcon className="w-6 h-6" />
-            </button>
-            
-            {/* User Avatar */}
-            <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
-              <UserCircleIcon className="w-6 h-6 text-white" />
-            </div>
           </div>
         </div>
       </header>

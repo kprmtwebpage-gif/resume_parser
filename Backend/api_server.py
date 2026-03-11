@@ -1062,6 +1062,46 @@ async def download_resume(candidate_id: int, inline: bool = Query(False, descrip
             )
 
 
+@app.get("/candidates/{candidate_id}/resume-text")
+async def get_resume_text(candidate_id: int):
+    """
+    Extract and return plain text from a .doc resume for preview purposes.
+    Returns JSON with extracted text wrapped in basic HTML.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"SELECT resume_filename FROM {CANDIDATES_TABLE} WHERE id = %s",
+                (candidate_id,)
+            )
+            row = cursor.fetchone()
+
+            if not row or not row.get("resume_filename"):
+                raise HTTPException(status_code=404, detail="Resume file not found")
+
+            resume_path = os.path.join(os.path.dirname(__file__), row["resume_filename"])
+
+            if not os.path.exists(resume_path):
+                raise HTTPException(status_code=404, detail="Resume file does not exist on disk")
+
+            ext = os.path.splitext(resume_path)[1].lower()
+            if ext != ".doc":
+                raise HTTPException(status_code=400, detail="This endpoint is only for .doc files")
+
+            try:
+                from parser import extract_text_from_doc
+                text = extract_text_from_doc(resume_path)
+                if not text or len(text.strip()) < 10:
+                    return {"html": "<p style='color:#64748b;'>Could not extract readable text from this .doc file.</p>"}
+                # Convert plain text to simple HTML with line breaks
+                import html as html_mod
+                safe_text = html_mod.escape(text)
+                html_content = "<div style='white-space:pre-wrap;font-family:Georgia,serif;font-size:14px;line-height:1.7;'>" + safe_text + "</div>"
+                return {"html": html_content}
+            except Exception as e:
+                return {"html": f"<p style='color:#64748b;'>Could not extract text: preview unavailable.</p>"}
+
+
 class CandidateUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None

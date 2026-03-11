@@ -310,7 +310,19 @@ const EXPERIENCE_OPTIONS = [
   '2 years',
   '3 years',
   '4 years',
-  '5+ years',
+  '5 years',
+  '6 years',
+  '7 years',
+  '8 years',
+  '9 years',
+  '10 years',
+  '11 years',
+  '12 years',
+  '13 years',
+  '14 years',
+  '15 years',
+  '15+ years',
+  '20+ years',
 ]
 
 /* ── Initial form state ── */
@@ -391,6 +403,7 @@ export default function CreateJobModal({
   const [draftId, setDraftId] = useState(null)
   const [lastAutosave, setLastAutosave] = useState(null)
   const [isAutosaving, setIsAutosaving] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const autosaveTimerRef = useRef(null)
 
   const isReview = mode === 'review'
@@ -636,7 +649,7 @@ export default function CreateJobModal({
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (isReview) return
+    if (isReview || isSubmitting) return
 
     // Mark all required as touched
     const allTouched = {}
@@ -649,12 +662,15 @@ export default function CreateJobModal({
 
     if (salaryError) return
 
+    setIsSubmitting(true)
+
     const payload = {
       ...formData,
       description: jobDescription,
       comments,
       logoFile: logoFile || null,  // Pass the actual File object, not just filename
       logoPreview: logoPreview || null,
+      _draftId: draftId || null,  // Pass draft ID so Jobs.jsx can clean up
     }
 
     if (onSave) {
@@ -673,6 +689,7 @@ export default function CreateJobModal({
     setComments('')
     setIsDirty(false)
     setShowConfirm(false)
+    setIsSubmitting(false)
     onClose()
   }
 
@@ -1130,8 +1147,8 @@ export default function CreateJobModal({
           <div className="cjm-footer">
             <div className="cjm-footer-left">
               {!isReview && (
-                <button type="submit" className="cjm-btn-submit">
-                  {isEdit ? 'Save Changes' : 'Create and move individuals'}
+                <button type="submit" className="cjm-btn-submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Saving...' : isEdit ? 'Save Changes' : 'Create and move individuals'}
                 </button>
               )}
               <button type="button" className="cjm-btn-cancel" onClick={handleCloseRequest}>

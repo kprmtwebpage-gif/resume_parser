@@ -220,6 +220,12 @@ _SKILL_CONTEXT_TOKENS: frozenset[str] = frozenset({
     # Company-ish / role-ish tokens that should never be a city
     "engineering", "developer", "architect", "analyst", "consultant",
     "technologies", "solutions", "systems", "services",
+    # ── Phase-13 additions ──
+    "gmail", "verizon", "entra", "vision", "using", "share", "point",
+    "delivery", "strategy", "force", "administration", "central",
+    "passport", "lease", "agreement", "receipt", "type", "visit",
+    "alcatel", "lucent", "sprint", "comcast", "enterprise",
+    "server", "support", "address",
     # Education-ish
     "bachelor", "master", "phd", "degree", "mba", "btech", "mtech",
 })
@@ -277,6 +283,12 @@ _BAD_CITY_TOKENS: frozenset[str] = frozenset({
     "remote", "settle", "metal", "analysis", "ms",
     "objective", "summary", "seeking", "looking", "responsible",
     "visa", "sponsorship", "authorization",
+    # ── Phase-13 additions ──
+    "gmail", "verizon", "entra", "vision", "using", "address",
+    "receipt", "lease", "agreement", "passport", "share", "point",
+    "server", "administration", "central", "support", "alcatel",
+    "lucent", "sprint", "comcast", "delivery", "strategy",
+    "force", "type", "visit", "enterprise",
 })
 
 # Single tokens that are valid city *prefixes* (part of multi-word names) but never
@@ -501,9 +513,15 @@ def _parse_fragment(frag: str) -> LocationResult | None:
     # ── City, ST  (abbreviation) ──────────────────────────────────────────────
     for m in _RE_CITY_ST.finditer(frag):
         city_raw, st_raw = m.group(1), m.group(2)
-        # Check MS-SQL / similar false-positive (state is not truly "MS")
-        tail = frag[m.end(2):m.end(2) + 15]
+        # Check MS-SQL / MS Office / similar false-positive (state code is tech prefix)
+        tail = frag[m.end(2):m.end(2) + 30]
         if re.match(r"\s*[-/]\s*sql\b", tail, re.I):
+            continue
+        if re.match(
+            r"(?i)\s*[-/ ]?\s*(?:office|teams|dynamics|excel|access|project|"
+            r"azure|entra|word|outlook|visio|sharepoint|server|build|test)\b",
+            tail,
+        ):
             continue
         if _preceding_token_is_skill(frag, m.start()):
             continue

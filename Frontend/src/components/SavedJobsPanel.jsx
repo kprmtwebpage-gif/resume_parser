@@ -1,4 +1,5 @@
 import { XMarkIcon, BookmarkIcon, TrashIcon, EyeIcon } from '@heroicons/react/24/outline'
+import { apiUrl } from '../config'
 
 /**
  * SavedJobsPanel - Slide-in panel showing saved jobs
@@ -109,7 +110,7 @@ export default function SavedJobsPanel({ savedJobs, onClose, onRemove, onViewJob
                       {/* Logo */}
                       {job.photo_url ? (
                         <img
-                          src={job.photo_url}
+                          src={apiUrl(job.photo_url)}
                           alt={job.company}
                           className="w-10 h-10 rounded-lg object-cover"
                         />

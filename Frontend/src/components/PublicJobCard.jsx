@@ -114,6 +114,7 @@ export default function PublicJobCard({ job, isSaved, onSave, onClick, onApply }
         {job.category && <span className="pjc-tag pjc-tag--category">{job.category}</span>}
         {salary && <span className="pjc-tag pjc-tag--salary">{salary}</span>}
         {job.employment_type && <span className="pjc-tag pjc-tag--type">{job.employment_type}</span>}
+        {job.experience && <span className="pjc-tag pjc-tag--experience">{job.experience}</span>}
       </div>
 
       {/* Company & qualification */}

@@ -72,6 +72,8 @@ export default function Upload() {
         return 'File already exists'
       case 'failed':
         return 'Failed'
+      case 'pending':
+        return 'Queued'
       default:
         return 'Uploading...'
     }
@@ -85,6 +87,8 @@ export default function Upload() {
         return 'bg-amber-400'
       case 'failed':
         return 'bg-red-500'
+      case 'pending':
+        return 'bg-neutral-400'
       default:
         return 'bg-brand-500'
     }
@@ -169,6 +173,8 @@ export default function Upload() {
                       ? 'bg-green-50 border-green-200'
                       : upload.status === 'duplicate'
                       ? 'bg-amber-50 border-amber-200'
+                      : upload.status === 'pending'
+                      ? 'bg-neutral-50 border-neutral-300'
                       : 'bg-neutral-50 border-neutral-200'
                   }`}
                 >

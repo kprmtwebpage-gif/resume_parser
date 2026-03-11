@@ -16,6 +16,10 @@ export function UploadProvider({ children }) {
   // ---- upload a single file to the backend ----
   const uploadFileToBackend = useCallback(async (upload) => {
     try {
+      // Transition from pending → uploading
+      setUploads(prev =>
+        prev.map(u => u.id === upload.id ? { ...u, status: 'uploading' } : u)
+      )
       const result = await uploadResume(upload.file, (progress) => {
         setUploads(prev =>
           prev.map(u => u.id === upload.id ? { ...u, progress: Math.min(progress, 95) } : u)
@@ -119,7 +123,7 @@ export function UploadProvider({ children }) {
         file,
         name: file.name,
         progress: 0,
-        status: 'uploading',
+        status: 'pending',
         errorMessage: null,
         candidateInfo: null,
       }))
@@ -165,8 +169,8 @@ export function UploadProvider({ children }) {
     [uploadFileToBackend]
   )
 
-  /** Number of uploads currently in progress */
-  const activeCount = uploads.filter((u) => u.status === 'uploading').length
+  /** Number of uploads currently in progress or pending */
+  const activeCount = uploads.filter((u) => u.status === 'uploading' || u.status === 'pending').length
 
   return (
     <UploadContext.Provider

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import {
@@ -6,6 +6,7 @@ import {
   Menu, Home, ChevronLeft, ChevronDown, ArrowLeft, RefreshCw, Bell,
   LayoutDashboard, Upload, BarChart3,
 } from 'lucide-react'
+import { api } from '../../services/api'
 import companyLogo from '../../assets/company-logo.png'
 
 export default function AdminLayout() {
@@ -15,6 +16,22 @@ export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [dashboardOpen, setDashboardOpen] = useState(true)
+  const [resetRequestCount, setResetRequestCount] = useState(0)
+
+  // Fetch pending password reset request count
+  useEffect(() => {
+    const fetchResetCount = async () => {
+      try {
+        const { data } = await api.get('/api/auth/admin/reset-requests')
+        setResetRequestCount(Array.isArray(data) ? data.length : 0)
+      } catch {
+        setResetRequestCount(0)
+      }
+    }
+    fetchResetCount()
+    const interval = setInterval(fetchResetCount, 60000)
+    return () => clearInterval(interval)
+  }, [])
 
   const dashboardSubmenus = [
     { path: '/admin', label: 'Overview', icon: Home },
@@ -245,11 +262,14 @@ export default function AdminLayout() {
             </button>
             {/* Notification bell */}
             <button
+              onClick={() => navigate('/admin/users')}
               className="relative p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-              title="Notifications"
+              title={resetRequestCount > 0 ? `${resetRequestCount} pending password reset request(s)` : 'Notifications'}
             >
               <Bell className="h-[18px] w-[18px]" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+              {resetRequestCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+              )}
             </button>
             {/* Admin avatar */}
             <div className="flex items-center gap-2.5">
