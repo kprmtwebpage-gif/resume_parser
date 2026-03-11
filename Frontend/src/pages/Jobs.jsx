@@ -616,10 +616,10 @@ export default function Jobs() {
     <div className="h-screen overflow-hidden">
       {/* Left Sidebar - Filters (Feature 6 & 7: Floating labels + Fixed buttons) */}
       <aside className="fixed left-0 top-14 w-72 bg-white border-r border-neutral-200 h-[calc(100vh-3.5rem)] z-20 shadow-sm flex flex-col">
-        {/* Scrollable Filter Content — hidden scrollbar */}
-        <div className="flex-1 overflow-y-auto p-4 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {/* Scrollable Filter Content — no scrollbar needed with compact layout */}
+        <div className="flex-1 overflow-y-auto p-3" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           {/* Filter Header */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <FunnelIcon className="w-5 h-5 text-brand-500" />
               <h2 className="text-sm font-semibold text-neutral-900">Filters</h2>
@@ -640,8 +640,8 @@ export default function Jobs() {
             )}
           </div>
 
-          {/* Filter Fields with Floating Labels */}
-          <div className="space-y-3">
+          {/* Filter Fields — compact spacing so all fit without scrolling */}
+          <div className="space-y-2">
             {/* Title */}
             <FloatingInput
               label="Job Title"
@@ -672,35 +672,35 @@ export default function Jobs() {
               suggestions={filterSuggestions.locations}
             />
 
-            {/* Status */}
-            <div className="fi-wrapper">
-              <select
-                className="fi-select"
-                value={filters.status}
-                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                style={{ paddingTop: filters.status ? '16px' : '10px', paddingBottom: filters.status ? '4px' : '10px' }}
-              >
-                <option value="">All Statuses</option>
-                <option value="DRAFT">Draft</option>
-                <option value="POSTED">Posted</option>
-                <option value="HOLD">On Hold</option>
-                <option value="CLOSED">Closed</option>
-              </select>
-            </div>
-
-            {/* Priority */}
-            <div className="fi-wrapper">
-              <select
-                className="fi-select"
-                value={filters.priority}
-                onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-                style={{ paddingTop: filters.priority ? '16px' : '10px', paddingBottom: filters.priority ? '4px' : '10px' }}
-              >
-                <option value="">All Priorities</option>
-                <option value="High">High</option>
-                <option value="Normal">Normal</option>
-                <option value="Low">Low</option>
-              </select>
+            {/* Status + Priority — 2-column row to save vertical space */}
+            <div className="flex gap-2">
+              <div className="fi-wrapper flex-1">
+                <select
+                  className="fi-select"
+                  value={filters.status}
+                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                  style={{ paddingTop: filters.status ? '16px' : '10px', paddingBottom: filters.status ? '4px' : '10px' }}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="DRAFT">Draft</option>
+                  <option value="POSTED">Posted</option>
+                  <option value="HOLD">On Hold</option>
+                  <option value="CLOSED">Closed</option>
+                </select>
+              </div>
+              <div className="fi-wrapper flex-1">
+                <select
+                  className="fi-select"
+                  value={filters.priority}
+                  onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
+                  style={{ paddingTop: filters.priority ? '16px' : '10px', paddingBottom: filters.priority ? '4px' : '10px' }}
+                >
+                  <option value="">All Priorities</option>
+                  <option value="High">High</option>
+                  <option value="Normal">Normal</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
             </div>
 
             {/* Department */}
@@ -724,15 +724,15 @@ export default function Jobs() {
             />
 
             {/* Skills - Tag Input with suggestions */}
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+            <div>
+              <label className="block text-xs font-semibold text-neutral-500 mb-1 uppercase tracking-wide">
                 Skills
               </label>
               <TagInput
                 tags={filters.skills}
                 onChange={(skills) => setFilters({ ...filters, skills })}
                 suggestions={filterSuggestions.skills}
-                placeholder="Type skill name (e.g., JavaScript, Python, React...)"
+                placeholder="Type skill name (e.g., JavaScript...)"
               />
             </div>
 
@@ -754,8 +754,8 @@ export default function Jobs() {
             </div>
 
             {/* Salary Range */}
-            <div className="pt-2">
-              <label className="block text-xs font-semibold text-neutral-500 mb-2 uppercase tracking-wide">
+            <div>
+              <label className="block text-xs font-semibold text-neutral-500 mb-1 uppercase tracking-wide">
                 Salary Range ($/year)
               </label>
               <div className="fi-range-wrapper">
@@ -777,30 +777,34 @@ export default function Jobs() {
               </div>
             </div>
 
-            {/* Created By */}
-            <FloatingInput
-              label="Created By"
-              name="createdBy"
-              value={filters.createdBy}
-              onChange={(e) => setFilters({ ...filters, createdBy: e.target.value })}
-            />
-
-            {/* Assignees */}
-            <FloatingInput
-              label="Assignees"
-              name="assignees"
-              value={filters.assignees}
-              onChange={(e) => setFilters({ ...filters, assignees: e.target.value })}
-            />
+            {/* Created By + Assignees — 2-column row to save vertical space */}
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <FloatingInput
+                  label="Created By"
+                  name="createdBy"
+                  value={filters.createdBy}
+                  onChange={(e) => setFilters({ ...filters, createdBy: e.target.value })}
+                />
+              </div>
+              <div className="flex-1">
+                <FloatingInput
+                  label="Assignees"
+                  name="assignees"
+                  value={filters.assignees}
+                  onChange={(e) => setFilters({ ...filters, assignees: e.target.value })}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Fixed Search & Export Buttons (Feature 7) */}
-        <div className="flex-shrink-0 p-4 border-t border-neutral-200 bg-white">
-          <div className="space-y-2">
+        {/* Search & Export Buttons — side-by-side to save vertical space */}
+        <div className="flex-shrink-0 p-3 border-t border-neutral-200 bg-white">
+          <div className="flex gap-2">
             <button
               type="button"
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-brand-500 hover:bg-brand-600 text-white font-semibold text-sm rounded-lg shadow-sm transition-all duration-200"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-brand-500 hover:bg-brand-600 text-white font-semibold text-sm rounded-lg shadow-sm transition-all duration-200"
               onClick={handleSearch}
             >
               <MagnifyingGlassIcon className="w-4 h-4" />
@@ -809,11 +813,11 @@ export default function Jobs() {
             
             <button
               type="button"
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white hover:bg-neutral-50 text-neutral-700 font-medium text-sm rounded-lg border border-neutral-300 transition-all duration-200"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-white hover:bg-neutral-50 text-neutral-700 font-medium text-sm rounded-lg border border-neutral-300 transition-all duration-200"
               onClick={handleExport}
             >
               <ArrowDownTrayIcon className="w-4 h-4" />
-              Export to Excel
+              Export
             </button>
           </div>
         </div>

@@ -14,7 +14,10 @@
  */
 export function timeAgo(dateStr) {
   if (!dateStr) return 'Never'
-  const diff = Date.now() - new Date(dateStr).getTime()
+  // Postgres returns UTC timestamps without 'Z'; append it so the browser
+  // doesn't misinterpret them as local time (causes ~5.5h offset in IST).
+  const normalized = (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+')) ? dateStr + 'Z' : dateStr
+  const diff = Date.now() - new Date(normalized).getTime()
   const mins = Math.floor(diff / 60000)
   if (mins < 1)  return 'Just now'
   if (mins < 60) return `${mins}m ago`

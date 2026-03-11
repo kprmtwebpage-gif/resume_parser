@@ -85,7 +85,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - resume_cache:/app/Backend/resumes_cache
-      - job_uploads:/app/uploads/jobs
+      - ./data/uploads/jobs:/app/uploads/jobs
     depends_on:
       database:
         condition: service_healthy
@@ -96,7 +96,6 @@ services:
 volumes:
   postgres_data:
   resume_cache:
-  job_uploads:
 
 # ── Networks ─────────────────────────────────────────────
 networks:

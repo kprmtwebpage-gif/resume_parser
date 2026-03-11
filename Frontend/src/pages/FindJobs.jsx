@@ -587,7 +587,7 @@ export default function FindJobs() {
           
           {/* Right Sidebar - Filters */}
           <aside className="w-72 flex-shrink-0">
-            <div className="bg-white rounded-xl border border-gray-200 p-6 fixed top-24 w-72 max-h-[calc(100vh-7rem)] overflow-y-auto">
+            <div className="bg-white rounded-xl border border-gray-200 p-6 sticky top-20 max-h-[calc(100vh-5rem)] overflow-y-auto">
               {/* Filters Header */}
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold text-gray-900">Job Filter</h3>
