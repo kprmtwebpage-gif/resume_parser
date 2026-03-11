@@ -19,7 +19,12 @@ Usage in api_server.py:
 """
 
 import os
+import random
+import smtplib
+import logging
 from datetime import datetime, timedelta, timezone
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Optional
 
 import bcrypt
@@ -29,6 +34,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SECRET_KEY   = os.getenv("JWT_SECRET", "change-me-in-production-32-chars-minimum!")
@@ -42,6 +49,13 @@ DB_CONFIG = dict(
     user     = os.getenv("DB_USER",     "postgres"),
     password = os.getenv("DB_PASSWORD", "admin"),
 )
+
+# ── SMTP config (Gmail) ──────────────────────────────────────────────────────
+SMTP_HOST     = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER     = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+OTP_EXPIRY_MINUTES = 10
 
 # ── OAuth2 scheme (reads token from Authorization: Bearer <token>) ─────────  
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -138,6 +152,77 @@ try:
     _migrate_admin_to_superuser()
 except Exception:
     pass
+
+
+def _ensure_otp_table():
+    """Idempotent: create password_reset_otps table if missing."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_reset_otps (
+                    id         SERIAL PRIMARY KEY,
+                    user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    otp_code   TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used       BOOLEAN DEFAULT FALSE
+                )
+            """)
+        conn.commit()
+    finally:
+        conn.close()
+
+try:
+    _ensure_otp_table()
+except Exception:
+    pass
+
+
+def _generate_otp() -> str:
+    """Generate a 6-digit OTP code."""
+    return f"{random.randint(100000, 999999)}"
+
+
+def _send_otp_email(to_email: str, otp_code: str, username: str) -> bool:
+    """Send OTP code via Gmail SMTP. Returns True on success."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        logger.warning("SMTP not configured — cannot send OTP email")
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "KPRMT Password Reset OTP"
+    msg["From"]    = SMTP_USER
+    msg["To"]      = to_email
+
+    html = f"""\
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px;">
+      <div style="max-width: 480px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 32px;">
+        <h2 style="color: #1e293b; margin-bottom: 8px;">Password Reset</h2>
+        <p style="color: #64748b; font-size: 14px;">Hi <strong>{username}</strong>,</p>
+        <p style="color: #64748b; font-size: 14px;">Use the OTP below to reset your password. It expires in {OTP_EXPIRY_MINUTES} minutes.</p>
+        <div style="text-align: center; margin: 24px 0;">
+          <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #6366f1; background: #f1f5f9; padding: 12px 24px; border-radius: 8px;">{otp_code}</span>
+        </div>
+        <p style="color: #94a3b8; font-size: 12px;">If you did not request this, please ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+        <p style="color: #94a3b8; font-size: 11px; text-align: center;">KPRMT Global Solutions</p>
+      </div>
+    </body>
+    </html>"""
+
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        logger.error("Failed to send OTP email to %s: %s", to_email, e)
+        return False
 
 
 def record_login(user_id: int, ip: str):
@@ -458,35 +543,146 @@ def _ensure_reset_requests_table():
 async def forgot_password(body: dict):
     """
     Public (no auth): user submits username to request a password reset.
-    Creates a pending record visible to admins in the dashboard.
+    If SMTP is configured, sends an OTP email. Otherwise falls back to
+    admin-mediated reset.
     """
     username = (body.get("username") or "").strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username required")
 
     _ensure_reset_requests_table()
+    _ensure_otp_table()
 
     user = get_user_by_username(username)
-    # Always return success — don’t reveal whether username exists
     if user is None:
-        return {"detail": "Request submitted. Your admin will reset your password shortly."}
+        return {"detail": "If the account exists and has an email, an OTP has been sent."}
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    email = (user.get("email") or "").strip()
+
+    # If SMTP is configured and user has an email, send OTP
+    if SMTP_USER and SMTP_PASSWORD and email:
+        otp_code = _generate_otp()
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE password_reset_otps SET used = TRUE WHERE user_id = %s AND used = FALSE",
+                    (user["id"],),
+                )
+                cur.execute(
+                    "INSERT INTO password_reset_otps (user_id, otp_code, expires_at) VALUES (%s, %s, %s)",
+                    (user["id"], otp_code, expires_at),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        sent = _send_otp_email(email, otp_code, username)
+        if sent:
+            parts = email.split("@")
+            masked = parts[0][:2] + "***@" + parts[1] if len(parts) == 2 else "***"
+            return {"detail": f"OTP sent to {masked}", "otp_sent": True}
+        else:
+            return {"detail": "Email delivery failed. Contact your admin.", "otp_sent": False}
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO password_reset_requests (user_id, username)
+                    SELECT %s, %s
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM password_reset_requests
+                        WHERE user_id = %s AND resolved = FALSE
+                    )
+                """, (user["id"], username, user["id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"detail": "Request submitted. Your admin will reset your password shortly.", "otp_sent": False}
+
+
+@router.post("/verify-otp")
+async def verify_otp(body: dict):
+    """Public (no auth): verify OTP code and return a short-lived reset token."""
+    username = (body.get("username") or "").strip()
+    otp_code = (body.get("otp") or "").strip()
+    if not username or not otp_code:
+        raise HTTPException(status_code=400, detail="Username and OTP are required")
+
+    _ensure_otp_table()
+    user = get_user_by_username(username)
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         with conn.cursor() as cur:
-            # Only one pending request per user at a time
             cur.execute("""
-                INSERT INTO password_reset_requests (user_id, username)
-                SELECT %s, %s
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM password_reset_requests
-                    WHERE user_id = %s AND resolved = FALSE
-                )
-            """, (user["id"], username, user["id"]))
+                SELECT id, otp_code, expires_at FROM password_reset_otps
+                WHERE user_id = %s AND used = FALSE
+                ORDER BY created_at DESC LIMIT 1
+            """, (user["id"],))
+            row = cur.fetchone()
+
+            if not row:
+                raise HTTPException(status_code=400, detail="No pending OTP found. Request a new one.")
+            if row["otp_code"] != otp_code:
+                raise HTTPException(status_code=400, detail="Invalid OTP")
+            if datetime.now(timezone.utc) > row["expires_at"].replace(tzinfo=timezone.utc):
+                raise HTTPException(status_code=400, detail="OTP has expired. Request a new one.")
+
+            cur.execute("UPDATE password_reset_otps SET used = TRUE WHERE id = %s", (row["id"],))
         conn.commit()
     finally:
         conn.close()
-    return {"detail": "Request submitted. Your admin will reset your password shortly."}
+
+    reset_token = create_access_token(
+        {"sub": username, "purpose": "password_reset"},
+        expires_delta=timedelta(minutes=15),
+    )
+    return {"reset_token": reset_token, "detail": "OTP verified"}
+
+
+@router.post("/reset-password-otp")
+async def reset_password_with_otp(body: dict):
+    """Public (no auth): reset password using the reset token from verify-otp."""
+    token        = (body.get("reset_token") or "").strip()
+    new_password = (body.get("new_password") or "").strip()
+
+    if not token or not new_password:
+        raise HTTPException(status_code=400, detail="Reset token and new password are required")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    if payload.get("purpose") != "password_reset":
+        raise HTTPException(status_code=400, detail="Invalid reset token")
+
+    username = payload.get("sub")
+    user = get_user_by_username(username)
+    if user is None:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    new_hash = hash_password(new_password)
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_hash, user["id"]))
+            cur.execute(
+                "UPDATE password_reset_requests SET resolved = TRUE WHERE user_id = %s AND resolved = FALSE",
+                (user["id"],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"detail": "Password reset successfully. You can now log in."}
 
 
 @router.get("/admin/reset-requests")

@@ -15,6 +15,12 @@ export default function LoginPage({ onLoginSuccess }) {
   const [forgotUser, setForgotUser] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
   const [forgotMsg, setForgotMsg] = useState('')
+  // OTP flow state
+  const [forgotStep, setForgotStep] = useState('username') // 'username' | 'otp' | 'newpass' | 'done'
+  const [otpCode, setOtpCode] = useState('')
+  const [resetToken, setResetToken] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -134,7 +140,11 @@ export default function LoginPage({ onLoginSuccess }) {
 
               <button
                 type="button"
-                onClick={() => { setShowForgot(true); setForgotMsg(''); setForgotUser('') }}
+                onClick={() => {
+                  setShowForgot(true); setForgotMsg(''); setForgotUser('')
+                  setForgotStep('username'); setOtpCode(''); setResetToken('')
+                  setNewPassword(''); setConfirmPassword('')
+                }}
                 className="admin-forgot-password-link"
                 style={{
                   background: 'none',
@@ -157,7 +167,7 @@ export default function LoginPage({ onLoginSuccess }) {
 
       </div>
 
-      {/* Forgot Password Modal */}
+      {/* Forgot Password Modal — multi-step OTP flow */}
       {showForgot && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
@@ -166,78 +176,243 @@ export default function LoginPage({ onLoginSuccess }) {
         }}>
           <div style={{
             backgroundColor: '#fff', borderRadius: '16px', padding: '32px',
-            width: '100%', maxWidth: '380px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)',
+            width: '100%', maxWidth: '400px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)',
           }}>
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
-              Forgot Password
+              {forgotStep === 'done' ? 'Password Reset' : 'Forgot Password'}
             </h3>
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
-              Enter your username. Your admin will be notified to reset your password.
-            </p>
+
+            {/* Status message */}
             {forgotMsg && (
               <div style={{
-                backgroundColor: forgotMsg.includes('submitted') ? '#ecfdf5' : '#fef2f2',
-                border: `1px solid ${forgotMsg.includes('submitted') ? '#10b981' : '#ef4444'}`,
+                backgroundColor: forgotMsg.includes('successfully') || forgotMsg.includes('OTP sent') || forgotMsg.includes('verified') ? '#ecfdf5' : '#fef2f2',
+                border: `1px solid ${forgotMsg.includes('successfully') || forgotMsg.includes('OTP sent') || forgotMsg.includes('verified') ? '#10b981' : '#ef4444'}`,
                 borderRadius: '8px', padding: '10px 14px',
-                color: forgotMsg.includes('submitted') ? '#065f46' : '#991b1b',
+                color: forgotMsg.includes('successfully') || forgotMsg.includes('OTP sent') || forgotMsg.includes('verified') ? '#065f46' : '#991b1b',
                 fontSize: '13px', marginBottom: '12px',
               }}>
                 {forgotMsg}
               </div>
             )}
-            <input
-              type="text"
-              value={forgotUser}
-              onChange={(e) => setForgotUser(e.target.value)}
-              placeholder="Enter your username"
-              autoFocus
-              style={{
-                width: '100%', padding: '10px 14px',
-                border: '1px solid #d1d5db', borderRadius: '8px',
-                fontSize: '14px', marginBottom: '16px',
-                outline: 'none', boxSizing: 'border-box',
-              }}
-            />
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                onClick={() => setShowForgot(false)}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: '8px',
-                  border: '1px solid #d1d5db', backgroundColor: '#fff',
-                  fontSize: '14px', fontWeight: 500, cursor: 'pointer',
-                  color: '#374151',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                disabled={forgotLoading || !forgotUser.trim()}
-                onClick={async () => {
-                  setForgotLoading(true); setForgotMsg('')
-                  try {
-                    const res = await fetch(apiUrl('/api/auth/forgot-password'), {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ username: forgotUser.trim() }),
-                    })
-                    const data = await res.json()
-                    setForgotMsg(data.detail || 'Request submitted. Your admin will reset your password shortly.')
-                  } catch {
-                    setForgotMsg('Failed to submit request. Please try again.')
-                  } finally {
-                    setForgotLoading(false)
-                  }
-                }}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: '8px',
-                  border: 'none', backgroundColor: forgotLoading ? '#94a3b8' : '#6366f1',
-                  fontSize: '14px', fontWeight: 600, cursor: forgotLoading ? 'not-allowed' : 'pointer',
-                  color: '#fff',
-                }}
-              >
-                {forgotLoading ? 'Submitting...' : 'Submit'}
-              </button>
-            </div>
+
+            {/* Step 1: Enter username */}
+            {forgotStep === 'username' && (
+              <>
+                <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
+                  Enter your username. An OTP will be sent to your registered email.
+                </p>
+                <input
+                  type="text"
+                  value={forgotUser}
+                  onChange={(e) => setForgotUser(e.target.value)}
+                  placeholder="Enter your username"
+                  autoFocus
+                  style={{
+                    width: '100%', padding: '10px 14px',
+                    border: '1px solid #d1d5db', borderRadius: '8px',
+                    fontSize: '14px', marginBottom: '16px',
+                    outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => setShowForgot(false)}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px',
+                      border: '1px solid #d1d5db', backgroundColor: '#fff',
+                      fontSize: '14px', fontWeight: 500, cursor: 'pointer', color: '#374151',
+                    }}
+                  >Cancel</button>
+                  <button
+                    disabled={forgotLoading || !forgotUser.trim()}
+                    onClick={async () => {
+                      setForgotLoading(true); setForgotMsg('')
+                      try {
+                        const res = await fetch(apiUrl('/api/auth/forgot-password'), {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ username: forgotUser.trim() }),
+                        })
+                        const data = await res.json()
+                        setForgotMsg(data.detail || '')
+                        if (data.otp_sent) {
+                          setForgotStep('otp')
+                        }
+                      } catch {
+                        setForgotMsg('Failed to submit request. Please try again.')
+                      } finally {
+                        setForgotLoading(false)
+                      }
+                    }}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px',
+                      border: 'none', backgroundColor: forgotLoading ? '#94a3b8' : '#6366f1',
+                      fontSize: '14px', fontWeight: 600, cursor: forgotLoading ? 'not-allowed' : 'pointer',
+                      color: '#fff',
+                    }}
+                  >{forgotLoading ? 'Sending...' : 'Send OTP'}</button>
+                </div>
+              </>
+            )}
+
+            {/* Step 2: Enter OTP */}
+            {forgotStep === 'otp' && (
+              <>
+                <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
+                  Enter the 6-digit OTP sent to your email.
+                </p>
+                <input
+                  type="text"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Enter 6-digit OTP"
+                  autoFocus
+                  maxLength={6}
+                  style={{
+                    width: '100%', padding: '12px 14px',
+                    border: '1px solid #d1d5db', borderRadius: '8px',
+                    fontSize: '20px', letterSpacing: '6px', textAlign: 'center',
+                    marginBottom: '16px', outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => { setForgotStep('username'); setForgotMsg(''); setOtpCode('') }}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px',
+                      border: '1px solid #d1d5db', backgroundColor: '#fff',
+                      fontSize: '14px', fontWeight: 500, cursor: 'pointer', color: '#374151',
+                    }}
+                  >Back</button>
+                  <button
+                    disabled={forgotLoading || otpCode.length !== 6}
+                    onClick={async () => {
+                      setForgotLoading(true); setForgotMsg('')
+                      try {
+                        const res = await fetch(apiUrl('/api/auth/verify-otp'), {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ username: forgotUser.trim(), otp: otpCode }),
+                        })
+                        const data = await res.json()
+                        if (res.ok && data.reset_token) {
+                          setResetToken(data.reset_token)
+                          setForgotMsg('OTP verified! Set your new password.')
+                          setForgotStep('newpass')
+                        } else {
+                          setForgotMsg(data.detail || 'Invalid OTP. Try again.')
+                        }
+                      } catch {
+                        setForgotMsg('Verification failed. Please try again.')
+                      } finally {
+                        setForgotLoading(false)
+                      }
+                    }}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px',
+                      border: 'none', backgroundColor: forgotLoading ? '#94a3b8' : '#6366f1',
+                      fontSize: '14px', fontWeight: 600, cursor: forgotLoading ? 'not-allowed' : 'pointer',
+                      color: '#fff',
+                    }}
+                  >{forgotLoading ? 'Verifying...' : 'Verify OTP'}</button>
+                </div>
+              </>
+            )}
+
+            {/* Step 3: Set new password */}
+            {forgotStep === 'newpass' && (
+              <>
+                <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
+                  Enter your new password (min 6 characters).
+                </p>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="New password"
+                  autoFocus
+                  style={{
+                    width: '100%', padding: '10px 14px',
+                    border: '1px solid #d1d5db', borderRadius: '8px',
+                    fontSize: '14px', marginBottom: '12px',
+                    outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm new password"
+                  style={{
+                    width: '100%', padding: '10px 14px',
+                    border: '1px solid #d1d5db', borderRadius: '8px',
+                    fontSize: '14px', marginBottom: '16px',
+                    outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => setShowForgot(false)}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px',
+                      border: '1px solid #d1d5db', backgroundColor: '#fff',
+                      fontSize: '14px', fontWeight: 500, cursor: 'pointer', color: '#374151',
+                    }}
+                  >Cancel</button>
+                  <button
+                    disabled={forgotLoading || newPassword.length < 6 || newPassword !== confirmPassword}
+                    onClick={async () => {
+                      setForgotLoading(true); setForgotMsg('')
+                      try {
+                        const res = await fetch(apiUrl('/api/auth/reset-password-otp'), {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ reset_token: resetToken, new_password: newPassword }),
+                        })
+                        const data = await res.json()
+                        if (res.ok) {
+                          setForgotMsg(data.detail || 'Password reset successfully!')
+                          setForgotStep('done')
+                        } else {
+                          setForgotMsg(data.detail || 'Reset failed. Try again.')
+                        }
+                      } catch {
+                        setForgotMsg('Reset failed. Please try again.')
+                      } finally {
+                        setForgotLoading(false)
+                      }
+                    }}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px',
+                      border: 'none',
+                      backgroundColor: forgotLoading || newPassword.length < 6 || newPassword !== confirmPassword ? '#94a3b8' : '#6366f1',
+                      fontSize: '14px', fontWeight: 600,
+                      cursor: forgotLoading || newPassword.length < 6 || newPassword !== confirmPassword ? 'not-allowed' : 'pointer',
+                      color: '#fff',
+                    }}
+                  >{forgotLoading ? 'Resetting...' : 'Reset Password'}</button>
+                </div>
+                {newPassword && confirmPassword && newPassword !== confirmPassword && (
+                  <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>Passwords do not match</p>
+                )}
+              </>
+            )}
+
+            {/* Step 4: Done */}
+            {forgotStep === 'done' && (
+              <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                <div style={{ fontSize: '48px', marginBottom: '12px' }}>&#10003;</div>
+                <button
+                  onClick={() => setShowForgot(false)}
+                  style={{
+                    padding: '10px 32px', borderRadius: '8px',
+                    border: 'none', backgroundColor: '#6366f1',
+                    fontSize: '14px', fontWeight: 600, cursor: 'pointer',
+                    color: '#fff', marginTop: '8px',
+                  }}
+                >Back to Login</button>
+              </div>
+            )}
           </div>
         </div>
       )}

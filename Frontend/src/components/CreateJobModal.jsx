@@ -647,7 +647,7 @@ export default function CreateJobModal({
     setIsDirty(true)
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (isReview || isSubmitting) return
 
@@ -673,10 +673,12 @@ export default function CreateJobModal({
       _draftId: draftId || null,  // Pass draft ID so Jobs.jsx can clean up
     }
 
-    if (onSave) {
-      onSave(payload, mode)
-    } else {
-      console.log('Job — formData:', payload)
+    try {
+      if (onSave) {
+        await onSave(payload, mode)
+      }
+    } catch (err) {
+      console.error('Save failed:', err)
     }
 
     if (mode === 'create') {

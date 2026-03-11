@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import {
-  Users, Clock, LogOut,
+  Users, Clock,
   Menu, Home, ChevronLeft, ChevronDown, ArrowLeft, RefreshCw, Bell,
   LayoutDashboard, Upload, BarChart3,
 } from 'lucide-react'
@@ -10,7 +10,7 @@ import { api } from '../../services/api'
 import companyLogo from '../../assets/company-logo.png'
 
 export default function AdminLayout() {
-  const { logout, user } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -42,11 +42,6 @@ export default function AdminLayout() {
     { path: '/admin/users', label: 'Users', icon: Users },
     { path: '/admin/activity', label: 'Activity Logs', icon: Clock },
   ]
-
-  const handleLogout = () => {
-    logout()
-    navigate('/')
-  }
 
   const isActive = (path) => {
     if (path === '/admin') return location.pathname === '/admin'
@@ -173,10 +168,10 @@ export default function AdminLayout() {
         </button>
       </div>
 
-      {/* User / Logout */}
+      {/* User info */}
       <div className="border-t border-white/[0.06] px-3 py-4">
         {sidebarOpen && (
-          <div className="flex items-center gap-3 px-3 py-2 mb-2">
+          <div className="flex items-center gap-3 px-3 py-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-[11px] font-bold text-white uppercase shadow-md">
               {user?.username?.charAt(0) || 'A'}
             </div>
@@ -186,16 +181,6 @@ export default function AdminLayout() {
             </div>
           </div>
         )}
-        <button
-          onClick={handleLogout}
-          className={`w-full flex items-center gap-3 rounded-lg text-gray-500 hover:bg-red-500/10 hover:text-red-400 transition-all duration-200 ${
-            sidebarOpen ? 'px-3 py-2.5' : 'px-2 py-2.5 justify-center'
-          }`}
-          title={!sidebarOpen ? 'Logout' : undefined}
-        >
-          <LogOut className="h-[18px] w-[18px] shrink-0" />
-          {sidebarOpen && <span className="text-[13px] font-medium">Logout</span>}
-        </button>
       </div>
     </>
   )

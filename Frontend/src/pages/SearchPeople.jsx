@@ -92,14 +92,16 @@ export default function SearchPeople() {
     }
 
     // Filter by locations using OR logic (frontend filtering)
+    // Uses word-boundary regex so "India" won't match "Indiana"
     const locationTags = filters.location ? filters.location.split(',').map(l => l.trim()).filter(Boolean) : []
     if (locationTags.length > 0) {
       rows = rows.filter(candidate => {
-        const candidateLocation = (candidate.location || candidate.address || '').toLowerCase()
-        // OR logic: match if ANY selected location is found in candidate's location
-        return locationTags.some(tag => 
-          candidateLocation.includes(tag.toLowerCase())
-        )
+        const candidateLocation = (candidate.location || candidate.address || '')
+        // OR logic: match if ANY selected location is found as a whole word
+        return locationTags.some(tag => {
+          const regex = new RegExp(`\\b${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+          return regex.test(candidateLocation)
+        })
       })
     }
 
@@ -161,18 +163,24 @@ export default function SearchPeople() {
       const nextRows = Array.isArray(data) ? data : Array.isArray(data?.candidates) ? data.candidates : []
       setAllRows(nextRows)
 
-      
+      // Use grand total from backend if available (for "14 / 729" display)
+      const grandTotal = data?.total ?? null
+
       // Update profiles cache for suggestions (only when loading without heavy filters)
       const hasBackendFilters = filters.keywords || filters.experienceFrom !== null || 
                                  filters.experienceTo !== null
       if (!hasBackendFilters) {
         setAllProfilesCache(nextRows)
-        setTotalProfilesCount(nextRows.length)
+        setTotalProfilesCount(grandTotal ?? nextRows.length)
         cachePopulatedRef.current = true
       } else if (!cachePopulatedRef.current) {
         // If cache hasn't been populated yet, populate it with current results
         setAllProfilesCache(nextRows)
         cachePopulatedRef.current = true
+      }
+      // Always update grand total if backend returned it
+      if (grandTotal != null) {
+        setTotalProfilesCount(grandTotal)
       }
     } catch (e) {
       console.error('Load candidates error:', e)

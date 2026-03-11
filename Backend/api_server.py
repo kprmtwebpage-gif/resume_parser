@@ -501,20 +501,20 @@ async def get_candidates(
                     where_conditions.append(f"({' OR '.join(name_conditions)})")
             
             # Location search - supports comma-separated locations with OR logic
+            # Uses word-boundary regex (\m / \M) so "India" won't match "Indiana"
             if location:
                 loc_tags = [l.strip() for l in location.split(",") if l.strip()]
                 if len(loc_tags) == 1:
                     location_words = [w.strip() for w in loc_tags[0].split() if w.strip()]
                     for word in location_words:
-                        pattern = f"%{word}%"
-                        where_conditions.append("c.address ILIKE %s")
-                        search_params.append(pattern)
+                        where_conditions.append(r"c.address ~* %s")
+                        search_params.append(r'\m' + word + r'\M')
                 else:
                     # Multiple locations: match any of them (OR logic)
                     loc_conditions = []
                     for loc in loc_tags:
-                        loc_conditions.append("c.address ILIKE %s")
-                        search_params.append(f"%{loc}%")
+                        loc_conditions.append(r"c.address ~* %s")
+                        search_params.append(r'\m' + loc.strip() + r'\M')
                     where_conditions.append(f"({' OR '.join(loc_conditions)})")
             
             # Job title search - supports multiple comma-separated titles
@@ -609,6 +609,10 @@ async def get_candidates(
             # Get candidates
             cursor.execute(data_sql, data_params)
             rows = cursor.fetchall()
+
+            # Get grand total (unfiltered) for UI display (e.g. "14 / 729")
+            cursor.execute(f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE}")
+            grand_total = cursor.fetchone()["total"]
             
             candidates = [
                 Candidate(
@@ -643,8 +647,8 @@ async def get_candidates(
                 for row in rows
             ]
 
-            # The React UI expects this endpoint to return a plain array.
-            return candidates
+            # Return candidates with grand total for UI filter count display
+            return {"candidates": candidates, "total": grand_total}
 
 
 # ── Bulk resume download (ZIP) ──────────────────────────────────────────────
@@ -2046,17 +2050,9 @@ if os.path.exists(frontend_dist) and os.getenv("SERVE_FRONTEND", "0") == "1":
     print(f"[OK] Serving built frontend from {frontend_dist}")
     print(f"   Access UI at: http://localhost:8000/")
 
-    # SPA catch-all: serve index.html for any non-API, non-asset path
-    # This supports React-Router client-side routing (page refresh on /jobs, /upload, etc.)
-    @app.get("/{full_path:path}")
-    async def spa_catch_all(full_path: str):
-        index_file_path = os.path.join(frontend_dist, "index.html")
-        if os.path.exists(index_file_path):
-            return _html_response(index_file_path)
-        raise HTTPException(status_code=404, detail="Not found")
-
-
 # ── Admin: User stats endpoint ────────────────────────────────────────────────
+# NOTE: Admin endpoints MUST be registered BEFORE the SPA catch-all below,
+# otherwise "/{full_path:path}" will intercept /api/admin/* requests.
 @app.get("/api/admin/users")
 async def admin_get_users(request: Request):
     """
@@ -2262,6 +2258,18 @@ async def admin_upload_metrics(request: Request):
                 "yearlyData": yearly_data,
                 "userSummaries": user_summaries,
             }
+
+
+# SPA catch-all: serve index.html for any non-API, non-asset path
+# This supports React-Router client-side routing (page refresh on /jobs, /upload, etc.)
+# MUST be the very last route registered — after all API endpoints.
+if os.path.exists(frontend_dist) and os.getenv("SERVE_FRONTEND", "0") == "1":
+    @app.get("/{full_path:path}")
+    async def spa_catch_all(full_path: str):
+        index_file_path = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_file_path):
+            return _html_response(index_file_path)
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 if __name__ == "__main__":
