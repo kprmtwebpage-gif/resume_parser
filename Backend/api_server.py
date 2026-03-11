@@ -475,25 +475,47 @@ async def get_candidates(
             where_conditions = []
             search_params = []
             
-            # Name search - search in first_name, last_name, and full name
+            # Name search - supports comma-separated names with OR logic
             if name:
-                name_words = [w.strip() for w in name.strip().split() if w.strip()]
-                for word in name_words:
-                    pattern = f"%{word}%"
-                    where_conditions.append("""(
-                        c.first_name ILIKE %s 
-                        OR c.last_name ILIKE %s 
-                        OR CONCAT(c.first_name, ' ', c.last_name) ILIKE %s
-                    )""")
-                    search_params.extend([pattern] * 3)
+                name_tags = [n.strip() for n in name.split(",") if n.strip()]
+                if len(name_tags) == 1:
+                    name_words = [w.strip() for w in name_tags[0].split() if w.strip()]
+                    for word in name_words:
+                        pattern = f"%{word}%"
+                        where_conditions.append("""(
+                            c.first_name ILIKE %s 
+                            OR c.last_name ILIKE %s 
+                            OR CONCAT(c.first_name, ' ', c.last_name) ILIKE %s
+                        )""")
+                        search_params.extend([pattern] * 3)
+                else:
+                    # Multiple names: match any of them (OR logic)
+                    name_conditions = []
+                    for n in name_tags:
+                        name_conditions.append("""(
+                            c.first_name ILIKE %s 
+                            OR c.last_name ILIKE %s 
+                            OR CONCAT(c.first_name, ' ', c.last_name) ILIKE %s
+                        )""")
+                        search_params.extend([f"%{n}%"] * 3)
+                    where_conditions.append(f"({' OR '.join(name_conditions)})")
             
-            # Location search - search in address field only
+            # Location search - supports comma-separated locations with OR logic
             if location:
-                location_words = [w.strip() for w in location.strip().split() if w.strip()]
-                for word in location_words:
-                    pattern = f"%{word}%"
-                    where_conditions.append("c.address ILIKE %s")
-                    search_params.append(pattern)
+                loc_tags = [l.strip() for l in location.split(",") if l.strip()]
+                if len(loc_tags) == 1:
+                    location_words = [w.strip() for w in loc_tags[0].split() if w.strip()]
+                    for word in location_words:
+                        pattern = f"%{word}%"
+                        where_conditions.append("c.address ILIKE %s")
+                        search_params.append(pattern)
+                else:
+                    # Multiple locations: match any of them (OR logic)
+                    loc_conditions = []
+                    for loc in loc_tags:
+                        loc_conditions.append("c.address ILIKE %s")
+                        search_params.append(f"%{loc}%")
+                    where_conditions.append(f"({' OR '.join(loc_conditions)})")
             
             # Job title search - supports multiple comma-separated titles
             if jobTitle:
@@ -512,14 +534,13 @@ async def get_candidates(
                         search_params.append(f"%{t}%")
                     where_conditions.append(f"({' OR '.join(title_conditions)})")
             
-            # Experience years filter (joint condition with jobTitle)
-            # Support both legacy experienceYears and new experienceFrom/experienceTo
+            # Experience years filter — works independently, no longer requires jobTitle
             exp_min = experienceFrom if experienceFrom is not None else experienceYears
             exp_max = experienceTo
-            if exp_min is not None and jobTitle:
+            if exp_min is not None:
                 where_conditions.append("s.years_of_experience >= %s")
                 search_params.append(exp_min)
-            if exp_max is not None and jobTitle:
+            if exp_max is not None:
                 where_conditions.append("s.years_of_experience <= %s")
                 search_params.append(exp_max)
             
@@ -2107,6 +2128,140 @@ async def admin_get_users(request: Request):
         }
         for r in rows
     ]
+
+
+@app.get("/api/admin/upload-metrics")
+async def admin_upload_metrics(request: Request):
+    """Return upload time-series data grouped by user for the Upload Metrics dashboard."""
+    from datetime import datetime, timedelta
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            # Get all users
+            cursor.execute("SELECT id, username FROM users ORDER BY created_at")
+            users_rows = cursor.fetchall()
+            if not users_rows:
+                return {"users": [], "dailyData": [], "weeklyData": [], "monthlyData": [], "yearlyData": [], "userSummaries": []}
+
+            user_map = {r["id"]: r["username"] for r in users_rows}
+            user_ids = list(user_map.keys())
+
+            # Get daily upload counts per user for last 90 days
+            cursor.execute("""
+                SELECT DATE(parsed_at) as day, uploaded_by, COUNT(*) as cnt
+                FROM candidate_profile
+                WHERE parsed_at IS NOT NULL AND uploaded_by IS NOT NULL
+                  AND parsed_at >= CURRENT_DATE - INTERVAL '90 days'
+                GROUP BY DATE(parsed_at), uploaded_by
+                ORDER BY day
+            """)
+            daily_rows = cursor.fetchall()
+
+            # Build daily data keyed by date
+            today = datetime.now().date()
+            daily_map = {}
+            for r in daily_rows:
+                day_str = r["day"].strftime("%Y-%m-%d")
+                if day_str not in daily_map:
+                    daily_map[day_str] = {"date": day_str}
+                uname = user_map.get(r["uploaded_by"], "unknown")
+                daily_map[day_str][uname] = r["cnt"]
+
+            # Fill in missing days for last 90 days
+            daily_data = []
+            for i in range(90, -1, -1):
+                d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                entry = daily_map.get(d, {"date": d})
+                entry["date"] = d
+                daily_data.append(entry)
+
+            # Aggregate weekly (last 24 weeks)
+            weekly_data = []
+            for w in range(23, -1, -1):
+                week_start = today - timedelta(weeks=w, days=today.weekday())
+                week_end = week_start + timedelta(days=6)
+                label = f"W{week_start.isocalendar()[1]} {week_start.year}"
+                entry = {"date": label}
+                for uid, uname in user_map.items():
+                    total = 0
+                    for dd in daily_data:
+                        dd_date = datetime.strptime(dd["date"], "%Y-%m-%d").date()
+                        if week_start <= dd_date <= week_end:
+                            total += dd.get(uname, 0)
+                    if total > 0:
+                        entry[uname] = total
+                weekly_data.append(entry)
+
+            # Aggregate monthly (last 12 months)
+            monthly_data = []
+            for m in range(11, -1, -1):
+                month_date = today.replace(day=1) - timedelta(days=m * 28)
+                month_date = month_date.replace(day=1)
+                label = month_date.strftime("%b %Y")
+                entry = {"date": label}
+                for uid, uname in user_map.items():
+                    total = 0
+                    for dd in daily_data:
+                        dd_date = datetime.strptime(dd["date"], "%Y-%m-%d").date()
+                        if dd_date.year == month_date.year and dd_date.month == month_date.month:
+                            total += dd.get(uname, 0)
+                    if total > 0:
+                        entry[uname] = total
+                monthly_data.append(entry)
+
+            # Aggregate yearly (last 3 years)
+            yearly_data = []
+            for y in range(2, -1, -1):
+                year = today.year - y
+                label = str(year)
+                entry = {"date": label}
+                for uid, uname in user_map.items():
+                    total = 0
+                    for dd in daily_data:
+                        dd_date = datetime.strptime(dd["date"], "%Y-%m-%d").date()
+                        if dd_date.year == year:
+                            total += dd.get(uname, 0)
+                    if total > 0:
+                        entry[uname] = total
+                yearly_data.append(entry)
+
+            # User summaries
+            user_colors = ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EC4899", "#14B8A6", "#6366F1", "#EF4444"]
+            today_str = today.strftime("%Y-%m-%d")
+            users_list = []
+            user_summaries = []
+            for idx, (uid, uname) in enumerate(user_map.items()):
+                color = user_colors[idx % len(user_colors)]
+                users_list.append({"id": uid, "name": uname, "color": color})
+
+                today_count = daily_map.get(today_str, {}).get(uname, 0)
+                last7 = sum(daily_map.get((today - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(uname, 0) for i in range(7))
+                last30 = sum(daily_map.get((today - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(uname, 0) for i in range(30))
+                total = sum(dd.get(uname, 0) for dd in daily_data)
+
+                # Weekly trend: (this week - last week) / last week * 100
+                this_week = sum(daily_map.get((today - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(uname, 0) for i in range(7))
+                last_week = sum(daily_map.get((today - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(uname, 0) for i in range(7, 14))
+                weekly_trend = round(((this_week - last_week) / max(last_week, 1)) * 100)
+
+                # Monthly trend
+                this_month = sum(daily_map.get((today - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(uname, 0) for i in range(30))
+                last_month = sum(daily_map.get((today - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get(uname, 0) for i in range(30, 60))
+                monthly_trend = round(((this_month - last_month) / max(last_month, 1)) * 100)
+
+                user_summaries.append({
+                    "id": uid, "name": uname, "color": color,
+                    "today": today_count, "last7": last7, "last30": last30, "total": total,
+                    "weeklyTrend": weekly_trend, "monthlyTrend": monthly_trend,
+                })
+
+            return {
+                "users": users_list,
+                "dailyData": daily_data,
+                "weeklyData": weekly_data,
+                "monthlyData": monthly_data,
+                "yearlyData": yearly_data,
+                "userSummaries": user_summaries,
+            }
 
 
 if __name__ == "__main__":

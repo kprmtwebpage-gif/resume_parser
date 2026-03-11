@@ -1,4 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useAuth } from '../../contexts/AuthContext'
+import { apiUrl } from '../../config'
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -13,9 +15,7 @@ import { MiniSparkline as ThemeMiniSparkline } from '../../theme/components'
 
 /* ── Sample Data Generator ────────────────────────────── */
 
-function generateUploadData() {
-  return { users: [], dailyData: [], weeklyData: [], monthlyData: [], yearlyData: [], userSummaries: [] }
-}
+const EMPTY_DATA = { users: [], dailyData: [], weeklyData: [], monthlyData: [], yearlyData: [], userSummaries: [] }
 
 /* ── Custom Tooltip ───────────────────────────────────── */
 
@@ -48,11 +48,29 @@ function MetricTooltip({ active, payload, label, period }) {
    ═══════════════════════════════════════════════════════ */
 
 export default function UploadMetrics() {
-  const [data] = useState(() => generateUploadData())
+  const { getAuthHeaders } = useAuth()
+  const [data, setData] = useState(EMPTY_DATA)
+  const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState('daily')
-  const [selectedUsers, setSelectedUsers] = useState(() => data.users.map(u => u.name))
+  const [selectedUsers, setSelectedUsers] = useState([])
   const [chartType, setChartType] = useState('bar') // 'bar' | 'line' | 'area'
   const [userDropdownOpen, setUserDropdownOpen] = useState(false)
+
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const res = await fetch(apiUrl('/api/admin/upload-metrics'), { headers: getAuthHeaders() })
+      if (!res.ok) throw new Error('Failed to fetch')
+      const json = await res.json()
+      setData(json)
+      setSelectedUsers(json.users.map(u => u.name))
+    } catch (e) {
+      console.error('Upload metrics fetch error:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [getAuthHeaders])
+
+  useEffect(() => { fetchMetrics() }, [fetchMetrics])
 
   /* period data source */
   const chartData = useMemo(() => {
@@ -99,7 +117,7 @@ export default function UploadMetrics() {
   }
 
   const selectAll = () => setSelectedUsers(data.users.map(u => u.name))
-  const clearAll = () => setSelectedUsers([data.users[0].name])
+  const clearAll = () => setSelectedUsers(data.users.length ? [data.users[0].name] : [])
 
   const periodLabels = {
     daily: 'Last 90 Days',
@@ -114,6 +132,13 @@ export default function UploadMetrics() {
     { label: 'Peak Uploads', value: kpis.peakUploads.toLocaleString(), icon: BarChart3, bg: '#FFFBEB', iconColor: COLORS.amber },
     { label: 'Active Users', value: kpis.activeUsers, icon: Users, bg: '#EEF2FF', iconColor: COLORS.indigo },
   ]
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: COLORS.primary }} />
+      <span className="ml-3 text-sm" style={{ color: COLORS.secondary }}>Loading upload metrics...</span>
+    </div>
+  )
 
   return (
     <div className="space-y-6">

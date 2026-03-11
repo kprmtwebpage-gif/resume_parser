@@ -5319,19 +5319,25 @@ def extract_linkedin(text):
         url = re.sub(r"^https://linkedin\.com/", "https://www.linkedin.com/", url, flags=re.I)
         # Remove trailing hyphens/slashes that occur when PDF text wraps mid-URL
         url = re.sub(r"[-/]+$", "", url)
+        # Decode percent-encoded characters in the path for cleaner slugs
+        url = url.replace("%20", "").replace("%2F", "/")
         # Validate the slug is non-empty after the /in/ prefix
         slug_match = re.search(r"/in/([a-zA-Z0-9][a-zA-Z0-9\-_%]{1,})", url)
         if not slug_match:
             return None
         # Reject obviously-bad slugs (pure numbers, single char, protocol names)
         slug = slug_match.group(1)
+        # Strip trailing hyphens from slug (PDF artefacts)
+        slug = slug.rstrip("-")
         if slug.isdigit() or len(slug) < 2:
             return None
         _bad_slugs = {"http", "https", "www", "linkedin", "profile", "view",
                       "company", "school", "jobs", "feed", "messaging"}
         if slug.casefold() in _bad_slugs:
             return None
-        return url
+        # Always reconstruct URL from the validated slug — never return raw text
+        # which may contain trailing garbage, query params, or PDF artefacts.
+        return f"https://www.linkedin.com/in/{slug}"
 
     _LI_URL_RE = re.compile(
         r"(?:https?://)?(?:www\.)?linkedin\.com\s*/\s*in\s*/\s*[a-zA-Z0-9][a-zA-Z0-9\-_%]*",
@@ -5346,15 +5352,36 @@ def extract_linkedin(text):
 
     lines = non_empty_lines(text or "")
 
+    def _try_extend_slug(matched_url: str, source_text: str, match_end: int) -> str:
+        """Try to extend a truncated slug by checking characters immediately after the match.
+
+        When PDFs break a URL across lines, the regex captures only the first part.
+        This looks at the characters right after the match to extend the slug.
+        """
+        remaining = source_text[match_end:]
+        # Skip a single whitespace/newline then try to continue with slug chars
+        cont = re.match(r"[\s]*([a-zA-Z0-9\-_%]+)", remaining)
+        if cont:
+            extra = cont.group(1)
+            # Only extend if the continuation looks like a slug fragment
+            # (not a random next word — slug continuations typically start lower/digit)
+            if extra and (extra[0].isdigit() or extra[0].islower()):
+                return matched_url + extra
+        return matched_url
+
     # ── Tier 1: Lines that contain an explicit LinkedIn label ────────────────
     # These lines are virtually always in the contact/header block of page 1.
-    for ln in lines[:80]:
+    for idx, ln in enumerate(lines[:80]):
         if not re.search(r"(?i)\blinked\s*in\b", ln):
             continue
         # Try the standard URL pattern first.
         m = _LI_URL_RE.search(ln)
         if m:
-            result = _normalise_url(m.group())
+            # Try extending slug with next line content
+            extended = _try_extend_slug(m.group(), ln, m.end())
+            if extended == m.group() and idx + 1 < len(lines):
+                extended = _try_extend_slug(m.group(), ln + " " + lines[idx + 1], m.end())
+            result = _normalise_url(extended)
             if result:
                 return result
         # Handle PDF-broken URL on the same line.
@@ -5389,11 +5416,22 @@ def extract_linkedin(text):
         (text or ""),
         flags=re.I,
     )
+    # Also collapse spaces around /in/ path separators
+    scratch = re.sub(r"(linkedin\.com)\s*/\s*in\s*/\s*", r"\1/in/", scratch, flags=re.I)
     m = _LI_URL_RE.search(scratch)
     if m:
-        result = _normalise_url(m.group())
+        extended = _try_extend_slug(m.group(), scratch, m.end())
+        result = _normalise_url(extended)
         if result:
             return result
+    # Try broken URL regex as fallback on scratch text
+    m2 = _broken_url_re.search(scratch)
+    if m2:
+        slug_raw = re.sub(r"\s+", "", m2.group(1))
+        if slug_raw and not slug_raw.isdigit() and len(slug_raw) >= 2:
+            result = _normalise_url(f"https://www.linkedin.com/in/{slug_raw}")
+            if result:
+                return result
 
     return None
 

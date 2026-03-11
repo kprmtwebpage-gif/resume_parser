@@ -1,6 +1,7 @@
 import { XMarkIcon, MapPinIcon, CurrencyDollarIcon, BriefcaseIcon, AcademicCapIcon, ClockIcon } from '@heroicons/react/24/outline'
 import { BookmarkIcon as BookmarkOutline } from '@heroicons/react/24/outline'
 import { BookmarkIcon as BookmarkSolid } from '@heroicons/react/24/solid'
+import { apiUrl } from '../config'
 
 /**
  * JobDetailsModal - Displays full job details in a modal
@@ -47,10 +48,10 @@ export default function JobDetailsModal({ job, isSaved, onClose, onSave, onApply
 
   // Get company logo or fallback
   const getLogoUrl = () => {
-    if (job.photo_url && job.photo_url.startsWith('/')) {
-      return job.photo_url
+    if (job.photo_url) {
+      return apiUrl(job.photo_url)
     }
-    return job.photo_url
+    return null
   }
 
   // Get company initial for fallback

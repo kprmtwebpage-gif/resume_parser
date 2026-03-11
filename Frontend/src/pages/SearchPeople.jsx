@@ -146,10 +146,12 @@ export default function SearchPeople() {
     try {
       // Don't send name, location to backend - we filter client-side with OR logic
       // BUT: send jobTitle + experience to backend for DB-level range filtering
-      const hasExperience = filters.experienceFrom != null || filters.experienceTo != null
       const data = await fetchCandidates({ 
-        // Send jobTitle to backend when experience filters are active (backend needs both for join query)
-        jobTitle: (hasExperience && filters.jobTitle) ? filters.jobTitle : undefined,
+        // Send name and location to backend for proper DB-level filtering
+        name: filters.name || undefined,
+        location: filters.location || undefined,
+        // Always send jobTitle to backend (not just when experience is active)
+        jobTitle: filters.jobTitle || undefined,
         keywords: filters.keywords || undefined,
         experienceFrom: filters.experienceFrom ?? undefined,
         experienceTo: filters.experienceTo ?? undefined,
