@@ -442,7 +442,7 @@ async def root():
     return {"status": "ok", "message": "Resume Parser API is running"}
 
 
-@app.get("/candidates", response_model=List[Candidate])
+@app.get("/candidates")
 async def get_candidates(
     q: Optional[str] = Query(None, description="General search query"),
     name: Optional[str] = Query(None, description="Search by name"),

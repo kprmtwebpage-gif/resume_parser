@@ -18,6 +18,7 @@ import UsersManagement from './pages/admin/UsersManagement.jsx'
 import ActivityLog from './pages/admin/ActivityLog.jsx'
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
+import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
 import LoginPage from './login/LoginPage.jsx'
 
 function AdminGuard({ children }) {
@@ -46,13 +47,14 @@ function AppContent() {
   }
 
   return (
-    <>
+    <UploadProvider>
       <ServerStatus />
+      <FloatingUploadIndicator />
       <Routes>
         {/* Main app routes with DashboardLayout */}
         <Route path="/" element={<DashboardLayout><SearchPeople /></DashboardLayout>} />
         <Route path="/jobs" element={<DashboardLayout><Jobs /></DashboardLayout>} />
-        <Route path="/upload" element={<UploadProvider><DashboardLayout><Upload /></DashboardLayout></UploadProvider>} />
+        <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
         <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
         {/* Admin routes — protected by role check */}
         <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
@@ -64,7 +66,7 @@ function AppContent() {
         </Route>
       </Routes>
       <ChatLauncher />
-    </>
+    </UploadProvider>
   )
 }
 
