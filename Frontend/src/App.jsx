@@ -66,6 +66,8 @@ function AppContent() {
           <Route path="activity" element={<ActivityLog />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
+        {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ChatLauncher />
     </UploadProvider>

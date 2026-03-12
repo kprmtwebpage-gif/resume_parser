@@ -480,9 +480,16 @@ async def admin_delete_user(
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
             
+            # Nullify uploaded_by references in candidate_profile to avoid FK constraint errors
+            cur.execute("UPDATE candidate_profile SET uploaded_by = NULL WHERE uploaded_by = %s", (user_id,))
+            
             # Delete the user (cascade deletes related records via ON DELETE CASCADE)
             cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
     finally:
         conn.close()
     return {"detail": f"User '{user['username']}' permanently deleted"}

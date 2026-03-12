@@ -2,6 +2,7 @@ const tabs = [
   { key: 'skills', label: 'Skills' },
   { key: 'experience', label: 'Work Experience' },
   { key: 'education', label: 'Education' },
+  { key: 'comments', label: 'Comments' },
 ]
 
 function classNames(...xs) {

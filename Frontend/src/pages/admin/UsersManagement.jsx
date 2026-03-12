@@ -162,7 +162,14 @@ function DeleteConfirmModal({ target, onClose, onDeleted, getAuthHeaders }) {
         method: 'DELETE',
         headers: getAuthHeaders(),
       })
-      const data = await res.json()
+      let data
+      const contentType = res.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        data = await res.json()
+      } else {
+        const text = await res.text()
+        data = { detail: text || `Server error (${res.status})` }
+      }
       if (!res.ok) throw new Error(data.detail || 'Failed to delete user')
       onDeleted(); onClose()
     } catch (e) { setErr(e.message) }

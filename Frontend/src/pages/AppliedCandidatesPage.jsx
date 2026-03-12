@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon, ArrowDownTrayIcon, EyeIcon, ChatBubbleLeftEllipsisIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon, ArrowDownTrayIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
 import { api } from '../services/api'
-import CommentModal from '../components/CommentModal'
 
 export default function AppliedCandidatesPage() {
   const { jobId } = useParams()
@@ -18,9 +17,8 @@ export default function AppliedCandidatesPage() {
   const [jobDetailOpen, setJobDetailOpen] = useState(false)
   const [candidateListOpen, setCandidateListOpen] = useState(true)
 
-  // Comment modal state
-  const [commentModalOpen, setCommentModalOpen] = useState(false)
-  const [commentCandidate, setCommentCandidate] = useState({ id: null, name: '' })
+  // Resume preview modal state
+  const [previewResume, setPreviewResume] = useState(null)
 
   useEffect(() => {
     if (jobId) {
@@ -268,7 +266,6 @@ export default function AppliedCandidatesPage() {
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Tech Experience</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Domain Expert</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Resume</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Actions</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Submitted On</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Created On</th>
                     </tr>
@@ -309,26 +306,18 @@ export default function AppliedCandidatesPage() {
                           <td className="px-4 py-3 border" style={{ borderColor: colors.border }}>
                             {app.resume_url ? (
                               <div className="flex items-center gap-2">
-                                <a href={`${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`} target="_blank" rel="noopener noreferrer" title="View Resume">
-                                  <EyeIcon className="h-5 w-5 text-green-600 hover:text-green-800 cursor-pointer" />
-                                </a>
+                                <button
+                                  onClick={() => setPreviewResume({ url: `${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`, filename: app.resume_filename || 'Resume' })}
+                                  title="View Resume"
+                                  className="p-0 bg-transparent border-none cursor-pointer"
+                                >
+                                  <EyeIcon className="h-5 w-5 text-green-600 hover:text-green-800" />
+                                </button>
                                 <a href={`${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`} download={app.resume_filename || 'resume'} title={app.resume_filename || 'Download Resume'}>
                                   <ArrowDownTrayIcon className="h-5 w-5 text-blue-600 hover:text-blue-800 cursor-pointer" />
                                 </a>
                               </div>
                             ) : '—'}
-                          </td>
-                          <td className="px-4 py-3 border" style={{ borderColor: colors.border }}>
-                            <button
-                              onClick={() => {
-                                setCommentCandidate({ id: appId, name: `${app.first_name || ''} ${app.last_name || ''}`.trim() || app.candidate_name || 'Candidate' })
-                                setCommentModalOpen(true)
-                              }}
-                              title="Add Comment"
-                              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                            >
-                              <ChatBubbleLeftEllipsisIcon className="h-5 w-5 text-indigo-600 hover:text-indigo-800" />
-                            </button>
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap border" style={{ color: colors.text, borderColor: colors.border }}>{app.submitted_at ? new Date(app.submitted_at).toLocaleString() : '—'}</td>
                           <td className="px-4 py-3 whitespace-nowrap border" style={{ color: colors.text, borderColor: colors.border }}>{job?.created_at ? new Date(job.created_at).toLocaleString() : '—'}</td>
@@ -343,13 +332,35 @@ export default function AppliedCandidatesPage() {
         )}
       </div>
 
-      {/* Comment Modal */}
-      <CommentModal
-        isOpen={commentModalOpen}
-        onClose={() => setCommentModalOpen(false)}
-        candidateId={commentCandidate.id}
-        candidateName={commentCandidate.name}
-      />
+      {/* Resume Preview Modal */}
+      {previewResume && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setPreviewResume(null)}
+        >
+          <div
+            className="relative rounded-xl shadow-2xl overflow-hidden"
+            style={{ width: '80vw', height: '90vh', backgroundColor: colors.card }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-3 border-b" style={{ borderColor: colors.border }}>
+              <h3 className="text-sm font-semibold truncate" style={{ color: colors.text }}>{previewResume.filename}</h3>
+              <button
+                onClick={() => setPreviewResume(null)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-800"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <iframe
+              src={previewResume.url}
+              title="Resume Preview"
+              className="w-full border-0"
+              style={{ height: 'calc(90vh - 52px)' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
