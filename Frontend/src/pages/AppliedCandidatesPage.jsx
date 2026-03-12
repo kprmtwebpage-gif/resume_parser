@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { DocumentArrowDownIcon, TrashIcon, EyeIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
 import { api } from '../services/api'
-import CandidateProfileModal from '../components/CandidateProfileModal'
 
 export default function AppliedCandidatesPage() {
   const { jobId } = useParams()
@@ -14,11 +13,9 @@ export default function AppliedCandidatesPage() {
   const [applications, setApplications] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [deletingId, setDeletingId] = useState(null)
-  const [openDropdown, setOpenDropdown] = useState(null)
 
-  const [selectedCandidate, setSelectedCandidate] = useState(null)
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
+  const [jobDetailOpen, setJobDetailOpen] = useState(false)
+  const [candidateListOpen, setCandidateListOpen] = useState(false)
 
   useEffect(() => {
     if (jobId) {
@@ -48,54 +45,36 @@ export default function AppliedCandidatesPage() {
     }
   }
 
-  const handleDeleteApplication = async (app) => {
-    const appId = app.application_id || app.id
-    const name = `${app.first_name || ''} ${app.last_name || ''}`.trim() || app.candidate_name || 'this candidate'
-    if (!window.confirm(`Are you sure you want to delete the application from ${name}?\n\nThis action cannot be undone.`)) return
-
-    try {
-      setDeletingId(appId)
-      await api.delete(`/api/job-projects/applications/${appId}`)
-      setApplications(prev => prev.filter(a => (a.application_id || a.id) !== appId))
-    } catch (err) {
-      console.error('Failed to delete application:', err)
-      alert(err.response?.data?.detail || 'Failed to delete application.')
-    } finally {
-      setDeletingId(null)
-    }
-  }
-
-  const handleDownloadResume = (app) => {
-    const resumeUrl = app.resume_file || app.resume_url
-    if (resumeUrl) {
-      const fullUrl = resumeUrl.startsWith('http')
-        ? resumeUrl
-        : `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${resumeUrl}`
-      window.open(fullUrl, '_blank')
-    }
-  }
-
-  const handleViewProfile = (app) => {
-    setSelectedCandidate(app)
-    setIsProfileModalOpen(true)
-  }
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '—'
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    })
+  const handleExport = () => {
+    if (!applications.length) return
+    const headers = ['S.No', 'First Name', 'Last Name', 'Address', 'Phone', 'Email', 'Qualification', 'Work Authorization Type']
+    const rows = applications.map((app, idx) => [
+      idx + 1,
+      app.first_name || '',
+      app.last_name || '',
+      app.address || '',
+      app.phone || app.candidate_phone || '',
+      app.email || app.candidate_email || '',
+      app.education || '',
+      app.citizenship || ''
+    ])
+    const csvContent = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `candidates_${job?.job_title || 'job'}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   const getStatusBadge = (s) => {
     const map = {
-      applied: 'bg-blue-100 text-blue-700',
-      PENDING: 'bg-amber-100 text-amber-700',
-      REVIEWED: 'bg-blue-100 text-blue-700',
-      SHORTLISTED: 'bg-green-100 text-green-700',
-      REJECTED: 'bg-red-100 text-red-700',
-      HIRED: 'bg-purple-100 text-purple-700',
+      POSTED: 'bg-green-100 text-green-700',
+      DRAFT: 'bg-gray-100 text-gray-700',
+      HELD: 'bg-amber-100 text-amber-700',
+      CLOSED: 'bg-red-100 text-red-700',
+      'NOT PUBLISHED': 'bg-red-50 text-red-600',
     }
     return map[s] || 'bg-gray-100 text-gray-700'
   }
@@ -128,8 +107,10 @@ export default function AppliedCandidatesPage() {
   const jobType = job?.employment_type || job?.type || '—'
   const jobStatus = job?.status || '—'
   const jobQualification = job?.required_qualification || job?.qualification || '—'
-  const jobSalary = job?.salary_min && job?.salary_max
-    ? `$${Number(job.salary_min).toLocaleString()} – $${Number(job.salary_max).toLocaleString()}`
+  const jobSalaryStart = job?.salary_start ?? job?.salary_min
+  const jobSalaryEnd = job?.salary_end ?? job?.salary_max
+  const jobSalary = (jobSalaryStart != null && jobSalaryEnd != null)
+    ? `$${Number(jobSalaryStart).toLocaleString()} - $${Number(jobSalaryEnd).toLocaleString()}`
     : job?.salary || '—'
 
   return (
@@ -143,175 +124,169 @@ export default function AppliedCandidatesPage() {
         <span className="font-semibold" style={{ color: colors.text }}>Candidate details</span>
       </nav>
 
-      {/* Job Details Card */}
+      {/* Back Button */}
+      <button
+        onClick={() => navigate('/jobs')}
+        className="flex items-center gap-2 px-5 py-2.5 mb-6 text-sm font-medium text-white rounded-lg transition-colors"
+        style={{ backgroundColor: '#6366f1' }}
+      >
+        <ArrowLeftIcon className="h-4 w-4" />
+        Back
+      </button>
+
+      {/* Job Detail Accordion */}
       <div
-        className="rounded-xl border p-6 mb-6"
+        className="rounded-xl border mb-4 overflow-hidden"
         style={{ backgroundColor: colors.card, borderColor: colors.border }}
       >
-        <h2 className="text-lg font-bold mb-4" style={{ color: colors.text }}>
-          Candidate Details
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <span className="font-medium" style={{ color: colors.textSecondary }}>Title</span>
-            <p className="mt-1" style={{ color: colors.text }}>{jobTitle}</p>
+        <button
+          onClick={() => setJobDetailOpen(!jobDetailOpen)}
+          className="w-full flex items-center justify-between px-6 py-4 text-left transition-colors hover:opacity-80"
+        >
+          <div className="flex items-center gap-3">
+            <BriefcaseIcon className="h-5 w-5 text-gray-500" />
+            <span className="text-base font-semibold" style={{ color: '#6366f1' }}>Job Detail</span>
           </div>
-          <div>
-            <span className="font-medium" style={{ color: colors.textSecondary }}>Type</span>
-            <p className="mt-1" style={{ color: colors.text }}>{jobType}</p>
-          </div>
-          <div>
-            <span className="font-medium" style={{ color: colors.textSecondary }}>Company</span>
-            <p className="mt-1" style={{ color: colors.text }}>{jobCompany}</p>
-          </div>
-          <div>
-            <span className="font-medium" style={{ color: colors.textSecondary }}>Salary</span>
-            <p className="mt-1" style={{ color: colors.text }}>{jobSalary}</p>
-          </div>
-          <div>
-            <span className="font-medium" style={{ color: colors.textSecondary }}>Qualification</span>
-            <p className="mt-1" style={{ color: colors.text }}>{jobQualification}</p>
-          </div>
-          <div>
-            <span className="font-medium" style={{ color: colors.textSecondary }}>Applied Candidates</span>
-            <p className="mt-1 font-semibold" style={{ color: colors.text }}>{applications.length}</p>
-          </div>
-          <div>
-            <span className="font-medium" style={{ color: colors.textSecondary }}>Status</span>
-            <p className="mt-1">
-              <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getStatusBadge(jobStatus)}`}>
-                {jobStatus}
-              </span>
-            </p>
-          </div>
-        </div>
-        {job?.job_description && (
-          <div className="mt-4">
-            <span className="font-medium text-sm" style={{ color: colors.textSecondary }}>Description</span>
-            <div
-              className="mt-1 text-sm prose prose-sm max-w-none"
-              style={{ color: colors.text }}
-              dangerouslySetInnerHTML={{ __html: job.job_description }}
-            />
+          <ChevronRightIcon
+            className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${jobDetailOpen ? 'rotate-90' : ''}`}
+          />
+        </button>
+
+        {jobDetailOpen && (
+          <div className="px-6 pb-6 border-t" style={{ borderColor: colors.border }}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 mt-5 text-sm">
+              <div className="flex items-baseline gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Id :</span>
+                <span style={{ color: colors.text }}>{ applications.length > 0 ? 1 : '—' }</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Title :</span>
+                <span style={{ color: colors.text }}>{jobTitle}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Type :</span>
+                <span className="px-3 py-0.5 text-xs font-semibold rounded bg-green-100 text-green-700">{jobType}</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Company Name :</span>
+                <span style={{ color: colors.text }}>{jobCompany}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Salary :</span>
+                <span className="px-3 py-0.5 text-xs font-semibold rounded bg-amber-100 text-amber-700">{jobSalary}</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Qualification :</span>
+                <span style={{ color: colors.text }}>{jobQualification}</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Applied Candidate No :</span>
+                <span style={{ color: colors.text }}>{applications.length}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold min-w-[160px]" style={{ color: '#6366f1' }}>Status :</span>
+                <span className={`px-3 py-0.5 text-xs font-semibold rounded ${getStatusBadge(jobStatus)}`}>{jobStatus}</span>
+              </div>
+            </div>
+            {job?.job_description && (
+              <div className="mt-5 text-sm">
+                <span className="font-semibold" style={{ color: '#6366f1' }}>Description: </span>
+                <span
+                  className="prose prose-sm max-w-none inline"
+                  style={{ color: colors.text }}
+                  dangerouslySetInnerHTML={{ __html: job.job_description }}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Candidates Table */}
+      {/* Candidate List Accordion */}
       <div
         className="rounded-xl border overflow-hidden"
         style={{ backgroundColor: colors.card, borderColor: colors.border }}
       >
-        {applications.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <h3 className="text-lg font-medium mb-2" style={{ color: colors.text }}>No applications yet</h3>
-            <p className="text-sm" style={{ color: colors.textSecondary }}>Candidates who apply to this job will appear here.</p>
+        <button
+          onClick={() => setCandidateListOpen(!candidateListOpen)}
+          className="w-full flex items-center justify-between px-6 py-4 text-left transition-colors hover:opacity-80"
+        >
+          <div className="flex items-center gap-3">
+            <ListBulletIcon className="h-5 w-5 text-gray-500" />
+            <span className="text-base font-semibold" style={{ color: '#6366f1' }}>Candidate List</span>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ backgroundColor: isDark ? '#1e293b' : '#f8fafc' }}>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>S.No</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>First Name</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Last Name</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Address</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Phone</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Email</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Qualification</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Work Auth Type</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Applied Date</th>
-                  <th className="px-4 py-3 text-left font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Status</th>
-                  <th className="px-4 py-3 text-center font-semibold border-b" style={{ color: colors.text, borderColor: colors.border }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {applications.map((app, idx) => {
-                  const appId = app.application_id || app.id
-                  const isDeleting = deletingId === appId
-                  return (
-                    <tr
-                      key={appId}
-                      className={`border-b transition-colors ${isDeleting ? 'opacity-50' : ''}`}
-                      style={{
-                        borderColor: colors.border,
-                        backgroundColor: idx % 2 === 0
-                          ? (isDark ? '#0f172a' : '#ffffff')
-                          : (isDark ? '#1e293b' : '#f9fafb')
-                      }}
-                    >
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{idx + 1}</td>
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{app.first_name || '—'}</td>
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{app.last_name || '—'}</td>
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{app.address || '—'}</td>
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{app.phone || app.candidate_phone || '—'}</td>
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{app.email || app.candidate_email || '—'}</td>
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{app.education || '—'}</td>
-                      <td className="px-4 py-3" style={{ color: colors.text }}>{app.citizenship || '—'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap" style={{ color: colors.textSecondary }}>{formatDate(app.applied_at)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getStatusBadge(app.application_status)}`}>
-                          {app.application_status || 'applied'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="relative inline-block">
-                          <button
-                            onClick={() => setOpenDropdown(openDropdown === appId ? null : appId)}
-                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors"
-                            style={{ borderColor: colors.border, color: colors.text }}
-                          >
-                            Actions
-                            <ChevronDownIcon className="h-3.5 w-3.5" />
-                          </button>
-                          {openDropdown === appId && (
-                            <div
-                              className="absolute right-0 mt-1 w-40 rounded-lg shadow-lg border z-20"
-                              style={{ backgroundColor: colors.card, borderColor: colors.border }}
-                            >
-                              <button
-                                onClick={() => { handleViewProfile(app); setOpenDropdown(null) }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-blue-50 text-left transition-colors"
-                              >
-                                <EyeIcon className="h-3.5 w-3.5 text-blue-600" />
-                                View Profile
-                              </button>
-                              {(app.resume_file || app.resume_url) && (
-                                <button
-                                  onClick={() => { handleDownloadResume(app); setOpenDropdown(null) }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-green-50 text-left transition-colors"
-                                >
-                                  <DocumentArrowDownIcon className="h-3.5 w-3.5 text-green-600" />
-                                  Download Resume
-                                </button>
-                              )}
-                              <button
-                                onClick={() => { handleDeleteApplication(app); setOpenDropdown(null) }}
-                                disabled={isDeleting}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-red-50 text-left text-red-600 transition-colors disabled:opacity-50"
-                              >
-                                <TrashIcon className="h-3.5 w-3.5" />
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </td>
+          <ChevronRightIcon
+            className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${candidateListOpen ? 'rotate-90' : ''}`}
+          />
+        </button>
+
+        {candidateListOpen && (
+          <div className="border-t" style={{ borderColor: colors.border }}>
+            {/* Export Button */}
+            <div className="px-6 py-4">
+              <button
+                onClick={handleExport}
+                disabled={!applications.length}
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50"
+                style={{ backgroundColor: '#6366f1' }}
+              >
+                <ArrowUpTrayIcon className="h-4 w-4" />
+                Export
+              </button>
+            </div>
+
+            {applications.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <h3 className="text-lg font-medium mb-2" style={{ color: colors.text }}>No applications yet</h3>
+                <p className="text-sm" style={{ color: colors.textSecondary }}>Candidates who apply to this job will appear here.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto px-6 pb-6">
+                <table className="w-full text-sm border" style={{ borderColor: colors.border }}>
+                  <thead>
+                    <tr style={{ backgroundColor: isDark ? '#1e293b' : '#f1f5f9' }}>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>S.No</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>First Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Last Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Address</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Phone</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Email</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Qualification</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Work Authorization Type</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {applications.map((app, idx) => {
+                      const appId = app.application_id || app.id
+                      return (
+                        <tr
+                          key={appId}
+                          className="border-b transition-colors"
+                          style={{
+                            borderColor: colors.border,
+                            backgroundColor: idx % 2 === 0
+                              ? (isDark ? '#0f172a' : '#ffffff')
+                              : (isDark ? '#1e293b' : '#f9fafb')
+                          }}
+                        >
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{idx + 1}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.first_name || '—'}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.last_name || '—'}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.address || '—'}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.phone || app.candidate_phone || '—'}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.email || app.candidate_email || '—'}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.education || '—'}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.citizenship || '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>
-
-      {/* Candidate Profile Modal */}
-      <CandidateProfileModal
-        isOpen={isProfileModalOpen}
-        onClose={() => { setIsProfileModalOpen(false); setSelectedCandidate(null) }}
-        candidate={selectedCandidate}
-      />
     </div>
   )
 }
