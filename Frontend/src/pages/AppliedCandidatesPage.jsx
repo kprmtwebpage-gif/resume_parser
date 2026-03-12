@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
 import { api } from '../services/api'
 
@@ -47,7 +47,7 @@ export default function AppliedCandidatesPage() {
 
   const handleExport = () => {
     if (!applications.length) return
-    const headers = ['S.No', 'First Name', 'Last Name', 'Address', 'Phone', 'Email', 'Qualification', 'Work Authorization Type']
+    const headers = ['S.No', 'First Name', 'Last Name', 'Address', 'Phone', 'Email', 'Qualification', 'Work Authorization Type', 'LinkedIn', 'Tech Experience', 'Domain Expert', 'Resume', 'Submitted On', 'Created On']
     const rows = applications.map((app, idx) => [
       idx + 1,
       app.first_name || '',
@@ -56,7 +56,13 @@ export default function AppliedCandidatesPage() {
       app.phone || app.candidate_phone || '',
       app.email || app.candidate_email || '',
       app.education || '',
-      app.citizenship || ''
+      app.citizenship || '',
+      app.linkedin_url || '',
+      app.tech_experience || '',
+      app.domain_expert || '',
+      app.resume_filename || '',
+      app.submitted_at ? new Date(app.submitted_at).toLocaleDateString() : '',
+      app.created_at ? new Date(app.created_at).toLocaleDateString() : ''
     ])
     const csvContent = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -253,6 +259,12 @@ export default function AppliedCandidatesPage() {
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Email</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Qualification</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Work Authorization Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>LinkedIn</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Tech Experience</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Domain Expert</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Resume</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Submitted On</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Created On</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -277,6 +289,22 @@ export default function AppliedCandidatesPage() {
                           <td className="px-4 py-3" style={{ color: colors.text }}>{app.email || app.candidate_email || '—'}</td>
                           <td className="px-4 py-3" style={{ color: colors.text }}>{app.education || '—'}</td>
                           <td className="px-4 py-3" style={{ color: colors.text }}>{app.citizenship || '—'}</td>
+                          <td className="px-4 py-3">
+                            {app.linkedin_url ? (
+                              <a href={app.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline text-xs">View</a>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.tech_experience || '—'}</td>
+                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.domain_expert || '—'}</td>
+                          <td className="px-4 py-3">
+                            {app.resume_url ? (
+                              <a href={`${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`} target="_blank" rel="noopener noreferrer" title={app.resume_filename || 'Download Resume'}>
+                                <ArrowDownTrayIcon className="h-5 w-5 text-blue-600 hover:text-blue-800" />
+                              </a>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap" style={{ color: colors.text }}>{app.submitted_at ? new Date(app.submitted_at).toLocaleDateString() : '—'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap" style={{ color: colors.text }}>{app.created_at ? new Date(app.created_at).toLocaleDateString() : '—'}</td>
                         </tr>
                       )
                     })}

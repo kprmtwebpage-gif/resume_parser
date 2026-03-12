@@ -314,7 +314,7 @@ export default function Jobs() {
       }
 
       // Fields that are client-only and should never be sent to the API
-      const skipKeys = new Set(['logoFile', 'logoPreview', 'removePhoto'])
+      const skipKeys = new Set(['logoFile', 'logoPreview', 'removePhoto', '_draftId'])
       
       // Append all form fields
       for (const [key, value] of Object.entries(payload)) {

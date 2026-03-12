@@ -142,31 +142,25 @@ export default function SearchPeople() {
     return filteredRows.slice(startIndex, endIndex)
   }, [filteredRows, page, rowsPerPage])
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     setError('')
     try {
-      // Don't send name, location to backend - we filter client-side with OR logic
-      // BUT: send jobTitle + experience to backend for DB-level range filtering
       const data = await fetchCandidates({ 
-        // Send name and location to backend for proper DB-level filtering
         name: filters.name || undefined,
         location: filters.location || undefined,
-        // Always send jobTitle to backend (not just when experience is active)
         jobTitle: filters.jobTitle || undefined,
         keywords: filters.keywords || undefined,
         experienceFrom: filters.experienceFrom ?? undefined,
         experienceTo: filters.experienceTo ?? undefined,
-        limit: 1000, // Load more records for client-side filtering
+        limit: 1000,
         offset: 0 
       })
       const nextRows = Array.isArray(data) ? data : Array.isArray(data?.candidates) ? data.candidates : []
       setAllRows(nextRows)
 
-      // Use grand total from backend if available (for "14 / 729" display)
       const grandTotal = data?.total ?? null
 
-      // Update profiles cache for suggestions (only when loading without heavy filters)
       const hasBackendFilters = filters.keywords || filters.experienceFrom !== null || 
                                  filters.experienceTo !== null
       if (!hasBackendFilters) {
@@ -174,18 +168,15 @@ export default function SearchPeople() {
         setTotalProfilesCount(grandTotal ?? nextRows.length)
         cachePopulatedRef.current = true
       } else if (!cachePopulatedRef.current) {
-        // If cache hasn't been populated yet, populate it with current results
         setAllProfilesCache(nextRows)
         cachePopulatedRef.current = true
       }
-      // Always update grand total if backend returned it
       if (grandTotal != null) {
         setTotalProfilesCount(grandTotal)
       }
     } catch (e) {
       console.error('Load candidates error:', e)
-      // Don't show error during sync operations, just log it
-      if (!syncing) {
+      if (!silent) {
         const status = e?.response?.status
         if (status === 401 || status === 403) {
           setError('Session expired. Please log in again.')
@@ -197,21 +188,21 @@ export default function SearchPeople() {
           setError(`Failed to load candidates (${status || e?.message || 'unknown error'}). Check that the backend is running.`)
         }
       }
-      setAllRows([])
+      if (!silent) setAllRows([])
     } finally {
       setLoading(false)
     }
-  }, [filters.name, filters.location, filters.jobTitle, filters.keywords, filters.experienceFrom, filters.experienceTo, syncing])
+  }, [filters.name, filters.location, filters.jobTitle, filters.keywords, filters.experienceFrom, filters.experienceTo])
 
   useEffect(() => {
     load()
   }, [load])
   
-  // Auto-refresh every 30 seconds to catch new resumes
+  // Auto-refresh every 30 seconds to catch new resumes (silent - no spinner)
   useEffect(() => {
     const autoRefreshInterval = setInterval(() => {
-      load()
-    }, 30000) // 30 seconds
+      load(true)
+    }, 30000)
     
     return () => clearInterval(autoRefreshInterval)
   }, [load])
