@@ -160,6 +160,39 @@ export default function Upload() {
             Supported file formats: PDF, DOC, DOCX
           </p>
 
+          {/* Upload Summary Counter */}
+          {uploads.length > 0 && (() => {
+            const total = uploads.length
+            const completed = uploads.filter(u => u.status === 'completed').length
+            const duplicates = uploads.filter(u => u.status === 'duplicate').length
+            const failed = uploads.filter(u => u.status === 'failed').length
+            const remaining = total - completed - duplicates - failed
+            return (
+              <div className="mt-6 p-4 rounded-lg bg-blue-50 border border-blue-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-blue-900">
+                    Upload {total}
+                  </span>
+                  <span className="text-sm font-medium text-blue-700">
+                    {remaining > 0 ? `${remaining} remaining` : 'All done!'}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-blue-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                    style={{ width: `${((completed + duplicates + failed) / total) * 100}%` }}
+                  />
+                </div>
+                <div className="flex gap-4 mt-2 text-xs text-blue-700">
+                  {completed > 0 && <span className="text-green-600">{completed} completed</span>}
+                  {duplicates > 0 && <span className="text-amber-600">{duplicates} duplicates</span>}
+                  {failed > 0 && <span className="text-red-600">{failed} failed</span>}
+                  {remaining > 0 && <span>{remaining} pending</span>}
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Upload Progress List */}
           {uploads.length > 0 && (
             <div className="mt-6 space-y-3">

@@ -199,7 +199,7 @@ export default function LoginPage({ onLoginSuccess }) {
             {forgotStep === 'username' && (
               <>
                 <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-                  Enter your username. An OTP will be sent to your registered email.
+                  Enter your username. If you are an admin, an OTP will be sent to your email. Regular users will receive assistance from the admin.
                 </p>
                 <input
                   type="text"

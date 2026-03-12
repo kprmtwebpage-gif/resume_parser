@@ -405,6 +405,7 @@ export default function CreateJobModal({
   const [isAutosaving, setIsAutosaving] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const autosaveTimerRef = useRef(null)
+  const submitGuardRef = useRef(false)
 
   const isReview = mode === 'review'
   const isEdit = mode === 'edit'
@@ -649,7 +650,7 @@ export default function CreateJobModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (isReview || isSubmitting) return
+    if (isReview || isSubmitting || submitGuardRef.current) return
 
     // Mark all required as touched
     const allTouched = {}
@@ -662,15 +663,23 @@ export default function CreateJobModal({
 
     if (salaryError) return
 
+    // Ref-based guard prevents double-submit (state updates are async)
+    submitGuardRef.current = true
     setIsSubmitting(true)
+
+    // Stop autosave timer to prevent race with draft creation during submit
+    if (autosaveTimerRef.current) {
+      clearInterval(autosaveTimerRef.current)
+      autosaveTimerRef.current = null
+    }
 
     const payload = {
       ...formData,
       description: jobDescription,
       comments,
-      logoFile: logoFile || null,  // Pass the actual File object, not just filename
+      logoFile: logoFile || null,
       logoPreview: logoPreview || null,
-      _draftId: draftId || null,  // Pass draft ID so Jobs.jsx can clean up
+      _draftId: draftId || null,
     }
 
     try {
@@ -679,6 +688,8 @@ export default function CreateJobModal({
       }
     } catch (err) {
       console.error('Save failed:', err)
+    } finally {
+      submitGuardRef.current = false
     }
 
     if (mode === 'create') {

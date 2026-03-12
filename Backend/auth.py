@@ -543,8 +543,8 @@ def _ensure_reset_requests_table():
 async def forgot_password(body: dict):
     """
     Public (no auth): user submits username to request a password reset.
-    If SMTP is configured, sends an OTP email. Otherwise falls back to
-    admin-mediated reset.
+    - Superuser/admin: If SMTP is configured, sends OTP email directly.
+    - Regular user: Always creates a request for admin to handle.
     """
     username = (body.get("username") or "").strip()
     if not username:
@@ -558,9 +558,11 @@ async def forgot_password(body: dict):
         return {"detail": "If the account exists and has an email, an OTP has been sent."}
 
     email = (user.get("email") or "").strip()
+    role = (user.get("role") or "").strip().lower()
+    is_privileged = role in ("superuser", "admin")
 
-    # If SMTP is configured and user has an email, send OTP
-    if SMTP_USER and SMTP_PASSWORD and email:
+    # Only superuser/admin gets direct OTP reset via email
+    if is_privileged and SMTP_USER and SMTP_PASSWORD and email:
         otp_code = _generate_otp()
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
 

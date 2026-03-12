@@ -222,7 +222,6 @@ export default function ApplyJobModal({ job, onClose }) {
   return (
     <div 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
     >
       <div 
         className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-hidden shadow-2xl"
@@ -344,11 +343,11 @@ export default function ApplyJobModal({ job, onClose }) {
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             
-            {/* LinkedIn URL */}
+            {/* LinkedIn URL (Optional) */}
             <input
-              type="url"
+              type="text"
               name="linkedInUrl"
-              placeholder="linkedInURL"
+              placeholder="LinkedIn URL (Optional)"
               value={formData.linkedInUrl}
               onChange={handleInputChange}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"

@@ -5,7 +5,7 @@ const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 
 export const api = axios.create({
   baseURL,
-  timeout: 15000,
+  timeout: 30000,
   headers: {
     'Cache-Control': 'no-cache, no-store, must-revalidate',
     'Pragma': 'no-cache',
@@ -51,6 +51,7 @@ export async function fetchCandidates({ q, name, location, jobTitle, keywords, e
       limit,
       offset,
     },
+    timeout: 60000,
   })
   return res.data
 }

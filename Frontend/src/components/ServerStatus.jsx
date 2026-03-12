@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { apiUrl } from '../config'
 
 export default function ServerStatus() {
   const [backendStatus, setBackendStatus] = useState('checking')
   const [frontendStatus, setFrontendStatus] = useState('running')
-  const [retryCount, setRetryCount] = useState(0)
+  const consecutiveFailures = useRef(0)
 
   const checkBackend = async () => {
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 3000)
+      const timeoutId = setTimeout(() => controller.abort(), 5000)
       
-      const response = await fetch('/', { 
+      const response = await fetch(apiUrl('/health'), { 
         method: 'GET',
         mode: 'cors',
         signal: controller.signal
@@ -20,46 +21,37 @@ export default function ServerStatus() {
       
       if (response.ok) {
         setBackendStatus('running')
-        setRetryCount(0)
+        consecutiveFailures.current = 0
       } else {
-        setBackendStatus('error')
-        setRetryCount(prev => prev + 1)
+        consecutiveFailures.current += 1
+        if (consecutiveFailures.current >= 3) {
+          setBackendStatus('error')
+        }
       }
     } catch (error) {
-      console.error('Backend check failed:', error)
-      setBackendStatus('offline')
-      setRetryCount(prev => prev + 1)
+      consecutiveFailures.current += 1
+      if (consecutiveFailures.current >= 3) {
+        console.error('Backend check failed:', error)
+        setBackendStatus('offline')
+      }
     }
   }
 
   useEffect(() => {
     checkBackend()
     
-    // Retry a few times with delays
-    const timers = []
-    const retries = [1000, 2000, 4000, 6000, 8000]
-    retries.forEach((delay) => {
-      const timer = setTimeout(() => {
-        checkBackend()
-      }, delay)
-      timers.push(timer)
-    })
-    
-    // Periodic check every 10 seconds after initial retries
+    // After initial check, poll every 15 seconds
     const periodicCheck = setInterval(() => {
-      if (backendStatus !== 'running') {
-        checkBackend()
-      }
-    }, 10000)
+      checkBackend()
+    }, 15000)
     
     return () => {
-      timers.forEach(t => clearTimeout(t))
       clearInterval(periodicCheck)
     }
   }, [])
 
-  // Don't show error immediately, give backend time to start
-  if (backendStatus === 'running' || (backendStatus === 'checking' && retryCount < 5)) return null
+  // Don't show until we've confirmed backend is truly down (3 consecutive failures)
+  if (backendStatus === 'running' || backendStatus === 'checking') return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/90">

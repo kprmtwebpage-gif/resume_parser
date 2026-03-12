@@ -10,6 +10,7 @@ const baseNavItems = [
   { label: 'Search', path: '/' },
   { label: 'Jobs', path: '/jobs' },
   { label: 'Upload', path: '/upload' },
+  { label: 'Find a Job', path: '/find-jobs' },
 ]
 
 export default function TopNavbar() {

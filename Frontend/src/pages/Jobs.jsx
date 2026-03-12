@@ -353,7 +353,7 @@ export default function Jobs() {
       // Do NOT manually set Content-Type — axios/browser sets
       // multipart/form-data with the correct boundary automatically.
       if (mode === 'create') {
-        // If a draft was auto-saved, delete it before creating the final record
+        // If a draft was auto-saved, delete it first and wait before creating the final record
         if (payload._draftId) {
           try {
             await api.delete(`/api/job-projects/${payload._draftId}`)
@@ -361,6 +361,7 @@ export default function Jobs() {
             console.warn('Draft cleanup failed (may already be gone):', delErr)
           }
         }
+        // Check guard: only create if we haven't already created for this submit
         await api.post('/api/job-projects', formData)
       } else if (mode === 'edit' && modalJob) {
         await api.put(`/api/job-projects/${modalJob.id}`, formData)
