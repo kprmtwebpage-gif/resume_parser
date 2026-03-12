@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, DocumentArrowDownIcon, TrashIcon, EyeIcon } from '@heroicons/react/24/outline'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import { DocumentArrowDownIcon, TrashIcon, EyeIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
 import { api } from '../services/api'
 import CandidateProfileModal from '../components/CandidateProfileModal'
@@ -15,6 +15,7 @@ export default function AppliedCandidatesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+  const [openDropdown, setOpenDropdown] = useState(null)
 
   const [selectedCandidate, setSelectedCandidate] = useState(null)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
@@ -133,24 +134,23 @@ export default function AppliedCandidatesPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Back button */}
-      <button
-        onClick={() => navigate('/jobs')}
-        className="flex items-center gap-2 text-sm font-medium mb-4 hover:underline"
-        style={{ color: colors.primary || '#3b82f6' }}
-      >
-        <ArrowLeftIcon className="h-4 w-4" />
-        Back to Jobs
-      </button>
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1.5 text-sm mb-5">
+        <Link to="/jobs" className="text-gray-400 hover:text-gray-600 transition-colors">Jobs</Link>
+        <span className="text-gray-300">/</span>
+        <Link to="/jobs" className="text-gray-400 hover:text-gray-600 transition-colors">Posted Jobs</Link>
+        <span className="text-gray-300">/</span>
+        <span className="font-semibold" style={{ color: colors.text }}>Candidate details</span>
+      </nav>
 
       {/* Job Details Card */}
       <div
         className="rounded-xl border p-6 mb-6"
         style={{ backgroundColor: colors.card, borderColor: colors.border }}
       >
-        <h1 className="text-xl font-bold mb-4" style={{ color: colors.text }}>
+        <h2 className="text-lg font-bold mb-4" style={{ color: colors.text }}>
           Candidate Details
-        </h1>
+        </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
             <span className="font-medium" style={{ color: colors.textSecondary }}>Title</span>
@@ -188,7 +188,11 @@ export default function AppliedCandidatesPage() {
         {job?.job_description && (
           <div className="mt-4">
             <span className="font-medium text-sm" style={{ color: colors.textSecondary }}>Description</span>
-            <p className="mt-1 text-sm whitespace-pre-line" style={{ color: colors.text }}>{job.job_description}</p>
+            <div
+              className="mt-1 text-sm prose prose-sm max-w-none"
+              style={{ color: colors.text }}
+              dangerouslySetInnerHTML={{ __html: job.job_description }}
+            />
           </div>
         )}
       </div>
@@ -251,31 +255,46 @@ export default function AppliedCandidatesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="relative inline-block">
                           <button
-                            onClick={() => handleViewProfile(app)}
-                            className="p-1.5 rounded hover:bg-blue-50 text-blue-600 transition-colors"
-                            title="View Profile"
+                            onClick={() => setOpenDropdown(openDropdown === appId ? null : appId)}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors"
+                            style={{ borderColor: colors.border, color: colors.text }}
                           >
-                            <EyeIcon className="h-4 w-4" />
+                            Actions
+                            <ChevronDownIcon className="h-3.5 w-3.5" />
                           </button>
-                          {(app.resume_file || app.resume_url) && (
-                            <button
-                              onClick={() => handleDownloadResume(app)}
-                              className="p-1.5 rounded hover:bg-green-50 text-green-600 transition-colors"
-                              title="Download Resume"
+                          {openDropdown === appId && (
+                            <div
+                              className="absolute right-0 mt-1 w-40 rounded-lg shadow-lg border z-20"
+                              style={{ backgroundColor: colors.card, borderColor: colors.border }}
                             >
-                              <DocumentArrowDownIcon className="h-4 w-4" />
-                            </button>
+                              <button
+                                onClick={() => { handleViewProfile(app); setOpenDropdown(null) }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-blue-50 text-left transition-colors"
+                              >
+                                <EyeIcon className="h-3.5 w-3.5 text-blue-600" />
+                                View Profile
+                              </button>
+                              {(app.resume_file || app.resume_url) && (
+                                <button
+                                  onClick={() => { handleDownloadResume(app); setOpenDropdown(null) }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-green-50 text-left transition-colors"
+                                >
+                                  <DocumentArrowDownIcon className="h-3.5 w-3.5 text-green-600" />
+                                  Download Resume
+                                </button>
+                              )}
+                              <button
+                                onClick={() => { handleDeleteApplication(app); setOpenDropdown(null) }}
+                                disabled={isDeleting}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-red-50 text-left text-red-600 transition-colors disabled:opacity-50"
+                              >
+                                <TrashIcon className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            </div>
                           )}
-                          <button
-                            onClick={() => handleDeleteApplication(app)}
-                            disabled={isDeleting}
-                            className="p-1.5 rounded hover:bg-red-50 text-red-600 transition-colors disabled:opacity-50"
-                            title="Delete Application"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
                         </div>
                       </td>
                     </tr>

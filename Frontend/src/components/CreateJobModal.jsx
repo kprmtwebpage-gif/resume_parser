@@ -817,7 +817,12 @@ export default function CreateJobModal({
             <div className="cjm-top-logo">
               {logoPreview ? (
                 <div className="cjm-logo-preview-wrapper">
-                  <img src={logoPreview} alt="Logo preview" className="cjm-logo-preview" />
+                  <img
+                    src={logoPreview}
+                    alt=""
+                    className="cjm-logo-preview"
+                    onError={(e) => { e.target.style.display = 'none' }}
+                  />
                   {!isReview && (
                     <button type="button" className="cjm-logo-remove" onClick={removeLogo}>
                       <XMarkIcon className="w-4 h-4" />
