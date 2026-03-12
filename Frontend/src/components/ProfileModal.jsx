@@ -4,11 +4,11 @@ import mammoth from 'mammoth'
 
 import ProfileTabs from './ProfileTabs.jsx'
 import PdfScrollViewer from './PdfScrollViewer.jsx'
+import CommentsTimeline from './CommentsTimeline.jsx'
 import { notifyModalOpened, notifyModalClosed, onChatbotOpened } from '../chatbot/modalEvents.js'
 import { useTheme } from '../contexts/ThemeContext'
 import { api } from '../services/api'
 import { apiUrl } from '../config'
-import './CommentModal.css'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -486,30 +486,7 @@ export default function ProfileModal({
                           <div className="mt-4">
                             <div className="rounded-lg bg-white p-6 border border-neutral-200">
                               <h3 className="text-lg font-semibold text-neutral-900 mb-5">Comments</h3>
-                              {commentsLoading ? (
-                                <div className="text-sm text-neutral-500 py-6 text-center">Loading comments…</div>
-                              ) : comments.length === 0 ? (
-                                <div className="text-sm text-neutral-500 py-6 text-center">No comments yet</div>
-                              ) : (
-                                <div className="comments-timeline" style={{ maxHeight: '420px', overflowY: 'auto' }}>
-                                  {comments.map((c) => {
-                                    const d = new Date(c.created_at)
-                                    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-                                    const dateStr = `${monthNames[d.getMonth()]} ${d.getFullYear()}`
-                                    const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-                                    return (
-                                      <div key={c.id} className="comments-timeline-item">
-                                        <div className="comments-timeline-dot" />
-                                        <div className="comments-timeline-text">{c.comment_text}</div>
-                                        <div className="comments-timeline-meta">
-                                          <span>{dateStr}</span>
-                                          <span>{timeStr}</span>
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              )}
+                              <CommentsTimeline comments={comments} loading={commentsLoading} />
                             </div>
                           </div>
                         )}

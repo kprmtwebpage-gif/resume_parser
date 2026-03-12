@@ -206,7 +206,7 @@ async def apply_for_job_api(
 
         resume_url = None
         resume_filename = None
-        upload_dir = _Path("uploads/applications")
+        upload_dir = _Path(__file__).resolve().parent / "uploads" / "applications"
         upload_dir.mkdir(parents=True, exist_ok=True)
         if resume and resume.filename:
             file_ext = _Path(resume.filename).suffix or ".pdf"
@@ -244,9 +244,9 @@ async def apply_for_job_api(
 
 # ── Static file serving for uploads ────────────────────────────
 from pathlib import Path as _UploadPath
-_UPLOAD_DIR = _UploadPath("uploads")
+_UPLOAD_DIR = _UploadPath(__file__).resolve().parent / "uploads"
 _UPLOAD_DIR.mkdir(exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=str(_UPLOAD_DIR)), name="uploads")
 
 @app.post("/upload")
 async def upload_editor_image(image: UploadFile = File(...)):
@@ -259,7 +259,7 @@ async def upload_editor_image(image: UploadFile = File(...)):
     if suffix not in allowed:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
-    editor_dir = _EdPath("uploads/editor")
+    editor_dir = _EdPath(__file__).resolve().parent / "uploads" / "editor"
     editor_dir.mkdir(parents=True, exist_ok=True)
 
     unique_name = f"{uuid.uuid4()}{suffix}"

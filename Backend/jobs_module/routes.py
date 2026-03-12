@@ -52,12 +52,15 @@ from .schemas import (
     JobExport
 )
 
+# Absolute base path (Backend directory) — avoids CWD-dependent resolution
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+
 # Ensure uploads directory exists
-UPLOAD_DIR = Path("uploads/jobs")
+UPLOAD_DIR = _BACKEND_DIR / "uploads" / "jobs"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Upload directory for resumes
-RESUME_UPLOAD_DIR = Path("uploads/applications")
+RESUME_UPLOAD_DIR = _BACKEND_DIR / "uploads" / "applications"
 RESUME_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter(prefix="/api/job-projects", tags=["Job Projects"])
@@ -1328,6 +1331,11 @@ async def create_job_application(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="email is required")
     if not candidate_phone.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="phone is required")
+    # Phone must be digits only, 10-15 characters
+    import re as _re
+    _phone_digits = _re.sub(r'\D', '', candidate_phone.strip())
+    if not _phone_digits or len(_phone_digits) < 10 or len(_phone_digits) > 15:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid phone number. Must contain 10-15 digits.")
 
     # Prevent duplicate applications (same email + same job)
     existing = db.query(JobApplication).filter(

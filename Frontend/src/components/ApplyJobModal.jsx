@@ -51,6 +51,12 @@ export default function ApplyJobModal({ job, onClose }) {
   // Handle input change
   const handleInputChange = (e) => {
     const { name, value } = e.target
+    if (name === 'phone') {
+      // Allow only digits
+      const digitsOnly = value.replace(/\D/g, '')
+      setFormData(prev => ({ ...prev, phone: digitsOnly }))
+      return
+    }
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
@@ -125,6 +131,7 @@ export default function ApplyJobModal({ job, onClose }) {
     if (!formData.email.trim()) return 'Email is required'
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) return 'Invalid email format'
     if (!formData.phone.trim()) return 'Phone number is required'
+    if (formData.phone.length < 10 || formData.phone.length > 15) return 'Phone number must be 10-15 digits'
     if (!resumeFile) return 'Please upload your resume'
     if (captchaInput.toLowerCase() !== captchaCode.toLowerCase()) return 'Invalid captcha code'
     return null
@@ -281,15 +288,23 @@ export default function ApplyJobModal({ job, onClose }) {
             />
             
             {/* Phone */}
-            <input
-              type="tel"
-              name="phone"
-              placeholder="Phone"
-              value={formData.phone}
-              onChange={handleInputChange}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            />
+            <div>
+              <input
+                type="tel"
+                name="phone"
+                placeholder="Phone (digits only)"
+                value={formData.phone}
+                onChange={handleInputChange}
+                maxLength={15}
+                inputMode="numeric"
+                pattern="[0-9]{10,15}"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+              {formData.phone && (formData.phone.length < 10 || formData.phone.length > 15) && (
+                <p className="text-xs text-red-500 mt-1">Phone number must be 10–15 digits.</p>
+              )}
+            </div>
             
             {/* Email */}
             <input
