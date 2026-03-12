@@ -403,6 +403,7 @@ async def submit_application(
         qualification=qualification,
         work_authorization=work_authorization,
         tech_experience=tech_experience,
+        domain_expert=domain_expert,
         # New canonical fields
         education=qualification,
         citizenship=work_authorization,

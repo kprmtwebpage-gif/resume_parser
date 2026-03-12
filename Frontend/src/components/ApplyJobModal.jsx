@@ -153,6 +153,8 @@ export default function ApplyJobModal({ job, onClose }) {
       submitData.append('education', formData.qualification || '')
       submitData.append('citizenship', formData.workAuthorization || '')
       submitData.append('experience', formData.techExperience || '0')
+      submitData.append('tech_experience', formData.techExperience || '')
+      submitData.append('domain_expert', formData.domainExpert || '')
       submitData.append('linkedin_url', formData.linkedInUrl || '')
       
       if (resumeFile) {

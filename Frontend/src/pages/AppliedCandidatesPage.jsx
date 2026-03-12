@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon, ArrowDownTrayIcon, EyeIcon, ChatBubbleLeftEllipsisIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
 import { api } from '../services/api'
+import CommentModal from '../components/CommentModal'
 
 export default function AppliedCandidatesPage() {
   const { jobId } = useParams()
@@ -15,7 +16,11 @@ export default function AppliedCandidatesPage() {
   const [error, setError] = useState(null)
 
   const [jobDetailOpen, setJobDetailOpen] = useState(false)
-  const [candidateListOpen, setCandidateListOpen] = useState(false)
+  const [candidateListOpen, setCandidateListOpen] = useState(true)
+
+  // Comment modal state
+  const [commentModalOpen, setCommentModalOpen] = useState(false)
+  const [commentCandidate, setCommentCandidate] = useState({ id: null, name: '' })
 
   useEffect(() => {
     if (jobId) {
@@ -263,6 +268,7 @@ export default function AppliedCandidatesPage() {
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Tech Experience</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Domain Expert</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Resume</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Actions</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Submitted On</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Created On</th>
                     </tr>
@@ -302,10 +308,27 @@ export default function AppliedCandidatesPage() {
                           <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.domain_expert || '—'}</td>
                           <td className="px-4 py-3 border" style={{ borderColor: colors.border }}>
                             {app.resume_url ? (
-                              <a href={`${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`} target="_blank" rel="noopener noreferrer" title={app.resume_filename || 'Download Resume'}>
-                                <ArrowDownTrayIcon className="h-5 w-5 text-blue-600 hover:text-blue-800" />
-                              </a>
+                              <div className="flex items-center gap-2">
+                                <a href={`${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`} target="_blank" rel="noopener noreferrer" title="View Resume">
+                                  <EyeIcon className="h-5 w-5 text-green-600 hover:text-green-800 cursor-pointer" />
+                                </a>
+                                <a href={`${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`} download={app.resume_filename || 'resume'} title={app.resume_filename || 'Download Resume'}>
+                                  <ArrowDownTrayIcon className="h-5 w-5 text-blue-600 hover:text-blue-800 cursor-pointer" />
+                                </a>
+                              </div>
                             ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 border" style={{ borderColor: colors.border }}>
+                            <button
+                              onClick={() => {
+                                setCommentCandidate({ id: appId, name: `${app.first_name || ''} ${app.last_name || ''}`.trim() || app.candidate_name || 'Candidate' })
+                                setCommentModalOpen(true)
+                              }}
+                              title="Add Comment"
+                              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                            >
+                              <ChatBubbleLeftEllipsisIcon className="h-5 w-5 text-indigo-600 hover:text-indigo-800" />
+                            </button>
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap border" style={{ color: colors.text, borderColor: colors.border }}>{app.submitted_at ? new Date(app.submitted_at).toLocaleString() : '—'}</td>
                           <td className="px-4 py-3 whitespace-nowrap border" style={{ color: colors.text, borderColor: colors.border }}>{job?.created_at ? new Date(job.created_at).toLocaleString() : '—'}</td>
@@ -319,6 +342,14 @@ export default function AppliedCandidatesPage() {
           </div>
         )}
       </div>
+
+      {/* Comment Modal */}
+      <CommentModal
+        isOpen={commentModalOpen}
+        onClose={() => setCommentModalOpen(false)}
+        candidateId={commentCandidate.id}
+        candidateName={commentCandidate.name}
+      />
     </div>
   )
 }

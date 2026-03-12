@@ -144,6 +144,7 @@ class JobApplication(Base):
     qualification = Column(Text, nullable=True)
     work_authorization = Column(String(100), nullable=True)
     tech_experience = Column(Text, nullable=True)
+    domain_expert = Column(Text, nullable=True)
 
     # Extended candidate fields
     first_name = Column(String(255), nullable=True)

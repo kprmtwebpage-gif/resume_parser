@@ -1229,6 +1229,7 @@ def _app_to_dict(app: JobApplication) -> dict:
         "experience": experience,
         "linkedin_url": app.linkedin_url or "",
         "tech_experience": app.tech_experience or "",
+        "domain_expert": app.domain_expert or "",
         "resume_file": app.resume_url or "",
         "resume_url": app.resume_url or "",
         "resume_filename": app.resume_filename or "",
@@ -1304,6 +1305,8 @@ async def create_job_application(
     citizenship: Optional[str] = Form(None),
     experience: Optional[str] = Form(None),
     linkedin_url: Optional[str] = Form(None),
+    tech_experience: Optional[str] = Form(None),
+    domain_expert: Optional[str] = Form(None),
     resume: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
 ):
@@ -1372,6 +1375,8 @@ async def create_job_application(
         citizenship=citizenship,
         experience=exp_int,
         linkedin_url=linkedin_url,
+        tech_experience=tech_experience,
+        domain_expert=domain_expert,
         resume_url=resume_url,
         resume_filename=resume_filename,
     )

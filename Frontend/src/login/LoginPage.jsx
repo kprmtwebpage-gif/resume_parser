@@ -199,7 +199,7 @@ export default function LoginPage({ onLoginSuccess }) {
             {forgotStep === 'username' && (
               <>
                 <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-                  Enter your username. If you are an admin, an OTP will be sent to your email. Regular users will receive assistance from the admin.
+                  Enter your username. If you are a superuser, an OTP will be sent to your email. Regular users will receive assistance from the superuser.
                 </p>
                 <input
                   type="text"
@@ -234,9 +234,12 @@ export default function LoginPage({ onLoginSuccess }) {
                           body: JSON.stringify({ username: forgotUser.trim() }),
                         })
                         const data = await res.json()
-                        setForgotMsg(data.detail || '')
                         if (data.otp_sent) {
+                          setForgotMsg(data.detail || 'OTP sent to your email.')
                           setForgotStep('otp')
+                        } else {
+                          setForgotMsg(data.detail || 'Your password reset request has been sent to the superuser. Please contact them for assistance.')
+                          setForgotStep('done')
                         }
                       } catch {
                         setForgotMsg('Failed to submit request. Please try again.')
@@ -250,7 +253,7 @@ export default function LoginPage({ onLoginSuccess }) {
                       fontSize: '14px', fontWeight: 600, cursor: forgotLoading ? 'not-allowed' : 'pointer',
                       color: '#fff',
                     }}
-                  >{forgotLoading ? 'Sending...' : 'Send OTP'}</button>
+                  >{forgotLoading ? 'Sending...' : 'Submit'}</button>
                 </div>
               </>
             )}
