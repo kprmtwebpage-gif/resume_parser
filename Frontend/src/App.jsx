@@ -8,6 +8,7 @@ import SearchPeople from './pages/SearchPeople.jsx'
 import Jobs from './pages/Jobs.jsx'
 import Upload from './pages/Upload.jsx'
 import FindJobs from './pages/FindJobs.jsx'
+import AppliedCandidatesPage from './pages/AppliedCandidatesPage.jsx'
 import AdminDashboard from './pages/AdminDashboard.jsx'
 import AdminResumes from './pages/AdminResumes.jsx'
 import AdminLayout from './pages/admin/AdminLayout.jsx'
@@ -56,6 +57,7 @@ function AppContent() {
         <Route path="/jobs" element={<DashboardLayout><Jobs /></DashboardLayout>} />
         <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
         <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
+        <Route path="/jobs/:jobId/applied" element={<DashboardLayout><AppliedCandidatesPage /></DashboardLayout>} />
         {/* Admin routes — protected by role check */}
         <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
           <Route index element={<DashboardOverview />} />

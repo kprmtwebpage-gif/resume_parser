@@ -4,7 +4,6 @@ import { ChevronDownIcon, ChevronUpIcon, XMarkIcon, ArchiveBoxIcon, ArrowPathIco
 import { api } from '../services/api'
 import CreateJobModal from '../components/CreateJobModal'
 import JobCard from '../components/JobCard'
-import AppliedCandidatesModal from '../components/AppliedCandidatesModal'
 import FloatingInput from '../components/FloatingInput'
 import TagInput from '../components/TagInput'
 import '../components/FloatingInput.css'
@@ -130,10 +129,6 @@ export default function Jobs() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState('create')   // 'create' | 'edit' | 'review'
   const [modalJob, setModalJob] = useState(null)          // job being edited / reviewed
-
-  /* ── Applied Candidates Modal state ── */
-  const [isAppliedModalOpen, setIsAppliedModalOpen] = useState(false)
-  const [appliedModalJob, setAppliedModalJob] = useState(null)
 
   const [filters, setFilters] = useState({
     title: '',
@@ -570,17 +565,9 @@ export default function Jobs() {
     }
   }
 
-  /* ── Applied candidates handler (opens modal) ── */
+  /* ── Applied candidates handler (navigates to page) ── */
   const handleAppliedClick = (job) => {
-    setAppliedModalJob(job)
-    setIsAppliedModalOpen(true)
-  }
-
-  const closeAppliedModal = () => {
-    setIsAppliedModalOpen(false)
-    setAppliedModalJob(null)
-    // Refresh job list to update applied count after modal closes
-    fetchJobs()
+    navigate(`/jobs/${job.id}/applied`)
   }
 
   const closeModal = () => {
@@ -1103,13 +1090,6 @@ export default function Jobs() {
         onSave={handleSaveJob}
         onDelete={handleArchiveJob}
         onDuplicate={handleDuplicateJob}
-      />
-
-      {/* Applied Candidates Modal */}
-      <AppliedCandidatesModal
-        isOpen={isAppliedModalOpen}
-        onClose={closeAppliedModal}
-        job={appliedModalJob}
       />
     </div>
   )
