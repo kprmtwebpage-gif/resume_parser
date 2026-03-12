@@ -43,7 +43,7 @@ export default function ResultsList({ rows, downloadedIds, onOpen, onDownload, o
             downloaded={downloadedIds.has(row.id)}
             checked={selectedIds.has(row.id)}
             onToggle={() => onToggleSelect(row.id)}
-            onOpen={() => onOpen(row.id)}
+            onOpen={(tab) => onOpen(row.id, tab)}
             onDownload={() => onDownload(row.id)}
             onEdit={() => onEdit(row.id)}
           />

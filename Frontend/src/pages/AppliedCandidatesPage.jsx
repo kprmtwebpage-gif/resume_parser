@@ -61,8 +61,8 @@ export default function AppliedCandidatesPage() {
       app.tech_experience || '',
       app.domain_expert || '',
       app.resume_filename || '',
-      app.submitted_at ? new Date(app.submitted_at).toLocaleDateString() : '',
-      app.created_at ? new Date(app.created_at).toLocaleDateString() : ''
+      app.submitted_at ? new Date(app.submitted_at).toLocaleString() : '',
+      job?.created_at ? new Date(job.created_at).toLocaleString() : ''
     ])
     const csvContent = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -248,23 +248,23 @@ export default function AppliedCandidatesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto px-6 pb-6">
-                <table className="w-full text-sm border" style={{ borderColor: colors.border }}>
+                <table className="w-full text-sm border-collapse" style={{ borderColor: colors.border, minWidth: '1400px' }}>
                   <thead>
                     <tr style={{ backgroundColor: isDark ? '#1e293b' : '#f1f5f9' }}>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>S.No</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>First Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Last Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Address</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Phone</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Email</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Qualification</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Work Authorization Type</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>LinkedIn</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Tech Experience</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Domain Expert</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Resume</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Submitted On</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-b" style={{ color: colors.textSecondary, borderColor: colors.border }}>Created On</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>S.No</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>First Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Last Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Address</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Phone</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Email</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Qualification</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Work Authorization Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>LinkedIn</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Tech Experience</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Domain Expert</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Resume</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Submitted On</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border" style={{ color: colors.textSecondary, borderColor: colors.border }}>Created On</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -281,30 +281,34 @@ export default function AppliedCandidatesPage() {
                               : (isDark ? '#1e293b' : '#f9fafb')
                           }}
                         >
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{idx + 1}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.first_name || '—'}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.last_name || '—'}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.address || '—'}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.phone || app.candidate_phone || '—'}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.email || app.candidate_email || '—'}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.education || '—'}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.citizenship || '—'}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{idx + 1}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.first_name || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.last_name || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.address || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.phone || app.candidate_phone || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.email || app.candidate_email || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.education || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.citizenship || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ borderColor: colors.border }}>
                             {app.linkedin_url ? (
-                              <a href={app.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline text-xs">View</a>
+                              <a href={app.linkedin_url} target="_blank" rel="noopener noreferrer" title="View LinkedIn Profile">
+                                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="#0A66C2">
+                                  <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                                </svg>
+                              </a>
                             ) : '—'}
                           </td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.tech_experience || '—'}</td>
-                          <td className="px-4 py-3" style={{ color: colors.text }}>{app.domain_expert || '—'}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.tech_experience || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ color: colors.text, borderColor: colors.border }}>{app.domain_expert || '—'}</td>
+                          <td className="px-4 py-3 border" style={{ borderColor: colors.border }}>
                             {app.resume_url ? (
                               <a href={`${import.meta.env.VITE_API_BASE_URL || ''}${app.resume_url}`} target="_blank" rel="noopener noreferrer" title={app.resume_filename || 'Download Resume'}>
                                 <ArrowDownTrayIcon className="h-5 w-5 text-blue-600 hover:text-blue-800" />
                               </a>
                             ) : '—'}
                           </td>
-                          <td className="px-4 py-3 whitespace-nowrap" style={{ color: colors.text }}>{app.submitted_at ? new Date(app.submitted_at).toLocaleDateString() : '—'}</td>
-                          <td className="px-4 py-3 whitespace-nowrap" style={{ color: colors.text }}>{app.created_at ? new Date(app.created_at).toLocaleDateString() : '—'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap border" style={{ color: colors.text, borderColor: colors.border }}>{app.submitted_at ? new Date(app.submitted_at).toLocaleString() : '—'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap border" style={{ color: colors.text, borderColor: colors.border }}>{job?.created_at ? new Date(job.created_at).toLocaleString() : '—'}</td>
                         </tr>
                       )
                     })}

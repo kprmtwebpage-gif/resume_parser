@@ -352,12 +352,12 @@ export default function SearchPeople() {
 
   const openProfileRef = useRef(0)
 
-  const openProfile = async (id) => {
+  const openProfile = async (id, tab) => {
     const requestId = ++openProfileRef.current
     setModalOpen(true)
     setActiveId(id)
     setActiveCandidate(null)
-    setActiveTab('skills')
+    setActiveTab(tab || 'skills')
 
     try {
       const data = await fetchCandidateById(id)

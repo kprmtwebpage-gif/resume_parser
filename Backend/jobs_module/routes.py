@@ -1233,7 +1233,7 @@ def _app_to_dict(app: JobApplication) -> dict:
         "resume_url": app.resume_url or "",
         "resume_filename": app.resume_filename or "",
         "application_status": app_status,
-        "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
+        "submitted_at": (app.submitted_at or app.applied_at).isoformat() if (app.submitted_at or app.applied_at) else None,
         "applied_at": applied_ts.isoformat() if applied_ts else None,
         "created_at": app.applied_at.isoformat() if app.applied_at else None,
         "updated_at": app.updated_at.isoformat() if app.updated_at else None,

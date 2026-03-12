@@ -449,7 +449,7 @@ Availability: ${row.availability || 'N/A'}`
         isOpen={isCommentModalOpen}
         onClose={(saved) => {
           setIsCommentModalOpen(false)
-          if (saved) alert('Comment saved successfully.')
+          if (saved) onOpen('comments')
         }}
         candidateId={row.id}
         candidateName={fullName}
