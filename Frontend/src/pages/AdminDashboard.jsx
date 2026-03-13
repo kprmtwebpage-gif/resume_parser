@@ -513,12 +513,14 @@ export default function AdminDashboard() {
                     >
                       Reset Pwd
                     </button>
-                    <button
-                      onClick={() => setDeleteTarget(u)}
-                      className="text-xs px-3 py-1 rounded-lg border border-red-700 text-red-500 hover:bg-red-900/40 transition"
-                    >
-                      Delete
-                    </button>
+                    {!(u.role === 'superuser' && users.filter(x => x.role === 'superuser').length <= 1) && (
+                      <button
+                        onClick={() => setDeleteTarget(u)}
+                        className="text-xs px-3 py-1 rounded-lg border border-red-700 text-red-500 hover:bg-red-900/40 transition"
+                      >
+                        Delete
+                      </button>
+                    )}
                     </div>
                   </td>
                   <td className="px-4 py-3">

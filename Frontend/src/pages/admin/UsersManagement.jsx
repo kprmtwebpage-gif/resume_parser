@@ -442,10 +442,12 @@ export default function UsersManagement() {
                           className="rounded-md px-2 py-1 text-[11px] font-medium text-amber-600 hover:bg-amber-50 transition">
                           Reset Pwd
                         </button>
-                        <button onClick={() => setDeleteTarget(u)}
-                          className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 transition">
-                          Delete
-                        </button>
+                        {!(u.role === 'superuser' && users.filter(x => x.role === 'superuser').length <= 1) && (
+                          <button onClick={() => setDeleteTarget(u)}
+                            className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 transition">
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
