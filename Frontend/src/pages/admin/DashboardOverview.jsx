@@ -160,7 +160,7 @@ function UserDetailDrawer({ user, onClose }) {
             {[
               { label: 'Last Login',      value: timeAgo(user.last_login) },
               { label: 'Total Sessions',  value: user.total_sessions ?? '—' },
-              { label: 'Role',            value: (user.role || 'user').replace(/_/g, ' '), badge: true },
+              { label: 'Role',            value: (user.role || 'user').replace(/_/g, ' ').replace('superuser', 'super user'), badge: true },
             ].map((row, i) => (
               <div key={i} className="flex items-center justify-between px-4 py-3 text-[12px]"
                 style={{ borderBottom: i < 2 ? `1px solid ${COLORS.border}` : 'none', backgroundColor: i % 2 === 0 ? 'var(--dash-row-alt)' : 'var(--dash-row-base)' }}>

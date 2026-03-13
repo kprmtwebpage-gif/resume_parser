@@ -26,7 +26,7 @@ function RoleBadge({ role }) {
       : 'bg-gray-100 text-gray-600'
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cls}`}>
-      {role.replace(/_/g, ' ')}
+      {role.replace(/_/g, ' ').replace('superuser', 'super user')}
     </span>
   )
 }
@@ -91,7 +91,7 @@ function CreateUserModal({ onClose, onCreated, getAuthHeaders }) {
           <select className={inp} value={form.role} onChange={e => setForm(f=>({...f, role: e.target.value}))}>
             <option value="user">user</option>
             <option value="upload_user">upload user</option>
-            <option value="superuser">superuser</option>
+            <option value="superuser">super user</option>
           </select>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-gray-200 py-2.5 text-[13px] font-medium text-gray-600 hover:bg-gray-50 transition">Cancel</button>

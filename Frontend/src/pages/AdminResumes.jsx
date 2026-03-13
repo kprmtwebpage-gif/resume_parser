@@ -106,7 +106,7 @@ export default function AdminResumes() {
                   <td className="px-5 py-3.5">
                     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
                       u.role === 'admin' ? 'bg-violet-50 text-violet-700' : 'bg-gray-100 text-gray-600'
-                    }`}>{u.role.replace(/_/g, ' ')}</span>
+                    }`}>{u.role.replace(/_/g, ' ').replace('superuser', 'super user')}</span>
                   </td>
                   <td className="px-5 py-3.5">
                     <span className="inline-flex items-center justify-center rounded-full bg-emerald-50 text-emerald-700 px-3 py-0.5 text-[13px] font-semibold tabular-nums">

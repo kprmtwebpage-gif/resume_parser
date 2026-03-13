@@ -261,7 +261,7 @@ export function StatusBadge({ value, variant }) {
   const { bg, color } = presets[v] || { bg: '#EFF6FF', color: COLORS.primary }
   return (
     <span
-      className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize"
+      className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
       style={{ backgroundColor: bg, color }}
     >
       {value}
