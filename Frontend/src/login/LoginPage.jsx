@@ -88,9 +88,10 @@ export default function LoginPage({ onLoginSuccess }) {
                   type="text"
                   placeholder="Enter admin username"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
                   disabled={isLoading}
                   className="admin-form-input"
+                  style={{ textTransform: 'lowercase' }}
                   autoFocus
                 />
               </div>

@@ -82,7 +82,7 @@ function CreateUserModal({ onClose, onCreated, getAuthHeaders }) {
         <p className="text-[12px] font-medium text-gray-500 mb-4">Fill in the details to add a new user</p>
         {err && <p className="mb-3 text-[12px] text-red-500 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
         <form onSubmit={submit} className="space-y-3">
-          <input required className={inp} placeholder="Username" value={form.username} onChange={e => setForm(f=>({...f, username: e.target.value}))} />
+          <input required className={inp} placeholder="Username" value={form.username} onChange={e => setForm(f=>({...f, username: e.target.value.toLowerCase()}))} style={{ textTransform: 'lowercase' }} />
           <input className={inp} placeholder="Email (optional)" value={form.email} onChange={e => setForm(f=>({...f, email: e.target.value}))} type="email" />
           <div className="relative">
             <input required className={inp + ' pr-10'} placeholder="Password (min 6)" value={form.password} onChange={e => setForm(f=>({...f, password: e.target.value}))} type={form.showPwd ? 'text' : 'password'} minLength={6} />

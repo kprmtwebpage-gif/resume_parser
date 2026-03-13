@@ -67,7 +67,7 @@ export default function AdminLogin() {
             <input
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => setUsername(e.target.value.toLowerCase())}
               autoFocus
               autoComplete="username"
               style={{
@@ -78,6 +78,7 @@ export default function AdminLogin() {
                 borderRadius: '8px',
                 color: '#f1f5f9',
                 fontSize: '14px',
+                textTransform: 'lowercase',
                 outline: 'none',
                 boxSizing: 'border-box',
               }}

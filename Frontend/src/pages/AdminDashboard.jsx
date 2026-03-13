@@ -73,7 +73,7 @@ function CreateUserModal({ onClose, onCreated, getAuthHeaders }) {
         <h2 className="text-lg font-semibold text-white mb-4">New User</h2>
         {err && <p className="mb-3 text-sm text-red-400">{err}</p>}
         <form onSubmit={submit} className="space-y-3">
-          <input required className={inp} placeholder="Username"  value={form.username} onChange={e => setForm(f=>({...f, username: e.target.value}))} />
+          <input required className={inp} placeholder="Username"  value={form.username} onChange={e => setForm(f=>({...f, username: e.target.value.toLowerCase()}))} style={{ textTransform: 'lowercase' }} />
           <input required className={inp} placeholder="Email"     value={form.email}    onChange={e => setForm(f=>({...f, email:    e.target.value}))} type="email" />
           <input required className={inp} placeholder="Password"  value={form.password} onChange={e => setForm(f=>({...f, password: e.target.value}))} type="password" minLength={6} />
           <select className={inp} value={form.role} onChange={e => setForm(f=>({...f, role: e.target.value}))}>
