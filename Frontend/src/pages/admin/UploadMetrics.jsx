@@ -83,7 +83,7 @@ export default function UploadMetrics() {
 
   /* KPIs for selected period + users */
   const kpis = useMemo(() => {
-    const totalUploads = chartData.reduce((sum, row) => {
+    const totalUploads = data.total_resumes ?? chartData.reduce((sum, row) => {
       return sum + selectedUsers.reduce((s, name) => s + (row[name] || 0), 0)
     }, 0)
     const avgPerPeriod = chartData.length > 0 ? Math.round(totalUploads / chartData.length) : 0
@@ -97,7 +97,7 @@ export default function UploadMetrics() {
     }).length
 
     return { totalUploads, avgPerPeriod, peakUploads: peakRow.val, peakDate: peakRow.date, activeUsers }
-  }, [chartData, selectedUsers])
+  }, [data, chartData, selectedUsers])
 
   /* filtered user summaries */
   const filteredSummaries = useMemo(() => {

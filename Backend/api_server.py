@@ -2337,6 +2337,10 @@ async def admin_upload_metrics(request: Request):
             user_map = {r["id"]: r["username"] for r in users_rows}
             user_ids = list(user_map.keys())
 
+            # Grand total of all resumes in DB (consistent with dashboard-stats)
+            cursor.execute(f"SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE}")
+            total_resumes = cursor.fetchone()["total"]
+
             # Get daily upload counts per user for last 90 days
             cursor.execute("""
                 SELECT DATE(parsed_at) as day, uploaded_by, COUNT(*) as cnt
@@ -2453,6 +2457,7 @@ async def admin_upload_metrics(request: Request):
                 "monthlyData": monthly_data,
                 "yearlyData": yearly_data,
                 "userSummaries": user_summaries,
+                "total_resumes": total_resumes,
             }
 
 
