@@ -74,6 +74,7 @@ export async function uploadResume(file, onProgress) {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+    timeout: 180000,
     onUploadProgress: (progressEvent) => {
       if (onProgress && progressEvent.total) {
         const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
