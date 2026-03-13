@@ -117,7 +117,7 @@ export default function UserPerformanceTable({ users = [] }) {
                           </span>
                           <span className={`ml-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                             u.role === 'admin' ? 'bg-violet-50 text-violet-700' : 'bg-gray-100 text-gray-500'
-                          }`}>{u.role}</span>
+                          }`}>{u.role.replace(/_/g, ' ')}</span>
                         </div>
                       </div>
                     </div>

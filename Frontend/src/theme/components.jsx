@@ -149,7 +149,7 @@ export function ChartTooltip({ active, payload, label }) {
   return (
     <div
       className="rounded-lg px-3 py-2 shadow-xl border-0"
-      style={{ backgroundColor: COLORS.text }}
+      style={{ backgroundColor: COLORS.tooltipBg }}
     >
       <p className="text-[10px] text-gray-400 mb-1">{label}</p>
       {payload.map((p, i) => (
@@ -176,7 +176,7 @@ export function MultiSeriesChartTooltip({ active, payload }) {
   return (
     <div
       className="rounded-lg px-4 py-3 shadow-xl border-0 min-w-[180px]"
-      style={{ backgroundColor: COLORS.text }}
+      style={{ backgroundColor: COLORS.tooltipBg }}
     >
       <p className="text-[10px] text-gray-400 mb-2 font-medium">{payload[0]?.payload?.date || ''}</p>
       {payload.map((p, i) => (

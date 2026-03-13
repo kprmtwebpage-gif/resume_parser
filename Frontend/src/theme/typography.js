@@ -41,7 +41,7 @@ export const tableHeaderClasses = 'text-[11px] font-medium tracking-wide upperca
  * Inline style for all KPI-style labels.
  * @param {string} [color='#4B5563']  text color
  */
-export function labelStyle(color = '#4B5563') {
+export function labelStyle(color = 'var(--dash-secondary, #4B5563)') {
   return {
     fontSize: '11px',
     fontWeight: 500,
@@ -55,7 +55,7 @@ export function labelStyle(color = '#4B5563') {
  * Inline style for section headings.
  * @param {string} [color='#111827']  text color
  */
-export function headingStyle(color = '#111827') {
+export function headingStyle(color = 'var(--dash-text, #111827)') {
   return {
     fontFamily: FONT_FAMILY,
     fontWeight: 800,
@@ -68,7 +68,7 @@ export function headingStyle(color = '#111827') {
  * Inline style for large KPI values.
  * @param {string} [color='#111827']  text color
  */
-export function valueStyle(color = '#111827') {
+export function valueStyle(color = 'var(--dash-text, #111827)') {
   return {
     fontFamily: FONT_FAMILY,
     fontSize: '28px',
@@ -82,7 +82,7 @@ export function valueStyle(color = '#111827') {
  * Inline style for secondary / supporting text.
  * @param {string} [color='#4B5563']  text color
  */
-export function subtextStyle(color = '#4B5563') {
+export function subtextStyle(color = 'var(--dash-secondary, #4B5563)') {
   return {
     fontSize: '12px',
     fontWeight: 500,

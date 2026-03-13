@@ -16,9 +16,10 @@ const COLORS = {
   teal: '#10B981',
   amber: '#F59E0B',
   indigo: '#6366F1',
-  text: '#111827',
-  secondary: '#4B5563',
-  border: '#E5E7EB',
+  text: 'var(--dash-text, #111827)',
+  secondary: 'var(--dash-secondary, #4B5563)',
+  border: 'var(--dash-border, #E5E7EB)',
+  tooltipBg: '#111827',
 }
 
 const PIE_COLORS = [COLORS.primary, COLORS.teal, COLORS.amber, COLORS.indigo, '#EC4899', '#06B6D4']
@@ -60,7 +61,7 @@ function PeriodToggle({ active, onChange }) {
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
-    <div className="rounded-lg px-3 py-2 shadow-xl border-0" style={{ backgroundColor: COLORS.text }}>
+    <div className="rounded-lg px-3 py-2 shadow-xl border-0" style={{ backgroundColor: COLORS.tooltipBg }}>
       <p className="text-[10px] text-gray-400 mb-1">{label}</p>
       {payload.map((p, i) => (
         <p key={i} className="text-[12px] font-semibold text-white">
@@ -238,10 +239,10 @@ export default function Analytics() {
   if (!data) return <div className="py-16 text-center text-sm" style={{ color: COLORS.secondary }}>No analytics data</div>
 
   const kpis = [
-    { label: 'Total Users', value: data.totalUsers, icon: Users, trend: data.usersTrend, bg: '#EFF6FF', iconColor: COLORS.primary },
-    { label: 'Resumes', value: data.totalUploads.toLocaleString(), icon: FileText, trend: data.resumesTrend, bg: '#F0FDF4', iconColor: COLORS.teal },
-    { label: 'Active Today', value: data.activeToday, icon: Activity, trend: null, bg: '#FFFBEB', iconColor: COLORS.amber },
-    { label: 'Avg / User', value: data.avgPerUser, icon: TrendingUp, trend: null, bg: '#EEF2FF', iconColor: COLORS.indigo },
+    { label: 'Total Users', value: data.totalUsers, icon: Users, trend: data.usersTrend, bg: 'var(--dash-tint-blue)', iconColor: COLORS.primary },
+    { label: 'Resumes', value: data.totalUploads.toLocaleString(), icon: FileText, trend: data.resumesTrend, bg: 'var(--dash-tint-green)', iconColor: COLORS.teal },
+    { label: 'Active Today', value: data.activeToday, icon: Activity, trend: null, bg: 'var(--dash-tint-amber)', iconColor: COLORS.amber },
+    { label: 'Avg / User', value: data.avgPerUser, icon: TrendingUp, trend: null, bg: 'var(--dash-tint-indigo)', iconColor: COLORS.indigo },
   ]
 
   const SortTh = ({ label, k }) => (
@@ -472,7 +473,7 @@ export default function Analytics() {
               return (
                 <div key={i} className="px-6 py-3 flex items-center gap-3 hover:bg-gray-50/50 transition-colors">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-                    style={{ backgroundColor: uploads > 0 ? '#F0FDF4' : '#EFF6FF', color: uploads > 0 ? COLORS.teal : COLORS.primary }}>
+                    style={{ backgroundColor: uploads > 0 ? 'var(--dash-tint-green)' : 'var(--dash-tint-blue)', color: uploads > 0 ? COLORS.teal : COLORS.primary }}>
                     {uploads > 0 ? <Upload className="h-3 w-3" /> : <LogIn className="h-3 w-3" />}
                   </div>
                   <p className="flex-1 text-[13px]" style={{ color: COLORS.secondary }}>

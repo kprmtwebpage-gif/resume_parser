@@ -72,7 +72,7 @@ class Token(BaseModel):
 class UserOut(BaseModel):
     id:           int
     username:     str
-    email:        str
+    email:        Optional[str] = None
     role:         str
     is_active:    bool
     total_logins: int
@@ -82,7 +82,7 @@ class UserOut(BaseModel):
 
 class UserCreate(BaseModel):
     username: str
-    email:    str = ""
+    email:    Optional[str] = None
     password: str
     role:     str = "user"
 
@@ -399,7 +399,10 @@ async def admin_get_users(
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, username, email, role, is_active, total_logins, 
-                       last_login, last_ip, created_at, resumes_uploaded
+                       last_login AT TIME ZONE 'UTC' AS last_login,
+                       last_ip,
+                       created_at AT TIME ZONE 'UTC' AS created_at,
+                       resumes_uploaded
                 FROM users
                 ORDER BY created_at DESC
             """)
@@ -414,21 +417,41 @@ async def admin_create_user(
     _: dict = Depends(get_current_admin),
 ):
     """Admin: create a new user account."""
+    # Normalize: trim whitespace, lowercase for comparison
+    clean_username = body.username.strip()
+    clean_email = body.email.strip() if body.email else None
+    # Treat empty string as no email
+    if not clean_email:
+        clean_email = None
+
     conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         with conn.cursor() as cur:
-            # Check username / email uniqueness
-            cur.execute("SELECT id FROM users WHERE username = %s OR email = %s",
-                        (body.username, body.email))
-            if cur.fetchone():
-                raise HTTPException(status_code=409, detail="Username or email already exists")
+            # Check username uniqueness (case-insensitive)
+            cur.execute("SELECT id, username FROM users WHERE LOWER(username) = LOWER(%s)",
+                        (clean_username,))
+            existing = cur.fetchone()
+            if existing:
+                logger.warning("Create user blocked: username '%s' conflicts with existing user id=%s",
+                               clean_username, existing["id"])
+                raise HTTPException(status_code=409, detail=f"Username '{clean_username}' already exists")
+
+            # Check email uniqueness only if email is provided
+            if clean_email:
+                cur.execute("SELECT id, email FROM users WHERE LOWER(email) = LOWER(%s)",
+                            (clean_email,))
+                existing = cur.fetchone()
+                if existing:
+                    logger.warning("Create user blocked: email '%s' conflicts with existing user id=%s",
+                                   clean_email, existing["id"])
+                    raise HTTPException(status_code=409, detail=f"Email '{clean_email}' already exists")
 
             cur.execute("""
                 INSERT INTO users (username, email, password_hash, role)
                 VALUES (%s, %s, %s, %s)
                 RETURNING id, username, email, role, is_active,
                           total_logins, last_login, created_at
-            """, (body.username, body.email, hash_password(body.password), body.role))
+            """, (clean_username, clean_email, hash_password(body.password), body.role))
             row = cur.fetchone()
         conn.commit()
     finally:

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { ChevronRightIcon, BriefcaseIcon, ListBulletIcon, ArrowUpTrayIcon, ArrowLeftIcon, ArrowDownTrayIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
@@ -334,33 +334,117 @@ export default function AppliedCandidatesPage() {
 
       {/* Resume Preview Modal */}
       {previewResume && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setPreviewResume(null)}
-        >
-          <div
-            className="relative rounded-xl shadow-2xl overflow-hidden"
-            style={{ width: '80vw', height: '90vh', backgroundColor: colors.card }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-6 py-3 border-b" style={{ borderColor: colors.border }}>
-              <h3 className="text-sm font-semibold truncate" style={{ color: colors.text }}>{previewResume.filename}</h3>
-              <button
-                onClick={() => setPreviewResume(null)}
-                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-800"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <iframe
-              src={previewResume.url}
-              title="Resume Preview"
-              className="w-full border-0"
-              style={{ height: 'calc(90vh - 52px)' }}
-            />
-          </div>
-        </div>
+        <ResumePreviewModal
+          url={previewResume.url}
+          filename={previewResume.filename}
+          colors={colors}
+          onClose={() => setPreviewResume(null)}
+        />
       )}
+    </div>
+  )
+}
+
+/* ── Resume Preview Modal (supports PDF, DOCX, DOC) ──────────────────────── */
+function ResumePreviewModal({ url, filename, colors, onClose }) {
+  const ext = (filename || '').split('.').pop().toLowerCase()
+  const isPdf = ext === 'pdf'
+  const isDocx = ext === 'docx'
+  const isDoc = ext === 'doc'
+  const isWordDoc = isDocx || isDoc
+
+  const [docHtml, setDocHtml] = useState(null)
+  const [docError, setDocError] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const contentRef = useRef(null)
+
+  useEffect(() => {
+    if (!isWordDoc) return
+    let cancelled = false
+    setLoading(true)
+    setDocError(null)
+    setDocHtml(null)
+
+    // Fetch the file as arrayBuffer and convert with mammoth.js
+    fetch(url)
+      .then(res => {
+        if (!res.ok) throw new Error(`Failed to fetch resume (${res.status})`)
+        return res.arrayBuffer()
+      })
+      .then(async (buffer) => {
+        const mammoth = await import('mammoth')
+        const result = await mammoth.convertToHtml({ arrayBuffer: buffer })
+        if (!cancelled) setDocHtml(result.value)
+      })
+      .catch(err => {
+        if (!cancelled) setDocError(err.message || 'Unable to preview this resume')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [url, isWordDoc])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="relative rounded-xl shadow-2xl overflow-hidden"
+        style={{ width: '80vw', height: '90vh', backgroundColor: colors.card }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-3 border-b" style={{ borderColor: colors.border }}>
+          <h3 className="text-sm font-semibold truncate" style={{ color: colors.text }}>{filename}</h3>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-800"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        {/* Content area */}
+        {isPdf ? (
+          /* PDF: render in iframe */
+          <iframe
+            src={url}
+            title="Resume Preview"
+            className="w-full border-0"
+            style={{ height: 'calc(90vh - 52px)' }}
+          />
+        ) : isWordDoc ? (
+          /* DOCX/DOC: render converted HTML via mammoth.js */
+          <div className="w-full overflow-auto" style={{ height: 'calc(90vh - 52px)' }}>
+            {loading && (
+              <div className="flex items-center justify-center h-full">
+                <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-gray-200 border-t-blue-500" />
+              </div>
+            )}
+            {docError && (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-red-500 text-sm">Unable to preview this resume</p>
+              </div>
+            )}
+            {docHtml && (
+              <div
+                ref={contentRef}
+                className="prose max-w-none p-8"
+                style={{ color: colors.text }}
+                dangerouslySetInnerHTML={{ __html: docHtml }}
+              />
+            )}
+          </div>
+        ) : (
+          /* Unsupported file type */
+          <div className="flex items-center justify-center w-full" style={{ height: 'calc(90vh - 52px)' }}>
+            <p className="text-gray-500 text-sm">Unable to preview this file type. Please download to view.</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

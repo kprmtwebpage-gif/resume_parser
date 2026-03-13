@@ -24,6 +24,41 @@
     --color-text-secondary: #6B7280;
     --color-border: #E5E7EB;
     --color-border-focus: #1F4FD8;
+
+    /* Dashboard theme tokens (used by theme/colors.js) */
+    --dash-text: #111827;
+    --dash-secondary: #4B5563;
+    --dash-border: #E5E7EB;
+    --dash-page-bg: #F8FAFC;
+    --dash-header-bg: #FFFFFF;
+    --dash-row-alt: #FAFAFA;
+    --dash-row-base: #FFFFFF;
+    --dash-tint-blue: #EFF6FF;
+    --dash-tint-green: #F0FDF4;
+    --dash-tint-amber: #FFFBEB;
+    --dash-tint-indigo: #EEF2FF;
+  }
+
+  .dark {
+    --color-primary-light: #1e3a5f;
+    --color-bg-primary: #0f172a;
+    --color-bg-secondary: #1e293b;
+    --color-text-primary: #e2e8f0;
+    --color-text-secondary: #94a3b8;
+    --color-border: #334155;
+
+    /* Dashboard theme tokens — dark mode */
+    --dash-text: #e2e8f0;
+    --dash-secondary: #94a3b8;
+    --dash-border: #334155;
+    --dash-page-bg: #0f172a;
+    --dash-header-bg: #1e293b;
+    --dash-row-alt: #1e293b;
+    --dash-row-base: #0f172a;
+    --dash-tint-blue: #1e3a5f;
+    --dash-tint-green: #064e3b;
+    --dash-tint-amber: #78350f;
+    --dash-tint-indigo: #312e81;
   }
 
   html, body, #root {
@@ -65,6 +100,112 @@
     @apply w-full rounded-button border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100
            dark:bg-neutral-800 dark:border-neutral-600 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:ring-brand-800;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Global Dark Mode Overrides
+   Applied automatically when <html class="dark"> is toggled by ThemeContext.
+   This avoids modifying every individual component's JSX.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Background colors ──────────────────────────────────────────────────── */
+.dark .bg-white { background-color: #1e293b !important; }
+.dark .bg-gray-50, .dark .bg-neutral-50 { background-color: #0f172a !important; }
+.dark .bg-neutral-100, .dark .bg-gray-100 { background-color: #1e293b !important; }
+.dark .bg-gray-200 { background-color: #334155 !important; }
+.dark .bg-slate-50 { background-color: #0f172a !important; }
+
+/* ── Text colors ────────────────────────────────────────────────────────── */
+.dark .text-gray-900, .dark .text-neutral-900 { color: #e2e8f0 !important; }
+.dark .text-gray-800, .dark .text-neutral-800 { color: #e2e8f0 !important; }
+.dark .text-gray-700, .dark .text-neutral-700 { color: #cbd5e1 !important; }
+.dark .text-gray-600, .dark .text-neutral-600 { color: #94a3b8 !important; }
+.dark .text-gray-500, .dark .text-neutral-500 { color: #94a3b8 !important; }
+.dark .text-gray-400, .dark .text-neutral-400 { color: #64748b !important; }
+.dark .text-slate-900 { color: #e2e8f0 !important; }
+.dark .text-slate-700 { color: #cbd5e1 !important; }
+.dark .text-slate-600 { color: #94a3b8 !important; }
+
+/* ── Border colors ──────────────────────────────────────────────────────── */
+.dark .border-gray-200, .dark .border-neutral-200 { border-color: #334155 !important; }
+.dark .border-gray-100, .dark .border-neutral-100 { border-color: #1e293b !important; }
+.dark .border-gray-300, .dark .border-neutral-300 { border-color: #475569 !important; }
+.dark .border-slate-200 { border-color: #334155 !important; }
+
+/* ── Hover states ───────────────────────────────────────────────────────── */
+.dark .hover\:bg-gray-50:hover, .dark .hover\:bg-neutral-50:hover { background-color: #334155 !important; }
+.dark .hover\:bg-gray-100:hover { background-color: #334155 !important; }
+
+/* ── Ring/focus colors ──────────────────────────────────────────────────── */
+.dark .ring-gray-200, .dark .ring-neutral-200 { --tw-ring-color: #334155 !important; }
+.dark .focus\:ring-blue-100:focus { --tw-ring-color: rgba(59,130,246,0.2) !important; }
+
+/* ── Divide colors ──────────────────────────────────────────────────────── */
+.dark .divide-gray-50 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1e293b !important; }
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #334155 !important; }
+
+/* ── Form elements ──────────────────────────────────────────────────────── */
+.dark input, .dark textarea, .dark select {
+  background-color: #1e293b;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+.dark input::placeholder, .dark textarea::placeholder {
+  color: #64748b;
+}
+.dark input:focus, .dark textarea:focus, .dark select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
+}
+
+/* ── Badges/chips with light bg ─────────────────────────────────────────── */
+.dark .bg-violet-50 { background-color: rgba(139,92,246,0.15) !important; }
+.dark .bg-emerald-50 { background-color: rgba(16,185,129,0.15) !important; }
+.dark .bg-red-50 { background-color: rgba(239,68,68,0.15) !important; }
+.dark .bg-amber-50 { background-color: rgba(245,158,11,0.15) !important; }
+.dark .bg-blue-50 { background-color: rgba(59,130,246,0.15) !important; }
+.dark .bg-brand-50 { background-color: rgba(31,79,216,0.15) !important; }
+
+/* ── Shadows (softer in dark mode) ──────────────────────────────────────── */
+.dark .shadow-sm, .dark .shadow, .dark .shadow-md, .dark .shadow-lg, .dark .shadow-xl, .dark .shadow-2xl {
+  --tw-shadow-color: rgba(0,0,0,0.3);
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────── */
+.dark ::-webkit-scrollbar { width: 8px; }
+.dark ::-webkit-scrollbar-track { background: #1e293b; }
+.dark ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* ── Table-specific overrides ───────────────────────────────────────────── */
+.dark .bg-gray-50\/50 { background-color: rgba(30,41,59,0.5) !important; }
+.dark .hover\:bg-gray-50\/50:hover { background-color: rgba(51,65,85,0.5) !important; }
+.dark tr.group:hover { background-color: rgba(51,65,85,0.5); }
+
+/* ── Admin pages (inline-style overrides via CSS specificity) ────────────── */
+.dark [style*="background-color: rgb(248, 250, 252)"],
+.dark [style*="backgroundColor: rgb(248, 250, 252)"] {
+  background-color: #0f172a !important;
+}
+.dark [style*="background-color: #F8FAFC"],
+.dark [style*="backgroundColor"] {
+  /* Don't override all inline backgrounds — only override the admin layout container */
+}
+
+/* ── CreateJobModal dark overrides ──────────────────────────────────────── */
+.dark .cjm-salary-input,
+.dark .cjm-currency-select {
+  background-color: #1e293b;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+.dark .cjm-salary-prefix { color: #94a3b8; }
+
+/* ── Modal/Dialog backgrounds ───────────────────────────────────────────── */
+.dark .bg-white.rounded-2xl,
+.dark .bg-white.rounded-xl {
+  background-color: #1e293b !important;
 }
 
 @keyframes bird-fly-right {

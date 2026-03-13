@@ -149,18 +149,19 @@ export default function TopNavbar() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            backgroundColor: '#fff', borderRadius: '16px', padding: '32px',
+            backgroundColor: isDark ? '#1e293b' : '#fff', borderRadius: '16px', padding: '32px',
             width: '100%', maxWidth: '380px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)',
+            border: isDark ? '1px solid #334155' : 'none',
           }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#1e293b', marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: isDark ? '#e2e8f0' : '#1e293b', marginBottom: '16px' }}>
               Change Password
             </h3>
             {pwdMsg && (
               <div style={{
-                backgroundColor: pwdMsg.includes('successfully') ? '#ecfdf5' : '#fef2f2',
+                backgroundColor: pwdMsg.includes('successfully') ? (isDark ? 'rgba(16,185,129,0.15)' : '#ecfdf5') : (isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2'),
                 border: `1px solid ${pwdMsg.includes('successfully') ? '#10b981' : '#ef4444'}`,
                 borderRadius: '8px', padding: '10px 14px',
-                color: pwdMsg.includes('successfully') ? '#065f46' : '#991b1b',
+                color: pwdMsg.includes('successfully') ? (isDark ? '#34d399' : '#065f46') : (isDark ? '#f87171' : '#991b1b'),
                 fontSize: '13px', marginBottom: '12px',
               }}>
                 {pwdMsg}
@@ -174,8 +175,9 @@ export default function TopNavbar() {
                 placeholder="Current password"
                 style={{
                   width: '100%', padding: '10px 60px 10px 14px',
-                  border: '1px solid #d1d5db', borderRadius: '8px',
+                  border: `1px solid ${isDark ? '#475569' : '#d1d5db'}`, borderRadius: '8px',
                   fontSize: '14px', outline: 'none', boxSizing: 'border-box',
+                  backgroundColor: isDark ? '#0f172a' : '#fff', color: isDark ? '#e2e8f0' : '#111827',
                 }}
               />
               <button type="button" onClick={() => setShowOldPwd(!showOldPwd)}
@@ -191,8 +193,9 @@ export default function TopNavbar() {
                 placeholder="New password (min 6 chars)"
                 style={{
                   width: '100%', padding: '10px 60px 10px 14px',
-                  border: '1px solid #d1d5db', borderRadius: '8px',
+                  border: `1px solid ${isDark ? '#475569' : '#d1d5db'}`, borderRadius: '8px',
                   fontSize: '14px', outline: 'none', boxSizing: 'border-box',
+                  backgroundColor: isDark ? '#0f172a' : '#fff', color: isDark ? '#e2e8f0' : '#111827',
                 }}
               />
               <button type="button" onClick={() => setShowNewPwd(!showNewPwd)}
@@ -205,8 +208,8 @@ export default function TopNavbar() {
                 onClick={() => setShowChangePwd(false)}
                 style={{
                   flex: 1, padding: '10px', borderRadius: '8px',
-                  border: '1px solid #d1d5db', backgroundColor: '#fff',
-                  fontSize: '14px', fontWeight: 500, cursor: 'pointer', color: '#374151',
+                  border: `1px solid ${isDark ? '#475569' : '#d1d5db'}`, backgroundColor: isDark ? '#0f172a' : '#fff',
+                  fontSize: '14px', fontWeight: 500, cursor: 'pointer', color: isDark ? '#e2e8f0' : '#374151',
                 }}
               >
                 Cancel

@@ -17,7 +17,7 @@ function PerformanceTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
   const user = payload[0]?.payload
   return (
-    <div className="rounded-xl px-4 py-3 shadow-xl border-0 min-w-[160px]" style={{ backgroundColor: COLORS.text }}>
+    <div className="rounded-xl px-4 py-3 shadow-xl border-0 min-w-[160px]" style={{ backgroundColor: COLORS.tooltipBg }}>
       <p className="text-[13px] font-semibold text-white mb-2">{user?.username}</p>
       {payload.map((p, i) => (
         <div key={i} className="flex items-center gap-2 mb-0.5">
@@ -160,15 +160,15 @@ function UserDetailDrawer({ user, onClose }) {
             {[
               { label: 'Last Login',      value: timeAgo(user.last_login) },
               { label: 'Total Sessions',  value: user.total_sessions ?? '—' },
-              { label: 'Role',            value: user.role || 'user', badge: true },
+              { label: 'Role',            value: (user.role || 'user').replace(/_/g, ' '), badge: true },
             ].map((row, i) => (
               <div key={i} className="flex items-center justify-between px-4 py-3 text-[12px]"
-                style={{ borderBottom: i < 2 ? `1px solid ${COLORS.border}` : 'none', backgroundColor: i % 2 === 0 ? '#FAFAFA' : 'white' }}>
+                style={{ borderBottom: i < 2 ? `1px solid ${COLORS.border}` : 'none', backgroundColor: i % 2 === 0 ? 'var(--dash-row-alt)' : 'var(--dash-row-base)' }}>
                 <span className="text-[11px] font-medium tracking-wide uppercase" style={{ color: COLORS.secondary, letterSpacing: '0.04em' }}>{row.label}</span>
                 {row.badge
                   ? <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
                       style={{
-                        backgroundColor: row.value === 'admin' ? '#EFF6FF' : '#F0FDF4',
+                        backgroundColor: row.value === 'admin' ? 'var(--dash-tint-blue)' : 'var(--dash-tint-green)',
                         color: row.value === 'admin' ? COLORS.primary : COLORS.teal,
                       }}>{row.value}</span>
                   : <span className="font-medium" style={{ color: COLORS.text }}>{row.value}</span>
@@ -278,10 +278,10 @@ export default function DashboardOverview() {
 
   /* KPI definitions */
   const kpis = [
-    { label: 'Total Users', value: d.totalUsers, icon: Users, trend: d.usersTrend, bg: '#EFF6FF', iconColor: COLORS.primary },
-    { label: 'Total Resumes Uploaded', value: d.totalUploads.toLocaleString(), icon: FileText, trend: d.resumesTrend, bg: '#F0FDF4', iconColor: COLORS.teal },
-    { label: 'Active Users Today', value: d.activeToday, icon: Activity, trend: null, bg: '#FFFBEB', iconColor: COLORS.amber },
-    { label: 'Avg Resumes / User', value: d.avgPerUser, icon: TrendingUp, trend: null, bg: '#EEF2FF', iconColor: COLORS.indigo },
+    { label: 'Total Users', value: d.totalUsers, icon: Users, trend: d.usersTrend, bg: 'var(--dash-tint-blue)', iconColor: COLORS.primary },
+    { label: 'Total Resumes Uploaded', value: d.totalUploads.toLocaleString(), icon: FileText, trend: d.resumesTrend, bg: 'var(--dash-tint-green)', iconColor: COLORS.teal },
+    { label: 'Active Users Today', value: d.activeToday, icon: Activity, trend: null, bg: 'var(--dash-tint-amber)', iconColor: COLORS.amber },
+    { label: 'Avg Resumes / User', value: d.avgPerUser, icon: TrendingUp, trend: null, bg: 'var(--dash-tint-indigo)', iconColor: COLORS.indigo },
   ]
 
   return (
@@ -538,7 +538,7 @@ export default function DashboardOverview() {
             return (
               <div key={i} className="px-6 py-3 flex items-center gap-3 hover:bg-gray-50/50 transition-colors">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                  style={{ backgroundColor: uploads > 0 ? '#F0FDF4' : '#EFF6FF', color: uploads > 0 ? COLORS.teal : COLORS.primary }}>
+                  style={{ backgroundColor: uploads > 0 ? 'var(--dash-tint-green)' : 'var(--dash-tint-blue)', color: uploads > 0 ? COLORS.teal : COLORS.primary }}>
                   {uploads > 0 ? <Upload className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
                 </div>
                 <div className="flex-1 min-w-0">

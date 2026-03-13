@@ -5,22 +5,27 @@
  * Import: import { COLORS, PIE_COLORS, USER_COLORS } from './theme/colors'
  */
 
-/** Core UI color palette */
+/** Core UI color palette
+ *  text / secondary / border use CSS custom properties so they
+ *  respond automatically to <html class="dark"> toggled by ThemeContext.
+ *  Chart-only accent colors stay as fixed hex values.
+ */
 export const COLORS = {
   primary:   '#2563EB',  // Blue-600 — buttons, active states, KPI accents
   teal:      '#10B981',  // Emerald-500 — success, upload actions
   amber:     '#F59E0B',  // Amber-400 — warnings, highlights
   indigo:    '#6366F1',  // Indigo-500 — analytics, charts
-  text:      '#111827',  // Gray-900 — primary text
-  secondary: '#4B5563',  // Gray-600 — secondary text, labels
-  border:    '#E5E7EB',  // Gray-200 — borders, dividers
+  text:      'var(--dash-text, #111827)',       // flips in dark mode
+  secondary: 'var(--dash-secondary, #4B5563)',  // flips in dark mode
+  border:    'var(--dash-border, #E5E7EB)',     // flips in dark mode
+  tooltipBg: '#111827',  // fixed dark background for chart tooltips
 }
 
 /** Sidebar & layout chrome */
 export const LAYOUT = {
-  sidebarBg: '#111827',  // Dark navy sidebar
-  pageBg:    '#F8FAFC',  // Off-white page background
-  headerBg:  '#FFFFFF',  // White top header
+  sidebarBg: '#111827',                           // Dark navy sidebar
+  pageBg:    'var(--dash-page-bg, #F8FAFC)',       // flips in dark mode
+  headerBg:  'var(--dash-header-bg, #FFFFFF)',      // flips in dark mode
 }
 
 /** Pie / donut chart fill sequence */

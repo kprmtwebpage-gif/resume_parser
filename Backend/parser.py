@@ -6626,6 +6626,34 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
 
         return t
 
+    # Word-boundary role detection (avoids substring accidents like matching "architect" inside "architecture" when it's just a skill).
+    # NOTE: Must be defined before shrink_to_role_phrase which references has_role_signal.
+    role_re = re.compile(
+        r"(?i)\b("
+        r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|devops|sre|manager|intern|"
+        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner|"
+        r"dba|trainer|recruiter|strategist|evangelist|officer|vp|cto|cio|cfo|executive|"
+        r"technician|operator|associate|fellow|researcher"
+        r")\b|\b(data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|systems?\s+analyst|"
+        r"cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
+        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer|"
+        r"machine\s+learning\s+engineer|full\s*stack\s+(?:developer|engineer)|"
+        r"front\s*end\s+(?:developer|engineer)|back\s*end\s+(?:developer|engineer)|"
+        r"database\s+administrator|network\s+engineer|security\s+engineer|infrastructure\s+engineer|"
+        r"release\s+engineer|build\s+engineer|test\s+engineer|automation\s+engineer|"
+        r"support\s+engineer|systems?\s+engineer|embedded\s+engineer|"
+        r"ux\s+designer|ui\s+designer|technical\s+writer|quality\s+analyst|"
+        r"scrum\s+master|delivery\s+manager|engagement\s+manager|account\s+manager|"
+        r"project\s+coordinator|program\s+coordinator|technical\s+architect|"
+        r"integration\s+developer|middleware\s+developer|salesforce\s+developer|"
+        r"sharepoint\s+developer|power\s+bi\s+developer|tableau\s+developer|"
+        r"peoplesoft\s+developer|sap\s+consultant|oracle\s+developer|oracle\s+dba)\b"
+        r"|\b(etl\s+(?:developer|engineer|analyst))\b"
+    )
+
+    def has_role_signal(s: str) -> bool:
+        return bool(role_re.search(s))
+
     def shrink_to_role_phrase(title: str) -> str:
         """Reduce long/noisy title lines to a cleaner role phrase.
 
@@ -6967,33 +6995,6 @@ def extract_job_title(text: str, *, first_name: str = "", last_name: str = "") -
         "tableau developer",
         "power bi developer",
     ]
-
-    # Word-boundary role detection (avoids substring accidents like matching "architect" inside "architecture" when it's just a skill).
-    role_re = re.compile(
-        r"(?i)\b("
-        r"developer|engineer|analyst|architect|consultant|tester|administrator|specialist|devops|sre|manager|intern|"
-        r"sde|sdet|programmer|designer|director|scientist|lead|coordinator|scrum\s*master|product\s*owner|"
-        r"dba|trainer|recruiter|strategist|evangelist|officer|vp|cto|cio|cfo|executive|"
-        r"technician|operator|associate|fellow|researcher"
-        r")\b|\b(data\s+engineer|data\s+scientist|data\s+analyst|business\s+analyst|systems?\s+analyst|"
-        r"cloud\s+engineer|platform\s+engineer|site\s+reliability|solutions?\s+architect|"
-        r"technical\s+lead|team\s+lead|tech\s+lead|ai\s+engineer|ml\s+engineer|"
-        r"machine\s+learning\s+engineer|full\s*stack\s+(?:developer|engineer)|"
-        r"front\s*end\s+(?:developer|engineer)|back\s*end\s+(?:developer|engineer)|"
-        r"database\s+administrator|network\s+engineer|security\s+engineer|infrastructure\s+engineer|"
-        r"release\s+engineer|build\s+engineer|test\s+engineer|automation\s+engineer|"
-        r"support\s+engineer|systems?\s+engineer|embedded\s+engineer|"
-        r"ux\s+designer|ui\s+designer|technical\s+writer|quality\s+analyst|"
-        r"scrum\s+master|delivery\s+manager|engagement\s+manager|account\s+manager|"
-        r"project\s+coordinator|program\s+coordinator|technical\s+architect|"
-        r"integration\s+developer|middleware\s+developer|salesforce\s+developer|"
-        r"sharepoint\s+developer|power\s+bi\s+developer|tableau\s+developer|"
-        r"peoplesoft\s+developer|sap\s+consultant|oracle\s+developer|oracle\s+dba)\b"
-        r"|\b(etl\s+(?:developer|engineer|analyst))\b"
-    )
-
-    def has_role_signal(s: str) -> bool:
-        return bool(role_re.search(s))
 
     # If the resume doesn't have a clean standalone title line, it often still
     # states the role in a sentence near the top (e.g., "experience as a Data Engineer").

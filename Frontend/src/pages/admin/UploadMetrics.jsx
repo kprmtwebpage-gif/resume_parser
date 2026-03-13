@@ -22,7 +22,7 @@ const EMPTY_DATA = { users: [], dailyData: [], weeklyData: [], monthlyData: [], 
 function MetricTooltip({ active, payload, label, period }) {
   if (!active || !payload?.length) return null
   return (
-    <div className="rounded-lg px-4 py-3 shadow-xl border-0 min-w-[180px]" style={{ backgroundColor: COLORS.text }}>
+    <div className="rounded-lg px-4 py-3 shadow-xl border-0 min-w-[180px]" style={{ backgroundColor: COLORS.tooltipBg }}>
       <p className="text-[10px] text-gray-400 mb-2 font-medium">{label}</p>
       {payload.map((p, i) => (
         <div key={i} className="flex items-center justify-between gap-4 mb-0.5">
@@ -127,10 +127,10 @@ export default function UploadMetrics() {
   }
 
   const kpiDefs = [
-    { label: 'Total Uploads', value: kpis.totalUploads.toLocaleString(), icon: Upload, bg: '#F0FDF4', iconColor: COLORS.teal },
-    { label: `Avg / ${period === 'daily' ? 'Day' : period === 'weekly' ? 'Week' : period === 'monthly' ? 'Month' : 'Year'}`, value: kpis.avgPerPeriod.toLocaleString(), icon: TrendingUp, bg: '#EFF6FF', iconColor: COLORS.primary },
-    { label: 'Peak Uploads', value: kpis.peakUploads.toLocaleString(), icon: BarChart3, bg: '#FFFBEB', iconColor: COLORS.amber },
-    { label: 'Active Users', value: kpis.activeUsers, icon: Users, bg: '#EEF2FF', iconColor: COLORS.indigo },
+    { label: 'Total Uploads', value: kpis.totalUploads.toLocaleString(), icon: Upload, bg: 'var(--dash-tint-green)', iconColor: COLORS.teal },
+    { label: `Avg / ${period === 'daily' ? 'Day' : period === 'weekly' ? 'Week' : period === 'monthly' ? 'Month' : 'Year'}`, value: kpis.avgPerPeriod.toLocaleString(), icon: TrendingUp, bg: 'var(--dash-tint-blue)', iconColor: COLORS.primary },
+    { label: 'Peak Uploads', value: kpis.peakUploads.toLocaleString(), icon: BarChart3, bg: 'var(--dash-tint-amber)', iconColor: COLORS.amber },
+    { label: 'Active Users', value: kpis.activeUsers, icon: Users, bg: 'var(--dash-tint-indigo)', iconColor: COLORS.indigo },
   ]
 
   if (loading) return (
@@ -358,7 +358,7 @@ export default function UploadMetrics() {
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr style={{ backgroundColor: '#FAFAFA', borderBottom: `1px solid ${COLORS.border}` }}>
+              <tr style={{ backgroundColor: 'var(--dash-row-alt)', borderBottom: `1px solid ${COLORS.border}` }}>
                 <th className="text-left px-6 py-3">
                   <span className="text-[11px] font-medium tracking-wide uppercase" style={{ color: COLORS.secondary, letterSpacing: '0.04em' }}>User</span>
                 </th>

@@ -524,3 +524,25 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Dark Mode ── */
+.dark .cjm-modal { background: #1e293b; }
+.dark .cjm-header { border-color: #334155; }
+.dark .cjm-title { color: #e2e8f0; }
+.dark .cjm-draft-status { color: #34d399; }
+.dark .cjm-close { color: #94a3b8; }
+.dark .cjm-close:hover { background: #334155; color: #e2e8f0; }
+.dark .cjm-body { background: #1e293b; }
+.dark .cjm-label { color: #94a3b8; }
+.dark .cjm-input,
+.dark .cjm-textarea { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+.dark .cjm-input:focus,
+.dark .cjm-textarea:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.2); }
+.dark .cjm-input::placeholder,
+.dark .cjm-textarea::placeholder { color: #64748b; }
+.dark .cjm-readonly-value { color: #cbd5e1; }
+.dark .cjm-footer { border-color: #334155; background: #1e293b; }
+.dark .cjm-confirm-dialog { background: #1e293b; }
+.dark .cjm-confirm-title { color: #e2e8f0; }
+.dark .cjm-confirm-message { color: #94a3b8; }
+.dark .cjm-char-count { color: #64748b; }

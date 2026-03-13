@@ -93,7 +93,7 @@ export default function ActivityLog() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-extrabold tracking-tight text-gray-900" style={{ fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}>Activity Logs</h2>
-        <p className="text-[11px] font-medium tracking-wide uppercase mt-1" style={{ color: '#6B7280', letterSpacing: '0.04em' }}>Complete log of user logins and resume uploads</p>
+        <p className="text-[11px] font-medium tracking-wide uppercase mt-1" style={{ color: 'var(--dash-secondary, #6B7280)', letterSpacing: '0.04em' }}>Complete log of user logins and resume uploads</p>
       </div>
 
       {/* Filters */}
@@ -125,7 +125,7 @@ export default function ActivityLog() {
             className="h-9 w-64 rounded-xl border border-gray-200 bg-gray-50/50 pl-9 pr-3 text-[13px] text-gray-700 placeholder:text-gray-400 focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-50 transition"
           />
         </div>
-        <span className="ml-auto text-[11px] font-medium tracking-wide uppercase" style={{ color: '#6B7280', letterSpacing: '0.04em' }}>{filtered.length} events</span>
+        <span className="ml-auto text-[11px] font-medium tracking-wide uppercase" style={{ color: 'var(--dash-secondary, #6B7280)', letterSpacing: '0.04em' }}>{filtered.length} events</span>
       </div>
 
       {/* Log list */}

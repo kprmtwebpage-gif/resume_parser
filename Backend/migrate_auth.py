@@ -112,6 +112,13 @@ def run_migration():
     """)
     print("  ✓ Indexes ready")
 
+    # ── Step 5: Make email nullable (allow users without email) ───────────────
+    print("Step 5: Making email column nullable...")
+    cur.execute("ALTER TABLE users ALTER COLUMN email DROP NOT NULL;")
+    # Convert empty strings to NULL
+    cur.execute("UPDATE users SET email = NULL WHERE email = '';")
+    print("  ✓ Email column is now nullable, empty strings converted to NULL")
+
     # ── Commit ────────────────────────────────────────────────────────────────
     conn.commit()
     print()

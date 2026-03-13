@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { useTheme } from '../../contexts/ThemeContext'
 import {
   Users, Clock,
   Menu, Home, ChevronLeft, ChevronDown, ArrowLeft, RefreshCw, Bell,
@@ -11,6 +12,7 @@ import companyLogo from '../../assets/company-logo.png'
 
 export default function AdminLayout() {
   const { user } = useAuth()
+  const { isDark, colors } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -186,7 +188,7 @@ export default function AdminLayout() {
   )
 
   return (
-    <div className="flex h-screen" style={{ backgroundColor: '#F8FAFC' }}>
+    <div className="flex h-screen" style={{ backgroundColor: isDark ? '#0f172a' : '#F8FAFC' }}>
       {/* Mobile overlay */}
       {mobileSidebarOpen && (
         <div
@@ -218,7 +220,7 @@ export default function AdminLayout() {
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Top Bar */}
-        <header className="bg-white border-b px-6 h-[60px] flex items-center justify-between gap-4 shrink-0" style={{ borderColor: '#E5E7EB' }}>
+        <header className="border-b px-6 h-[60px] flex items-center justify-between gap-4 shrink-0" style={{ backgroundColor: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? '#334155' : '#E5E7EB' }}>
           <div className="flex items-center gap-4">
             <button
               onClick={() => setMobileSidebarOpen(true)}
@@ -263,7 +265,7 @@ export default function AdminLayout() {
               </div>
               <div className="hidden sm:block">
                 <p className="text-[10px] font-medium tracking-wide uppercase leading-none" style={{ color: '#9CA3AF', letterSpacing: '0.04em' }}>Admin</p>
-                <p className="text-[13px] font-extrabold tracking-tight leading-none mt-0.5" style={{ color: '#111827', fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}>{user?.username || 'Admin'}</p>
+                <p className="text-[13px] font-extrabold tracking-tight leading-none mt-0.5" style={{ color: isDark ? '#e2e8f0' : '#111827', fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}>{user?.username || 'Admin'}</p>
               </div>
             </div>
           </div>

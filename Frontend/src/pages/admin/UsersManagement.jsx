@@ -9,7 +9,9 @@ import { apiUrl } from '../../config'
 
 function formatDate(iso) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
+  // Ensure UTC interpretation if no timezone suffix present
+  const dateStr = typeof iso === 'string' && !iso.endsWith('Z') && !iso.includes('+') ? iso + 'Z' : iso
+  return new Date(dateStr).toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
@@ -24,7 +26,7 @@ function RoleBadge({ role }) {
       : 'bg-gray-100 text-gray-600'
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cls}`}>
-      {role}
+      {role.replace(/_/g, ' ')}
     </span>
   )
 }
@@ -88,7 +90,7 @@ function CreateUserModal({ onClose, onCreated, getAuthHeaders }) {
           </div>
           <select className={inp} value={form.role} onChange={e => setForm(f=>({...f, role: e.target.value}))}>
             <option value="user">user</option>
-            <option value="upload_user">upload_user</option>
+            <option value="upload_user">upload user</option>
             <option value="superuser">superuser</option>
           </select>
           <div className="flex gap-3 pt-2">
@@ -244,10 +246,10 @@ function LoginHistoryModal({ target, onClose, getAuthHeaders }) {
             <table className="w-full text-[12px]">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: '#6B7280', letterSpacing: '0.04em' }}>#</th>
-                  <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: '#6B7280', letterSpacing: '0.04em' }}>Date</th>
-                  <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: '#6B7280', letterSpacing: '0.04em' }}>IP</th>
-                  <th className="px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide" style={{ color: '#6B7280', letterSpacing: '0.04em' }}>Uploads</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--dash-secondary, #6B7280)', letterSpacing: '0.04em' }}>#</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--dash-secondary, #6B7280)', letterSpacing: '0.04em' }}>Date</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--dash-secondary, #6B7280)', letterSpacing: '0.04em' }}>IP</th>
+                  <th className="px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--dash-secondary, #6B7280)', letterSpacing: '0.04em' }}>Uploads</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -406,7 +408,7 @@ export default function UsersManagement() {
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50">
                   {['Username', 'Email', 'Role', 'Status', 'Total Logins', 'Resumes', 'Last Login', 'Created', 'Actions'].map(h => (
-                    <th key={h} className="px-5 py-3 text-left text-[11px] font-medium uppercase tracking-wide whitespace-nowrap" style={{ color: '#6B7280', letterSpacing: '0.04em' }}>{h}</th>
+                    <th key={h} className="px-5 py-3 text-left text-[11px] font-medium uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--dash-secondary, #6B7280)', letterSpacing: '0.04em' }}>{h}</th>
                   ))}
                 </tr>
               </thead>

@@ -965,54 +965,40 @@ export default function CreateJobModal({
             </div>
 
             {/* Salary Range */}
-            <div className="cjm-salary-row">
-              <div className="cjm-salary-field">
-                <label className="cjm-label">Currency ($)</label>
-                {isReview ? (
-                  <div className="cjm-readonly-value">{formData.currency || '—'}</div>
-                ) : (
-                  <select
-                    name="currency"
-                    value={formData.currency}
-                    onChange={handleChange}
-                    className="cjm-currency-select"
-                  >
-                    {CURRENCIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                )}
+            <div className="cjm-salary-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <div className="cjm-salary-field" style={{ gridColumn: '1 / -1' }}>
+                <label className="cjm-label">Salary Range</label>
               </div>
               <div className="cjm-salary-field">
-                <label className="cjm-label">Salary Start ($ per year)</label>
                 {isReview ? (
-                  <div className="cjm-readonly-value">{formData.salary_start ? `${formData.currency} ${Number(formData.salary_start).toLocaleString()}` : '—'}</div>
+                  <div className="cjm-readonly-value">{formData.salary_start ? `$${Number(formData.salary_start).toLocaleString()}` : '—'}</div>
                 ) : (
                   <div className="cjm-salary-input-wrapper">
+                    <span className="cjm-salary-prefix">$</span>
                     <input
                       type="text"
                       inputMode="numeric"
                       value={formData.salary_start}
                       onChange={handleSalaryChange('salary_start')}
-                      className="cjm-salary-input cjm-salary-input--no-prefix"
-                      placeholder="Salary ($ per year)"
+                      className="cjm-salary-input"
+                      placeholder="Start"
                     />
                   </div>
                 )}
               </div>
               <div className="cjm-salary-field">
-                <label className="cjm-label">Salary End ($ per year)</label>
                 {isReview ? (
-                  <div className="cjm-readonly-value">{formData.salary_end ? `${formData.currency} ${Number(formData.salary_end).toLocaleString()}` : '—'}</div>
+                  <div className="cjm-readonly-value">{formData.salary_end ? `$${Number(formData.salary_end).toLocaleString()}` : '—'}</div>
                 ) : (
                   <div className="cjm-salary-input-wrapper">
+                    <span className="cjm-salary-prefix">$</span>
                     <input
                       type="text"
                       inputMode="numeric"
                       value={formData.salary_end}
                       onChange={handleSalaryChange('salary_end')}
-                      className="cjm-salary-input cjm-salary-input--no-prefix"
-                      placeholder="Salary End"
+                      className="cjm-salary-input"
+                      placeholder="End"
                     />
                   </div>
                 )}

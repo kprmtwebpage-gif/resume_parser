@@ -1442,6 +1442,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         raise HTTPException(status_code=500, detail=f"Parser error: {type(e).__name__}: {e}")
 
     if returncode != 0:
+        print(f"[PARSER FAILED] file={save_name} returncode={returncode}\nSTDERR: {stderr_text[:1000]}", flush=True)
         raise HTTPException(status_code=500, detail=f"Parser failed: {stderr_text[:500]}")
 
     # Look up the newly created candidate by resume filename
