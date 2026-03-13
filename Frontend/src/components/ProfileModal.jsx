@@ -7,6 +7,7 @@ import PdfScrollViewer from './PdfScrollViewer.jsx'
 import CommentsTimeline from './CommentsTimeline.jsx'
 import { notifyModalOpened, notifyModalClosed, onChatbotOpened } from '../chatbot/modalEvents.js'
 import { useTheme } from '../contexts/ThemeContext'
+import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
 import { apiUrl } from '../config'
 
@@ -64,6 +65,7 @@ export default function ProfileModal({
   
   // Use global theme context
   const { isDark, colors } = useTheme()
+  const { isAdmin } = useAuth()
 
   // Construct resume URL similar to ProfileCard
   const hasResume = candidate?.resume_filename
@@ -553,7 +555,7 @@ export default function ProfileModal({
                             )}
                           </div>
                           {/* Export Button in Header */}
-                          {hasResume && (
+                          {isAdmin && hasResume && (
                             <button
                               onClick={handleExportResume}
                               disabled={exportingResume}
@@ -612,7 +614,7 @@ export default function ProfileModal({
                                 </div>
                                 <p className="text-lg font-medium mb-2 transition-colors duration-300" style={{ color: colors.text }}>Could not extract .doc preview</p>
                                 <p className="text-sm mb-4 transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Use the Export button to download this file.</p>
-                                {hasResume && (
+                                {isAdmin && hasResume && (
                                   <button
                                     onClick={handleExportResume}
                                     disabled={exportingResume}

@@ -96,3 +96,8 @@ export async function bulkDownloadResumes(candidateIds) {
   })
   return res.data
 }
+
+export async function checkUploadStatus(candidateId) {
+  const res = await api.get(`/upload-status/${candidateId}`)
+  return res.data
+}

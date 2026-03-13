@@ -62,7 +62,8 @@ def main() -> int:
                     profile_picture_url TEXT,
                     resume_filename TEXT,
                     resume_sha256 TEXT UNIQUE,
-                    parsed_at TIMESTAMP
+                    parsed_at TIMESTAMP,
+                    resume_parse_status TEXT DEFAULT 'completed'
                 )
                 """
             )
@@ -85,6 +86,28 @@ def main() -> int:
                 f"CREATE INDEX IF NOT EXISTS idx_{skills_table}_candidate_id ON {skills_table}(candidate_id)"
             )
             cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{skills_table}_job_id ON {skills_table}(job_id)")
+
+            # ── Performance indexes for search queries ────────────────────────
+            # candidate_profile indexes
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{candidates_table}_first_name ON {candidates_table}(LOWER(first_name))"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{candidates_table}_last_name ON {candidates_table}(LOWER(last_name))"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{candidates_table}_email ON {candidates_table}(LOWER(email))"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{candidates_table}_resume_sha256 ON {candidates_table}(resume_sha256)"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{candidates_table}_parsed_at ON {candidates_table}(parsed_at DESC)"
+            )
+            # candidate_skills_profile indexes for ILIKE searches
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{skills_table}_job_title_lower ON {skills_table}(LOWER(job_title))"
+            )
 
     print(f"✅ Ready: {candidates_table}, {skills_table}")
     return 0

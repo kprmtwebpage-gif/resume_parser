@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useCallback } from 'react'
-import { uploadResume } from '../services/api'
+import { uploadResume, checkUploadStatus } from '../services/api'
 
 const UploadContext = createContext(null)
 
@@ -13,6 +13,66 @@ export function UploadProvider({ children }) {
   const [uploads, setUploads] = useState([])
   const fileInputRef = useRef(null)
 
+  // ---- poll for background parse completion ----
+  const pollParseStatus = useCallback(async (upload, candidateId) => {
+    const maxAttempts = 60 // 60 * 3s = 3 min max
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(r => setTimeout(r, 3000))
+      try {
+        const status = await checkUploadStatus(candidateId)
+        if (status.status === 'completed') {
+          setUploads(prev =>
+            prev.map(u =>
+              u.id === upload.id
+                ? {
+                    ...u,
+                    progress: 100,
+                    status: 'completed',
+                    candidateInfo: {
+                      name: status.name,
+                      email: status.email,
+                      jobTitle: status.job_title,
+                    },
+                  }
+                : u
+            )
+          )
+          setTimeout(() => {
+            setUploads(prev => prev.filter(u => u.id !== upload.id))
+          }, 5000)
+          return
+        } else if (status.status === 'failed') {
+          setUploads(prev =>
+            prev.map(u =>
+              u.id === upload.id
+                ? { ...u, progress: 100, status: 'failed', errorMessage: status.message || 'Parsing failed' }
+                : u
+            )
+          )
+          return
+        }
+        // Still processing — update progress animation
+        setUploads(prev =>
+          prev.map(u =>
+            u.id === upload.id
+              ? { ...u, progress: Math.min(50 + attempt, 95) }
+              : u
+          )
+        )
+      } catch {
+        // Polling error — keep trying
+      }
+    }
+    // Timed out
+    setUploads(prev =>
+      prev.map(u =>
+        u.id === upload.id
+          ? { ...u, progress: 100, status: 'failed', errorMessage: 'Parsing timed out' }
+          : u
+      )
+    )
+  }, [])
+
   // ---- upload a single file to the backend ----
   const uploadFileToBackend = useCallback(async (upload) => {
     try {
@@ -22,7 +82,7 @@ export function UploadProvider({ children }) {
       )
       const result = await uploadResume(upload.file, (progress) => {
         setUploads(prev =>
-          prev.map(u => u.id === upload.id ? { ...u, progress: Math.min(progress, 95) } : u)
+          prev.map(u => u.id === upload.id ? { ...u, progress: Math.min(progress, 50) } : u)
         )
       })
 
@@ -43,10 +103,20 @@ export function UploadProvider({ children }) {
               : u
           )
         )
-        // Auto-remove completed after 5 s
         setTimeout(() => {
           setUploads(prev => prev.filter(u => u.id !== upload.id))
         }, 5000)
+
+      } else if (result.status === 'processing') {
+        // Backend accepted file — parsing in background. Poll for result.
+        setUploads(prev =>
+          prev.map(u =>
+            u.id === upload.id
+              ? { ...u, progress: 50, status: 'uploading' }
+              : u
+          )
+        )
+        pollParseStatus(upload, result.id)
 
       } else if (result.status === 'duplicate') {
         setUploads(prev =>
@@ -99,7 +169,7 @@ export function UploadProvider({ children }) {
         )
       )
     }
-  }, [])
+  }, [pollParseStatus])
 
   // ---- accept files, enqueue, and run with concurrency ----
   const handleFileSelect = useCallback(

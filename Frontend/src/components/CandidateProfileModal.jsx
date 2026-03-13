@@ -13,6 +13,7 @@ import {
   LinkIcon,
   IdentificationIcon
 } from '@heroicons/react/24/outline'
+import { useAuth } from '../contexts/AuthContext'
 
 /**
  * CandidateProfileModal - Full candidate profile view
@@ -23,6 +24,7 @@ import {
  *  - candidate: application data object from API
  */
 export default function CandidateProfileModal({ isOpen, onClose, candidate }) {
+  const { isAdmin } = useAuth()
   if (!candidate) return null
 
   // Resolve name from first_name/last_name or legacy candidate_name
@@ -186,6 +188,7 @@ export default function CandidateProfileModal({ isOpen, onClose, candidate }) {
                             {candidate.resume_filename || 'Resume File'}
                           </p>
                         </div>
+                        {isAdmin && (
                         <button
                           type="button"
                           onClick={handleDownloadResume}
@@ -194,6 +197,7 @@ export default function CandidateProfileModal({ isOpen, onClose, candidate }) {
                           <DocumentArrowDownIcon className="h-3.5 w-3.5" />
                           Download
                         </button>
+                        )}
                       </div>
                     )}
                   </div>

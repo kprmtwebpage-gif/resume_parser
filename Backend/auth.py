@@ -30,6 +30,7 @@ from typing import Optional
 import bcrypt
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -37,7 +38,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SECRET_KEY   = os.getenv("JWT_SECRET", "change-me-in-production-32-chars-minimum!")
 ALGORITHM    = "HS256"
 TOKEN_EXPIRE = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))  # 8 hours default
@@ -50,18 +51,18 @@ DB_CONFIG = dict(
     password = os.getenv("DB_PASSWORD", "admin"),
 )
 
-# ── SMTP config (Gmail) ──────────────────────────────────────────────────────
+# â”€â”€ SMTP config (Gmail) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SMTP_HOST     = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER     = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 OTP_EXPIRY_MINUTES = 10
 
-# ── OAuth2 scheme (reads token from Authorization: Bearer <token>) ─────────  
+# â”€â”€ OAuth2 scheme (reads token from Authorization: Bearer <token>) â”€â”€â”€â”€â”€â”€â”€â”€â”€  
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
-# ── Pydantic models ───────────────────────────────────────────────────────────
+# â”€â”€ Pydantic models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class Token(BaseModel):
     access_token: str
     token_type:   str = "bearer"
@@ -92,29 +93,45 @@ class ChangePassword(BaseModel):
     new_password: str
 
 
-# ── DB helpers ────────────────────────────────────────────────────────────────
+# â”€â”€ Connection pool (shared across all auth operations) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+_auth_pool = psycopg2.pool.ThreadedConnectionPool(
+    minconn=2,
+    maxconn=10,
+    **DB_CONFIG,
+    cursor_factory=psycopg2.extras.RealDictCursor,
+)
+
+# â”€â”€ DB helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _get_conn():
+    """Get a connection from the pool."""
+    return _auth_pool.getconn()
+
+def _put_conn(conn):
+    """Return a connection to the pool."""
+    _auth_pool.putconn(conn)
+
 def _db():
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         yield conn
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
 def get_user_by_username(username: str) -> Optional[dict]:
     """Return user row as dict, or None if not found. Lookup is case-insensitive."""
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
             return cur.fetchone()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
 def _ensure_login_sessions_table():
     """Idempotent: create login_sessions table if missing."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -129,7 +146,7 @@ def _ensure_login_sessions_table():
             """)
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 # Ensure table exists at import time
 try:
@@ -140,13 +157,13 @@ except Exception:
 
 def _migrate_admin_to_superuser():
     """One-time migration: rename role 'admin' to 'superuser'."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("UPDATE users SET role = 'superuser' WHERE role = 'admin'")
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 try:
     _migrate_admin_to_superuser()
@@ -156,7 +173,7 @@ except Exception:
 
 def _ensure_otp_table():
     """Idempotent: create password_reset_otps table if missing."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -171,7 +188,7 @@ def _ensure_otp_table():
             """)
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 try:
     _ensure_otp_table()
@@ -187,7 +204,7 @@ def _generate_otp() -> str:
 def _send_otp_email(to_email: str, otp_code: str, username: str) -> bool:
     """Send OTP code via Gmail SMTP. Returns True on success."""
     if not SMTP_USER or not SMTP_PASSWORD:
-        logger.warning("SMTP not configured — cannot send OTP email")
+        logger.warning("SMTP not configured â€” cannot send OTP email")
         return False
 
     msg = MIMEMultipart("alternative")
@@ -228,7 +245,7 @@ def _send_otp_email(to_email: str, otp_code: str, username: str) -> bool:
 def record_login(user_id: int, ip: str):
     """Increment total_logins, update last_login / last_ip, and log session."""
     _ensure_login_sessions_table()
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             # Update user stats
@@ -249,10 +266,10 @@ def record_login(user_id: int, ip: str):
             """, (user_id, username, ip))
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
-# ── Password helpers ──────────────────────────────────────────────────────────
+# â”€â”€ Password helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def verify_password(plain: str, hashed: str) -> bool:
     """Verify a plain password against a bcrypt hash."""
     return bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
@@ -263,7 +280,7 @@ def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
-# ── JWT helpers ───────────────────────────────────────────────────────────────
+# â”€â”€ JWT helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     payload = data.copy()
     expire  = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=TOKEN_EXPIRE))
@@ -283,7 +300,7 @@ def decode_token(token: str) -> dict:
         )
 
 
-# ── FastAPI dependencies ──────────────────────────────────────────────────────
+# â”€â”€ FastAPI dependencies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     """Dependency: validates token, returns user row dict."""
     payload  = decode_token(token)
@@ -306,7 +323,7 @@ async def get_current_admin(current_user: dict = Depends(get_current_user)) -> d
     return current_user
 
 
-# ── Router ────────────────────────────────────────────────────────────────────
+# â”€â”€ Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router = APIRouter()
 
 
@@ -352,7 +369,7 @@ async def login(
 @router.post("/logout")
 async def logout(current_user: dict = Depends(get_current_user)):
     """
-    Stateless logout — client should discard the JWT.
+    Stateless logout â€” client should discard the JWT.
     No server-side state is maintained (tokens are short-lived).
     """
     return {"detail": f"Goodbye, {current_user['username']}!"}
@@ -374,7 +391,7 @@ async def change_password(
         raise HTTPException(status_code=400, detail="Old password incorrect")
 
     new_hash = hash_password(body.new_password)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -383,18 +400,18 @@ async def change_password(
             )
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
     return {"detail": "Password changed successfully"}
 
 
-# ── Admin-only routes ─────────────────────────────────────────────────────────
+# â”€â”€ Admin-only routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/admin/users")
 async def admin_get_users(
     _: dict = Depends(get_current_admin),
 ):
     """Admin: list all users with their stats."""
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -408,7 +425,7 @@ async def admin_get_users(
             """)
             return cur.fetchall()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
 @router.post("/admin/create-user", response_model=UserOut)
@@ -424,7 +441,7 @@ async def admin_create_user(
     if not clean_email:
         clean_email = None
 
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             # Check username uniqueness (case-insensitive)
@@ -455,7 +472,7 @@ async def admin_create_user(
             row = cur.fetchone()
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
     return row
 
 
@@ -465,7 +482,7 @@ async def admin_toggle_user(
     _: dict = Depends(get_current_admin),
 ):
     """Admin: enable or disable a user account."""
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -477,7 +494,7 @@ async def admin_toggle_user(
                 raise HTTPException(status_code=404, detail="User not found")
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
     status_str = "enabled" if row["is_active"] else "disabled"
     return {"detail": f"User '{row['username']}' {status_str}"}
 
@@ -488,7 +505,7 @@ async def admin_delete_user(
     _: dict = Depends(get_current_admin),
 ):
     """Admin: permanently delete a user account."""
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             # Prevent deleting the last superuser
@@ -514,7 +531,7 @@ async def admin_delete_user(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
     finally:
-        conn.close()
+        _put_conn(conn)
     return {"detail": f"User '{user['username']}' permanently deleted"}
 
 
@@ -529,7 +546,7 @@ async def admin_reset_password(
     if len(new_password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -545,14 +562,14 @@ async def admin_reset_password(
             )
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
     return {"detail": "Password reset successfully"}
 
 
-# ── Forgot Password flow ─────────────────────────────────────────────────────────────
+# â”€â”€ Forgot Password flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _ensure_reset_requests_table():
     """Idempotent: create password_reset_requests table if missing."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -566,7 +583,7 @@ def _ensure_reset_requests_table():
             """)
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
 @router.post("/forgot-password")
@@ -596,7 +613,7 @@ async def forgot_password(body: dict):
         otp_code = _generate_otp()
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
 
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = _get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -609,7 +626,7 @@ async def forgot_password(body: dict):
                 )
             conn.commit()
         finally:
-            conn.close()
+            _put_conn(conn)
 
         sent = _send_otp_email(email, otp_code, username)
         if sent:
@@ -619,7 +636,7 @@ async def forgot_password(body: dict):
         else:
             return {"detail": "Email delivery failed. Contact your admin.", "otp_sent": False}
     else:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = _get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -632,7 +649,7 @@ async def forgot_password(body: dict):
                 """, (user["id"], username, user["id"]))
             conn.commit()
         finally:
-            conn.close()
+            _put_conn(conn)
         return {"detail": "Request submitted. Your admin will reset your password shortly.", "otp_sent": False}
 
 
@@ -649,7 +666,7 @@ async def verify_otp(body: dict):
     if user is None:
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -669,7 +686,7 @@ async def verify_otp(body: dict):
             cur.execute("UPDATE password_reset_otps SET used = TRUE WHERE id = %s", (row["id"],))
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
 
     reset_token = create_access_token(
         {"sub": username, "purpose": "password_reset"},
@@ -703,7 +720,7 @@ async def reset_password_with_otp(body: dict):
         raise HTTPException(status_code=400, detail="User not found")
 
     new_hash = hash_password(new_password)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_hash, user["id"]))
@@ -713,7 +730,7 @@ async def reset_password_with_otp(body: dict):
             )
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
     return {"detail": "Password reset successfully. You can now log in."}
 
 
@@ -721,7 +738,7 @@ async def reset_password_with_otp(body: dict):
 async def admin_get_reset_requests(_: dict = Depends(get_current_admin)):
     """Admin: list all pending (unresolved) password reset requests."""
     _ensure_reset_requests_table()
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -732,7 +749,7 @@ async def admin_get_reset_requests(_: dict = Depends(get_current_admin)):
             """)
             return cur.fetchall()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
 @router.delete("/admin/reset-requests/{request_id}")
@@ -741,7 +758,7 @@ async def admin_dismiss_reset_request(
     _: dict = Depends(get_current_admin),
 ):
     """Admin: dismiss a password reset request without resetting the password."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -752,11 +769,11 @@ async def admin_dismiss_reset_request(
                 raise HTTPException(status_code=404, detail="Request not found")
         conn.commit()
     finally:
-        conn.close()
+        _put_conn(conn)
     return {"detail": "Request dismissed"}
 
 
-# ── Login Session History ─────────────────────────────────────────────────────
+# â”€â”€ Login Session History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/admin/activity-log")
 async def admin_activity_log(
@@ -765,7 +782,7 @@ async def admin_activity_log(
 ):
     """Admin: get all login sessions across all users (most recent first)."""
     _ensure_login_sessions_table()
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -777,7 +794,7 @@ async def admin_activity_log(
             """, (limit,))
             return cur.fetchall()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
 @router.get("/admin/login-sessions/{user_id}")
@@ -788,7 +805,7 @@ async def admin_get_login_sessions(
 ):
     """Admin: get login history for a specific user (most recent first)."""
     _ensure_login_sessions_table()
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -801,7 +818,7 @@ async def admin_get_login_sessions(
             """, (user_id, limit))
             return cur.fetchall()
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
 @router.post("/admin/update-session-uploads/{session_id}")
@@ -812,7 +829,7 @@ async def update_session_uploads(
 ):
     """Update resume upload count for a login session."""
     _ensure_login_sessions_table()
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             resumes_uploaded = body.get("resumes_uploaded", 0)
@@ -824,17 +841,17 @@ async def update_session_uploads(
         conn.commit()
         return {"detail": "Session uploads updated"}
     finally:
-        conn.close()
+        _put_conn(conn)
 
 
-# ── Dashboard Stats ───────────────────────────────────────────────────────────
+# â”€â”€ Dashboard Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 CANDIDATES_TABLE = os.getenv("NEW_CANDIDATES_TABLE", "candidate_profile")
 
 @router.get("/admin/dashboard-stats")
 async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
     """Return aggregated stats for the admin dashboard."""
-    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _get_conn()
     try:
         with conn.cursor() as cur:
             # Total users
@@ -874,7 +891,7 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 conn.rollback()
                 success_rate = 0
 
-            # ── Trend indicators (compare this week vs last week) ─────────
+            # â”€â”€ Trend indicators (compare this week vs last week) â”€â”€â”€â”€â”€â”€â”€â”€â”€
             cur.execute("""
                 SELECT COUNT(DISTINCT user_id) AS cnt FROM login_sessions
                 WHERE logged_in_at >= date_trunc('week', CURRENT_DATE)
@@ -905,7 +922,7 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 conn.rollback()
                 resumes_trend = 0
 
-            # Login activity (daily for last 90 days — frontend filters)
+            # Login activity (daily for last 90 days â€” frontend filters)
             cur.execute("""
                 SELECT DATE(logged_in_at) AS date, COUNT(*) AS logins
                 FROM login_sessions
@@ -1097,5 +1114,5 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
             "recent_activity": [dict(a) for a in recent_activity],
         }
     finally:
-        conn.close()
+        _put_conn(conn)
 

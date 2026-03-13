@@ -16,6 +16,7 @@ except ImportError:
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from dotenv import load_dotenv
 import tempfile
 import shutil
@@ -363,21 +364,27 @@ async def upload_editor_image(image: UploadFile = File(...)):
 # This will be mounted at the end of the file to avoid conflicts with API routes
 
 
+# ── Connection pool (initialized once at startup) ─────────────────────────────
+_db_pool = psycopg2.pool.ThreadedConnectionPool(
+    minconn=2,
+    maxconn=20,
+    dbname=os.getenv("DB_NAME"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+    host=os.getenv("DB_HOST"),
+    port=os.getenv("DB_PORT"),
+    cursor_factory=psycopg2.extras.RealDictCursor,
+)
+
+
 @contextmanager
 def get_db():
-    """Database connection context manager"""
-    conn = psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT"),
-        cursor_factory=psycopg2.extras.RealDictCursor,
-    )
+    """Database connection context manager using connection pool"""
+    conn = _db_pool.getconn()
     try:
         yield conn
     finally:
-        conn.close()
+        _db_pool.putconn(conn)
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -506,6 +513,31 @@ def _get_commit() -> str:
     return _COMMIT_HASH
 
 
+@app.on_event("startup")
+async def _create_indexes():
+    """Create performance indexes and add missing columns on first start (idempotent)."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_first_name ON {CANDIDATES_TABLE}(LOWER(first_name))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_last_name ON {CANDIDATES_TABLE}(LOWER(last_name))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_email ON {CANDIDATES_TABLE}(LOWER(email))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_resume_sha256 ON {CANDIDATES_TABLE}(resume_sha256)")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_parsed_at ON {CANDIDATES_TABLE}(parsed_at DESC)")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SKILLS_TABLE}_job_title_lower ON {SKILLS_TABLE}(LOWER(job_title))")
+                # Add resume_parse_status column if missing
+                cur.execute(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN resume_parse_status TEXT DEFAULT 'completed';
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$
+                """)
+            conn.commit()
+        print("[OK] Performance indexes and schema verified")
+    except Exception as e:
+        print(f"[WARN] Could not create indexes: {e}")
+
+
 @app.get("/health")
 async def health_check():
     """Docker health check endpoint"""
@@ -562,6 +594,9 @@ async def get_candidates(
             # Build query with field-specific search
             where_conditions = []
             search_params = []
+
+            # Exclude resumes still being parsed or that failed parsing
+            where_conditions.append("(c.resume_parse_status IS NULL OR c.resume_parse_status = 'completed')")
             
             # Name search - supports comma-separated names with OR logic
             if name:
@@ -698,8 +733,8 @@ async def get_candidates(
             cursor.execute(data_sql, data_params)
             rows = cursor.fetchall()
 
-            # Get grand total (unfiltered) for UI display (e.g. "14 / 729")
-            cursor.execute(f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE}")
+            # Get grand total (only fully parsed) for UI display (e.g. "14 / 729")
+            cursor.execute(f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE} WHERE resume_parse_status IS NULL OR resume_parse_status = 'completed'")
             grand_total = cursor.fetchone()["total"]
             
             candidates = [
@@ -1311,7 +1346,7 @@ async def update_candidate(candidate_id: int, data: CandidateUpdate):
 
 @app.post("/upload-resume")
 async def upload_resume_endpoint(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    """Upload a resume file, parse it, and add to the database."""
+    """Upload a resume file, save it, and parse in background. Returns immediately."""
     import subprocess
     import sys
     from pathlib import Path
@@ -1326,14 +1361,10 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     cache_dir.mkdir(exist_ok=True)
 
     # Check if this filename already exists in the database.
-    # Strip any trailing _timestamp suffix from the stem so that both
-    # "ResumeFoo.pdf" and "ResumeFoo_1234567890.pdf" map to base stem "ResumeFoo".
     import re as _re
-    raw_stem = Path(file.filename).stem          # e.g. "ResumeSuryaPrakash" or "ResumeSuryaPrakash_1771934430"
-    base_stem = _re.sub(r'_\d{7,13}$', '', raw_stem)  # strip trailing _timestamp if present
-    # Escape regex special characters in the stem (dots, parentheses, etc.)
+    raw_stem = Path(file.filename).stem
+    base_stem = _re.sub(r'_\d{7,13}$', '', raw_stem)
     escaped_stem = _re.escape(base_stem)
-    # Matches: resumes_cache/ResumeSuryaPrakash.pdf  OR  resumes_cache/ResumeSuryaPrakash_<digits>.pdf
     regex_pattern = rf'^resumes_cache/{escaped_stem}(_\d{{7,13}})?{_re.escape(suffix)}$'
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -1359,14 +1390,13 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         }
 
     dest_path = cache_dir / file.filename
-    # Avoid overwriting existing file with different content
     if dest_path.exists():
         base = Path(file.filename).stem
         dest_path = cache_dir / f"{base}_{int(os.path.getmtime(str(dest_path)))}{suffix}"
 
     contents = await file.read()
 
-    # ── SHA-256 duplicate check: reject identical file content even with different filenames ──
+    # SHA-256 duplicate check
     import hashlib as _hashlib
     file_sha256 = _hashlib.sha256(contents).hexdigest()
     with get_db() as conn:
@@ -1392,7 +1422,6 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         }
 
     dest_path = cache_dir / file.filename
-    # Avoid overwriting existing file with different content
     if dest_path.exists():
         base = Path(file.filename).stem
         dest_path = cache_dir / f"{base}_{int(os.path.getmtime(str(dest_path)))}{suffix}"
@@ -1401,121 +1430,181 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         f.write(contents)
 
     save_name = dest_path.name
-
-    # Run parser for only this file.
-    # Use subprocess.run in a thread pool instead of asyncio.create_subprocess_exec
-    # because the latter raises NotImplementedError on Windows + Python 3.14
-    # (the default ProactorEventLoop doesn't support subprocess transports in all configs).
-    env = os.environ.copy()
-    env["RESUME_INPUT_DIR"] = str(cache_dir)
-    env["RESUME_PROCESS_ONLY"] = save_name
-    env["QUIET"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-
-    import subprocess as _sp
-    import concurrent.futures
-
-    def _run_parser():
-        return _sp.run(
-            [sys.executable, str(backend_dir / "parser.py")],
-            env=env,
-            capture_output=True,
-            cwd=str(backend_dir),
-            timeout=180,
-        )
-
-    try:
-        async with _parse_semaphore:  # max 3 concurrent parsers
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, _run_parser)
-            returncode = result.returncode
-            stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
-            stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
-    except _sp.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Parsing timed out. File may be too complex.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        print(f"[UPLOAD ERROR] {type(e).__name__}: {e}\n{tb}", flush=True)
-        raise HTTPException(status_code=500, detail=f"Parser error: {type(e).__name__}: {e}")
-
-    if returncode != 0:
-        print(f"[PARSER FAILED] file={save_name} returncode={returncode}\nSTDERR: {stderr_text[:1000]}", flush=True)
-        raise HTTPException(status_code=500, detail=f"Parser failed: {stderr_text[:500]}")
-
-    # Look up the newly created candidate by resume filename
     relative_filename = f"resumes_cache/{save_name}"
+
+    # Insert a placeholder candidate row with status 'processing'
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                f"""SELECT c.id, c.first_name, c.last_name, c.email, s.job_title
+                f"""INSERT INTO {CANDIDATES_TABLE} (resume_filename, resume_sha256, resume_parse_status)
+                    VALUES (%s, %s, 'processing')
+                    RETURNING id""",
+                (relative_filename, file_sha256),
+            )
+            placeholder_row = cursor.fetchone()
+        conn.commit()
+
+    placeholder_id = placeholder_row["id"]
+
+    # Extract auth info before background task
+    auth_header = request.headers.get("Authorization", "")
+
+    # Parse in background — returns immediately to frontend
+    async def _background_parse():
+        import subprocess as _sp
+        env = os.environ.copy()
+        env["RESUME_INPUT_DIR"] = str(cache_dir)
+        env["RESUME_PROCESS_ONLY"] = save_name
+        env["QUIET"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+
+        def _run_parser():
+            return _sp.run(
+                [sys.executable, str(backend_dir / "parser.py")],
+                env=env,
+                capture_output=True,
+                cwd=str(backend_dir),
+                timeout=180,
+            )
+
+        try:
+            async with _parse_semaphore:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, _run_parser)
+                returncode = result.returncode
+                stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
+
+            if returncode != 0:
+                print(f"[PARSER FAILED] file={save_name} rc={returncode}\nSTDERR: {stderr_text[:1000]}", flush=True)
+                with get_db() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed' WHERE id = %s",
+                            (placeholder_id,),
+                        )
+                    conn.commit()
+                return
+
+            # Parser succeeded — check if parser created its own row (it usually does)
+            with get_db() as conn:
+                with conn.cursor() as cursor:
+                    # Find the row the parser created (by filename, different from our placeholder)
+                    cursor.execute(
+                        f"""SELECT id FROM {CANDIDATES_TABLE}
+                            WHERE resume_filename = %s AND id != %s
+                            ORDER BY id DESC LIMIT 1""",
+                        (relative_filename, placeholder_id),
+                    )
+                    parser_row = cursor.fetchone()
+
+                    if parser_row:
+                        # Parser created its own row — delete our placeholder and mark parser row completed
+                        cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
+                        cursor.execute(
+                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                            (parser_row["id"],),
+                        )
+                        final_candidate_id = parser_row["id"]
+                    else:
+                        # Parser updated our placeholder row in-place
+                        cursor.execute(
+                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                            (placeholder_id,),
+                        )
+                        final_candidate_id = placeholder_id
+                conn.commit()
+
+            # Stamp uploaded_by
+            if AUTH_AVAILABLE and auth_header.startswith("Bearer "):
+                try:
+                    from auth import decode_token, get_user_by_username
+                    payload = decode_token(auth_header[7:])
+                    uploader_username = payload.get("sub")
+                    if uploader_username:
+                        uploader = get_user_by_username(uploader_username)
+                        if uploader and uploader.get("id"):
+                            uploader_id = uploader["id"]
+                            with get_db() as conn:
+                                with conn.cursor() as cursor:
+                                    cursor.execute(
+                                        f"UPDATE {CANDIDATES_TABLE} SET uploaded_by = %s WHERE id = %s",
+                                        (uploader_id, final_candidate_id),
+                                    )
+                                    cursor.execute(
+                                        "UPDATE users SET resumes_uploaded = resumes_uploaded + 1 WHERE id = %s",
+                                        (uploader_id,),
+                                    )
+                                    cursor.execute("""
+                                        UPDATE login_sessions
+                                        SET resumes_uploaded_this_session = resumes_uploaded_this_session + 1
+                                        WHERE id = (
+                                            SELECT id FROM login_sessions
+                                            WHERE user_id = %s
+                                            ORDER BY logged_in_at DESC
+                                            LIMIT 1
+                                        )
+                                    """, (uploader_id,))
+                                conn.commit()
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+
+        except Exception as e:
+            import traceback
+            print(f"[BG PARSE ERROR] {save_name}: {e}\n{traceback.format_exc()}", flush=True)
+            try:
+                with get_db() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed' WHERE id = %s",
+                            (placeholder_id,),
+                        )
+                    conn.commit()
+            except Exception:
+                pass
+
+    background_tasks.add_task(_background_parse)
+
+    return {
+        "status": "processing",
+        "message": "Resume uploaded — parsing in background",
+        "id": placeholder_id,
+        "filename": save_name,
+    }
+
+
+@app.get("/upload-status/{candidate_id}")
+async def get_upload_status(candidate_id: int):
+    """Poll the parse status of a recently uploaded resume."""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""SELECT c.id, c.first_name, c.last_name, c.email, c.resume_parse_status,
+                           s.job_title
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
-                    WHERE c.resume_filename = %s
-                    ORDER BY c.id DESC LIMIT 1""",
-                (relative_filename,)
+                    WHERE c.id = %s""",
+                (candidate_id,),
             )
             row = cursor.fetchone()
 
     if not row:
-        return {
-            "status": "completed",
-            "message": "Resume uploaded and parsed (candidate may already exist)",
-            "name": None, "email": None, "job_title": None,
-        }
+        raise HTTPException(status_code=404, detail="Candidate not found")
 
-    # ── Stamp uploaded_by if the caller is authenticated ──────────────────────
-    candidate_id = row["id"]
-    if AUTH_AVAILABLE:
-        try:
-            auth_header = request.headers.get("Authorization", "")
-            if auth_header.startswith("Bearer "):
-                from auth import decode_token, get_user_by_username
-                payload = decode_token(auth_header[7:])
-                uploader_username = payload.get("sub")
-                if uploader_username:
-                    uploader = get_user_by_username(uploader_username)
-                    if uploader and uploader.get("id"):
-                        uploader_id = uploader["id"]
-                        with get_db() as conn:
-                            with conn.cursor() as cursor:
-                                # Update candidate uploaded_by
-                                cursor.execute(
-                                    f"UPDATE {CANDIDATES_TABLE} SET uploaded_by = %s WHERE id = %s",
-                                    (uploader_id, candidate_id),
-                                )
-                                # Increment resumes_uploaded counter for this user
-                                cursor.execute(
-                                    "UPDATE users SET resumes_uploaded = resumes_uploaded + 1 WHERE id = %s",
-                                    (uploader_id,)
-                                )
-                                # Update current session's resume count (latest session for this user)
-                                # NOTE: PostgreSQL requires subquery for ORDER BY + LIMIT in UPDATE
-                                cursor.execute("""
-                                    UPDATE login_sessions
-                                    SET resumes_uploaded_this_session = resumes_uploaded_this_session + 1
-                                    WHERE id = (
-                                        SELECT id FROM login_sessions
-                                        WHERE user_id = %s
-                                        ORDER BY logged_in_at DESC
-                                        LIMIT 1
-                                    )
-                                """, (uploader_id,))
-                            conn.commit()
-        except Exception as e:
-            import traceback
-            traceback.print_exc()  # Log errors — never block upload
+    status = row.get("resume_parse_status", "completed")
+    result = {"id": row["id"], "status": status}
 
-    full_name = " ".join(filter(None, [row.get("first_name"), row.get("last_name")])) or None
-    return {
-        "status": "completed",
-        "id": row["id"],
-        "name": full_name,
-        "email": row.get("email"),
-        "job_title": row.get("job_title"),
-    }
+    if status == "completed":
+        full_name = " ".join(filter(None, [row.get("first_name"), row.get("last_name")])) or None
+        result.update({
+            "name": full_name,
+            "email": row.get("email"),
+            "job_title": row.get("job_title"),
+        })
+    elif status == "failed":
+        result["message"] = "Resume parsing failed"
+
+    return result
 
 
 # Google Drive Integration Endpoints

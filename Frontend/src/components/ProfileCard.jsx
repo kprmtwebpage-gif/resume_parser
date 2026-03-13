@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { FaLinkedin } from 'react-icons/fa'
 import { useTheme } from '../contexts/ThemeContext'
+import { useAuth } from '../contexts/AuthContext'
 import { apiUrl } from '../config'
 import { api } from '../services/api'
 import ResumeViewer from './ResumeViewer.jsx'
@@ -98,6 +99,7 @@ function ActionsDropdown({ anchorRef, isOpen, onClose, children, colors }) {
 
 export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit }) {
   const { colors, isDark } = useTheme()
+  const { isAdmin } = useAuth()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
   const [isGenerated, setIsGenerated] = useState(false)
   const [isDownloaded, setIsDownloaded] = useState(false)
@@ -405,6 +407,7 @@ Availability: ${row.availability || 'N/A'}`
                     >
                       View Resume
                     </button>
+                    {isAdmin && (
                     <button
                       type="button"
                       onClick={handleDownloadResume}
@@ -415,6 +418,7 @@ Availability: ${row.availability || 'N/A'}`
                     >
                       Download Resume
                     </button>
+                    )}
                   </>
                 ) : (
                   <>
@@ -424,12 +428,14 @@ Availability: ${row.availability || 'N/A'}`
                     >
                       View Resume
                     </div>
+                    {isAdmin && (
                     <div 
                       className="px-4 py-2 text-sm cursor-not-allowed"
                       style={{ color: isDark ? '#64748b' : '#cbd5e1' }}
                     >
                       Download Resume
                     </div>
+                    )}
                   </>
                 )}
                 <button
