@@ -258,7 +258,7 @@ def record_login(user_id: int, ip: str):
                 RETURNING username
             """, (ip, user_id))
             row = cur.fetchone()
-            username = row[0] if row else ""
+            username = row["username"] if row else ""
             # Insert session record
             cur.execute("""
                 INSERT INTO login_sessions (user_id, username, ip_address)
