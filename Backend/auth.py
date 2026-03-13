@@ -102,11 +102,11 @@ def _db():
 
 
 def get_user_by_username(username: str) -> Optional[dict]:
-    """Return user row as dict, or None if not found."""
+    """Return user row as dict, or None if not found. Lookup is case-insensitive."""
     conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+            cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
             return cur.fetchone()
     finally:
         conn.close()
@@ -417,8 +417,8 @@ async def admin_create_user(
     _: dict = Depends(get_current_admin),
 ):
     """Admin: create a new user account."""
-    # Normalize: trim whitespace, lowercase for comparison
-    clean_username = body.username.strip()
+    # Normalize: trim whitespace, store username as lowercase
+    clean_username = body.username.strip().lower()
     clean_email = body.email.strip() if body.email else None
     # Treat empty string as no email
     if not clean_email:
