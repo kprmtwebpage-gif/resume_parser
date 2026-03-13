@@ -67,11 +67,12 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = Boolean(token && user)
   const isAdmin         = user?.role === 'superuser' || user?.role === 'admin'
+  const isUploadUser    = user?.role === 'upload_user'
 
   return (
     <AuthContext.Provider value={{
       token, user, loading, error,
-      isAuthenticated, isAdmin,
+      isAuthenticated, isAdmin, isUploadUser,
       login, logout, getAuthHeaders,
     }}>
       {children}

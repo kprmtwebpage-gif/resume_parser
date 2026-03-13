@@ -552,70 +552,18 @@ def _build_targeted_prompt(resume_text: str, weak_fields: list[str]) -> str:
     )
 
 
-def _call_targeted_llm(resume_text: str, weak_fields: list[str]) -> dict | None:
-    """Make a targeted LLM call for specific weak fields."""
-    import json
+def _call_targeted_llm(resume_text: str, weak_fields: list[str], source_file: str = "") -> dict | None:
+    """
+    Make a targeted LLM call for specific weak fields.
 
-    # ── Master switch: USE_LLM=false disables all LLM calls ──────────────
-    master = os.getenv("USE_LLM", "false").strip().casefold()
-    if master not in {"1", "true", "yes", "on"}:
-        logger.debug("hybrid_enhancer: LLM disabled (USE_LLM=%s)", os.getenv("USE_LLM", "false"))
-        return None
+    Uses the multi-provider chain (HuggingFace → Groq → NLP-only fallback).
+    Never raises — returns None on all failure paths so callers always
+    fall back to regex/NLP results gracefully.
+    """
+    from llm_provider_chain import call_llm_chain
 
-    try:
-        import openai
-    except ImportError:
-        logger.warning("hybrid_enhancer: openai package not installed")
-        return None
-    
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    base_url = os.getenv("LLM_BASE_URL", "").strip()
-    model = os.getenv("LLM_MODEL", "llama-3.1-8b-instant").strip()
-    
-    if not api_key:
-        logger.warning("hybrid_enhancer: no API key configured")
-        return None
-    
     prompt = _build_targeted_prompt(resume_text, weak_fields)
-    
-    kwargs: dict[str, Any] = {"api_key": api_key, "timeout": 30.0}
-    if base_url:
-        kwargs["base_url"] = base_url
-    
-    try:
-        client = openai.OpenAI(**kwargs)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a resume parser. Extract data and return ONLY valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0,
-            max_tokens=512,
-            timeout=30.0,
-        )
-        raw = response.choices[0].message.content or ""
-        
-        # Parse JSON from response
-        text = raw.strip()
-        for fence in ("```json", "```"):
-            if text.startswith(fence):
-                text = text[len(fence):]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end != -1:
-                return json.loads(text[start:end + 1])
-    except Exception as e:
-        logger.warning("hybrid_enhancer: LLM call failed: %s: %s", type(e).__name__, e)
-    
-    return None
+    return call_llm_chain(prompt, source_file=source_file)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -752,7 +700,7 @@ def enhance_extraction(
                 time.sleep(delay)
             
             # Make targeted LLM call
-            llm_result = _call_targeted_llm(resume_text, weak_fields)
+            llm_result = _call_targeted_llm(resume_text, weak_fields, source_file=source_file)
             llm_called = True
             
             if llm_result:

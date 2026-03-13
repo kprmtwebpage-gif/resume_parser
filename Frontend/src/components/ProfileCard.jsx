@@ -8,6 +8,7 @@ import {
 import { FaLinkedin } from 'react-icons/fa'
 import { useTheme } from '../contexts/ThemeContext'
 import { apiUrl } from '../config'
+import { api } from '../services/api'
 import ResumeViewer from './ResumeViewer.jsx'
 import EmailProviderModal from './EmailProviderModal.jsx'
 import CommentModal from './CommentModal.jsx'
@@ -123,23 +124,36 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     setIsDropdownOpen(false)
   }, [viewResumeUrl])
 
-  const handleDownloadResume = useCallback((e) => {
+  const handleDownloadResume = useCallback(async (e) => {
     e.stopPropagation()
     e.preventDefault()
-    if (!downloadResumeUrl) return
-    
-    // Mark as downloaded (temporary state only)
+    if (!row.id || !row.resume_filename) return
     setIsDownloaded(true)
     setIsDropdownOpen(false)
-    
-    // Then trigger download
-    const link = document.createElement('a')
-    link.href = downloadResumeUrl
-    link.download = (row.resume_filename || `resume_${row.id}`).split('/').pop()
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }, [downloadResumeUrl, row.resume_filename, row.id])
+    try {
+      const res = await api.get(`/candidates/${row.id}/resume`, { responseType: 'blob' })
+      const contentType = res.headers['content-type'] || ''
+      if (contentType.includes('application/json')) {
+        alert('Resume file is not available on the server.')
+        return
+      }
+      const blob = new Blob([res.data], { type: contentType })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = (row.resume_filename || `resume_${row.id}`).split('/').pop()
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      if (err.response?.status === 429) {
+        alert(err.response?.data?.detail || 'Daily download limit reached (10 resumes/day). Superusers have unlimited downloads.')
+      } else {
+        alert('Failed to download resume. Please try again.')
+      }
+    }
+  }, [row.id, row.resume_filename])
 
   const handleCloseViewer = useCallback(() => {
     setIsViewerOpen(false)
@@ -253,7 +267,7 @@ Availability: ${row.availability || 'N/A'}`
                   type="button"
                   className="truncate text-left text-sm font-semibold hover:text-brand-500 transition-colors duration-300"
                   style={{ color: colors.text }}
-                  onClick={onOpen}
+                  onClick={() => onOpen()}
                   title={fullName}
                 >
                   {fullName}

@@ -19,11 +19,12 @@ function RoleBadge({ role }) {
   const isSuperuser = role === 'superuser' || role === 'admin'
   const cls = isSuperuser
     ? 'bg-violet-50 text-violet-700'
-    : 'bg-gray-100 text-gray-600'
-  const label = isSuperuser ? 'superuser' : role
+    : role === 'upload_user'
+      ? 'bg-emerald-50 text-emerald-700'
+      : 'bg-gray-100 text-gray-600'
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cls}`}>
-      {label}
+      {role}
     </span>
   )
 }
@@ -87,6 +88,7 @@ function CreateUserModal({ onClose, onCreated, getAuthHeaders }) {
           </div>
           <select className={inp} value={form.role} onChange={e => setForm(f=>({...f, role: e.target.value}))}>
             <option value="user">user</option>
+            <option value="upload_user">upload_user</option>
             <option value="superuser">superuser</option>
           </select>
           <div className="flex gap-3 pt-2">

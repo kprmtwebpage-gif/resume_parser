@@ -74,6 +74,8 @@ export default function ProfileModal({
   const resumeIsPdf = hasResume && candidate.resume_filename.toLowerCase().endsWith('.pdf')
   const resumeIsImage = hasResume && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(candidate.resume_filename)
 
+  const [exportingResume, setExportingResume] = useState(false)
+
   useEffect(() => setShow(open), [open])
 
   useEffect(() => {
@@ -85,6 +87,36 @@ export default function ProfileModal({
       setDocTextHtml(null)
     }
   }, [open, candidate])
+
+  const handleExportResume = async () => {
+    if (!candidate?.id) return
+    setExportingResume(true)
+    try {
+      const res = await api.get(`/candidates/${candidate.id}/resume`, { responseType: 'blob' })
+      const contentType = res.headers['content-type'] || ''
+      if (contentType.includes('application/json')) {
+        alert('Resume file is not available on the server.')
+        return
+      }
+      const blob = new Blob([res.data], { type: contentType })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = candidate.resume_filename || 'resume'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      if (err.response?.status === 429) {
+        alert(err.response?.data?.detail || 'Daily download limit reached (10 resumes/day). Superusers have unlimited downloads.')
+      } else {
+        alert('Resume file is not available for download.')
+      }
+    } finally {
+      setExportingResume(false)
+    }
+  }
 
 
 
@@ -522,20 +554,21 @@ export default function ProfileModal({
                           </div>
                           {/* Export Button in Header */}
                           {hasResume && (
-                            <a
-                              href={apiUrl(`/candidates/${candidate.id}/resume`)}
-                              download
+                            <button
+                              onClick={handleExportResume}
+                              disabled={exportingResume}
                               className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300"
                               style={{
-                                backgroundColor: '#2563eb',
+                                backgroundColor: exportingResume ? '#93c5fd' : '#2563eb',
                                 color: '#ffffff',
+                                cursor: exportingResume ? 'not-allowed' : 'pointer',
                               }}
-                              onMouseEnter={(e) => e.target.style.backgroundColor = '#1d4ed8'}
-                              onMouseLeave={(e) => e.target.style.backgroundColor = '#2563eb'}
+                              onMouseEnter={(e) => { if (!exportingResume) e.target.style.backgroundColor = '#1d4ed8' }}
+                              onMouseLeave={(e) => { if (!exportingResume) e.target.style.backgroundColor = '#2563eb' }}
                               title="Export Resume"
                             >
-                              Export
-                            </a>
+                              {exportingResume ? 'Downloading...' : 'Export'}
+                            </button>
                           )}
                         </div>
                         <div 
@@ -579,15 +612,15 @@ export default function ProfileModal({
                                 </div>
                                 <p className="text-lg font-medium mb-2 transition-colors duration-300" style={{ color: colors.text }}>Could not extract .doc preview</p>
                                 <p className="text-sm mb-4 transition-colors duration-300" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Use the Export button to download this file.</p>
-                                {baseResumeUrl && (
-                                  <a
-                                    href={baseResumeUrl}
-                                    download
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                                {hasResume && (
+                                  <button
+                                    onClick={handleExportResume}
+                                    disabled={exportingResume}
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                    Download Resume
-                                  </a>
+                                    {exportingResume ? 'Downloading...' : 'Download Resume'}
+                                  </button>
                                 )}
                               </div>
                               )

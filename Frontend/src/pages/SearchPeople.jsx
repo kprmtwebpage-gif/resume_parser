@@ -146,10 +146,9 @@ export default function SearchPeople() {
     if (!silent) setLoading(true)
     setError('')
     try {
+      // Only send backend-required filters (keywords, experience).
+      // Name, location, jobTitle are filtered client-side in filteredRows useMemo.
       const data = await fetchCandidates({ 
-        name: filters.name || undefined,
-        location: filters.location || undefined,
-        jobTitle: filters.jobTitle || undefined,
         keywords: filters.keywords || undefined,
         experienceFrom: filters.experienceFrom ?? undefined,
         experienceTo: filters.experienceTo ?? undefined,
@@ -192,7 +191,7 @@ export default function SearchPeople() {
     } finally {
       setLoading(false)
     }
-  }, [filters.name, filters.location, filters.jobTitle, filters.keywords, filters.experienceFrom, filters.experienceTo])
+  }, [filters.keywords, filters.experienceFrom, filters.experienceTo])
 
   useEffect(() => {
     load()
@@ -322,7 +321,11 @@ export default function SearchPeople() {
       window.URL.revokeObjectURL(url)
     } catch (e) {
       console.error('Export failed:', e)
-      alert('Failed to export resumes. Please try again.')
+      if (e.response?.status === 429) {
+        alert(e.response?.data?.detail || 'Daily download limit reached (10 resumes/day). Superusers have unlimited downloads.')
+      } else {
+        alert('Failed to export resumes. Please try again.')
+      }
     } finally {
       setExporting(false)
     }
@@ -344,7 +347,11 @@ export default function SearchPeople() {
       window.URL.revokeObjectURL(url)
     } catch (e) {
       console.error('Export all failed:', e)
-      alert('Failed to export resumes. Please try again.')
+      if (e.response?.status === 429) {
+        alert(e.response?.data?.detail || 'Daily download limit reached (10 resumes/day). Superusers have unlimited downloads.')
+      } else {
+        alert('Failed to export resumes. Please try again.')
+      }
     } finally {
       setExporting(false)
     }

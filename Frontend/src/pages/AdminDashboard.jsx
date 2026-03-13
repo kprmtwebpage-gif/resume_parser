@@ -24,9 +24,11 @@ function formatDate(iso) {
 }
 
 function RoleBadge({ role }) {
-  const cls = role === 'admin'
+  const cls = role === 'superuser' || role === 'admin'
     ? 'bg-purple-900/60 text-purple-300 border border-purple-700'
-    : 'bg-slate-700 text-slate-300 border border-slate-600'
+    : role === 'upload_user'
+      ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-700'
+      : 'bg-slate-700 text-slate-300 border border-slate-600'
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
       {role}
@@ -76,7 +78,8 @@ function CreateUserModal({ onClose, onCreated, getAuthHeaders }) {
           <input required className={inp} placeholder="Password"  value={form.password} onChange={e => setForm(f=>({...f, password: e.target.value}))} type="password" minLength={6} />
           <select className={inp} value={form.role} onChange={e => setForm(f=>({...f, role: e.target.value}))}>
             <option value="user">user</option>
-            <option value="admin">admin</option>
+            <option value="upload_user">upload_user</option>
+            <option value="superuser">superuser</option>
           </select>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose}

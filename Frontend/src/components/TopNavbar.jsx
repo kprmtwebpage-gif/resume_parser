@@ -14,8 +14,12 @@ const baseNavItems = [
 
 export default function TopNavbar() {
   const { isDark, toggleTheme, colors } = useTheme()
-  const { getAuthHeaders, isAdmin } = useAuth()
-  const navItems = isAdmin ? [...baseNavItems, { label: 'Admin', path: '/admin' }] : baseNavItems
+  const { getAuthHeaders, isAdmin, isUploadUser } = useAuth()
+  const navItems = isUploadUser
+    ? [{ label: 'Upload', path: '/upload' }]
+    : isAdmin
+      ? [...baseNavItems, { label: 'Admin', path: '/admin' }]
+      : baseNavItems
   const [showChangePwd, setShowChangePwd] = useState(false)
   const [oldPwd, setOldPwd] = useState('')
   const [newPwd, setNewPwd] = useState('')

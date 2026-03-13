@@ -47,6 +47,22 @@ function AppContent() {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />
   }
 
+  // Upload-only users: restrict to /upload route exclusively
+  try {
+    const stored = localStorage.getItem('rp_user')
+    const user = stored ? JSON.parse(stored) : null
+    if (user?.role === 'upload_user') {
+      return (
+        <UploadProvider>
+          <Routes>
+            <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
+            <Route path="*" element={<Navigate to="/upload" replace />} />
+          </Routes>
+        </UploadProvider>
+      )
+    }
+  } catch {}
+
   return (
     <UploadProvider>
       <ServerStatus />

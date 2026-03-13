@@ -375,6 +375,15 @@ def _pdf_ocr_mode() -> str:
     return v if v in {"header", "full"} else "header"
 
 
+def _pdf_ocr_timeout() -> int:
+    """Per-page OCR timeout in seconds (default: 30)."""
+    try:
+        n = int(os.getenv("PDF_OCR_TIMEOUT", "30") or "30")
+    except Exception:
+        n = 30
+    return max(5, min(120, n))
+
+
 def _text_has_contact_signals(text: str) -> bool:
     t = (text or "")
     if not t:
@@ -454,7 +463,7 @@ def _pdf_ocr_page_text(page) -> str:
 
     try:
         img = ocr_page.to_image(resolution=dpi).original
-        txt = pt.image_to_string(img, config="--oem 3 --psm 6") or ""
+        txt = pt.image_to_string(img, config="--oem 3 --psm 6", timeout=_pdf_ocr_timeout()) or ""
         txt = normalize_text(txt)
         # Avoid flooding downstream heuristics with huge OCR blobs.
         max_chars = int(os.getenv("PDF_OCR_MAX_CHARS", "8000") or "8000")
@@ -8709,21 +8718,31 @@ def main() -> int:
             )
             
             extraction_method = "regex"  # Default
-            use_llm = should_use_llm_fallback(
-                confidence_score,
-                threshold=float(os.getenv("LLM_CONFIDENCE_THRESHOLD", "0.75")),
-                missing_critical_fields=missing_critical
-            )
+            
+            # ── PARSE_MODE switch ──────────────────────────────────────────
+            # PARSE_MODE=nlp    → Pure NLP/regex only, no LLM calls (fast, free)
+            # PARSE_MODE=hybrid → NLP + LLM fallback when confidence < threshold
+            _parse_mode = os.getenv("PARSE_MODE", "nlp").strip().casefold()
+            
+            # Determine if we should use LLM based on mode
+            use_llm = False
+            llm_explicitly_enabled = False
+            if _parse_mode == "hybrid":
+                use_llm = should_use_llm_fallback(
+                    confidence_score,
+                    threshold=float(os.getenv("LLM_CONFIDENCE_THRESHOLD", "0.75")),
+                    missing_critical_fields=missing_critical
+                )
+                llm_explicitly_enabled = True
             
             _log.info(
-                "CONFIDENCE [%s] score=%.2f (%s) missing_critical=%d use_llm=%s",
+                "CONFIDENCE [%s] score=%.2f (%s) missing_critical=%d parse_mode=%s use_llm=%s",
                 file, confidence_score, get_confidence_category(confidence_score),
-                missing_critical, use_llm
+                missing_critical, _parse_mode, use_llm
             )
             
             # ── LLM enrichment layer (triggered by low confidence or env flag) ─
             _llm = None
-            llm_explicitly_enabled = os.getenv("LLM_EXTRACT_ENABLED", "").strip().casefold() in {"true", "1", "yes"}
             
             # Check daily limit before calling LLM
             llm_allowed, llm_status_msg = check_llm_limit()

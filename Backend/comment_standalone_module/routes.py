@@ -79,3 +79,23 @@ async def get_comments(
         .all()
     )
     return comments
+
+
+@router.delete(
+    "/{comment_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Delete a standalone comment by ID",
+)
+async def delete_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+):
+    comment = db.query(StandaloneComment).filter(StandaloneComment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Comment {comment_id} not found",
+        )
+    db.delete(comment)
+    db.commit()
+    return {"message": "Comment deleted", "id": comment_id}

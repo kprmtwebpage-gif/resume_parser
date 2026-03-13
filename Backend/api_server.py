@@ -20,10 +20,11 @@ from dotenv import load_dotenv
 import tempfile
 import shutil
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, BackgroundTasks, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, BackgroundTasks, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # --- helpers ---------------------------------------------------------------
 _NO_CACHE_HEADERS = {
@@ -53,12 +54,14 @@ except ImportError as e:
 
 # Import auth module
 try:
-    from auth import router as auth_router, get_current_user, get_current_admin
+    from auth import router as auth_router, get_current_user, get_current_admin, decode_token, get_user_by_username
     AUTH_AVAILABLE = True
 except ImportError as e:
     print(f"[WARN] Auth module not available: {e}")
     AUTH_AVAILABLE = False
     auth_router = None
+    decode_token = None
+    get_user_by_username = None
 
 # Load environment variables
 load_dotenv()
@@ -71,6 +74,91 @@ app = FastAPI(title="Resume Parser API", version="1.0.0")
 
 # Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
 _parse_semaphore = asyncio.Semaphore(3)
+
+# ── Resume Download Quota Tracking ────────────────────────────────────────────
+DAILY_DOWNLOAD_LIMIT = 10
+_http_bearer_optional = HTTPBearer(auto_error=False)
+
+def _ensure_download_logs_table():
+    """Idempotent: create resume_download_logs table for daily quota tracking."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS resume_download_logs (
+                    id            SERIAL PRIMARY KEY,
+                    user_id       INTEGER NOT NULL,
+                    download_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                    count         INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE (user_id, download_date)
+                )
+            """)
+        conn.commit()
+
+try:
+    _ensure_download_logs_table()
+except Exception:
+    pass
+
+def _get_today_download_count(user_id: int) -> int:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count FROM resume_download_logs WHERE user_id = %s AND download_date = CURRENT_DATE",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            return row["count"] if row else 0
+
+def _increment_download_count(user_id: int, amount: int = 1):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO resume_download_logs (user_id, download_date, count)
+                VALUES (%s, CURRENT_DATE, %s)
+                ON CONFLICT (user_id, download_date) DO UPDATE
+                SET count = resume_download_logs.count + EXCLUDED.count
+                """,
+                (user_id, amount),
+            )
+        conn.commit()
+
+async def _get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_http_bearer_optional),
+) -> Optional[dict]:
+    """Dependency: returns the user dict if a valid Bearer token is provided, else None."""
+    if not credentials or not AUTH_AVAILABLE or decode_token is None:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+        username = payload.get("sub")
+        if not username:
+            return None
+        return get_user_by_username(username)
+    except Exception:
+        return None
+
+def _enforce_download_limit(current_user: Optional[dict], amount: int = 1):
+    """Raise 429 if a non-superuser user exceeds their daily download quota."""
+    if not current_user:
+        return
+    role = current_user.get("role", "user")
+    if role in ("superuser", "admin"):
+        return  # unlimited
+    user_id = current_user["id"]
+    current_count = _get_today_download_count(user_id)
+    remaining = DAILY_DOWNLOAD_LIMIT - current_count
+    if remaining <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily download limit of {DAILY_DOWNLOAD_LIMIT} resumes reached. Try again tomorrow.",
+        )
+    if amount > remaining:
+        raise HTTPException(
+            status_code=429,
+            detail=f"This would exceed your daily limit. You can download {remaining} more resume(s) today.",
+        )
+    _increment_download_count(user_id, amount)
 
 # CORS configuration - allows dev, production, and server IP
 _extra_origins = [o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()]
@@ -659,15 +747,22 @@ class BulkDownloadRequest(BaseModel):
     candidate_ids: List[int]
 
 @app.post("/candidates/bulk-download")
-async def bulk_download_resumes(body: BulkDownloadRequest):
+async def bulk_download_resumes(
+    body: BulkDownloadRequest,
+    current_user: Optional[dict] = Depends(_get_optional_user),
+):
     """
     Download multiple resumes as a single ZIP archive.
     Accepts a JSON body with { "candidate_ids": [1, 2, 3, ...] }.
+    Non-superuser accounts are limited to 10 resumes per day.
     """
     if not body.candidate_ids:
         raise HTTPException(status_code=400, detail="No candidate IDs provided")
     if len(body.candidate_ids) > 200:
         raise HTTPException(status_code=400, detail="Maximum 200 candidates per download")
+
+    # Enforce daily download quota (counted before zipping to avoid partial work)
+    _enforce_download_limit(current_user, amount=len(body.candidate_ids))
 
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -1037,11 +1132,20 @@ async def search_job_titles(
 
 
 @app.get("/candidates/{candidate_id}/resume")
-async def download_resume(candidate_id: int, inline: bool = Query(False, description="Serve inline for viewing instead of download")):
+async def download_resume(
+    candidate_id: int,
+    inline: bool = Query(False, description="Serve inline for viewing instead of download"),
+    current_user: Optional[dict] = Depends(_get_optional_user),
+):
     """
     Serve the original resume file for a candidate.
     Pass ?inline=true to display in browser (PDF preview); omit for download.
+    Non-superuser accounts are limited to 10 downloads per day (inline views are free).
     """
+    # Enforce daily quota only for actual downloads (not inline preview)
+    if not inline:
+        _enforce_download_limit(current_user, amount=1)
+
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
