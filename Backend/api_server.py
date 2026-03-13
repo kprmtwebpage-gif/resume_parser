@@ -1433,13 +1433,15 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     relative_filename = f"resumes_cache/{save_name}"
 
     # Insert a placeholder candidate row with status 'processing'
+    # Note: Do NOT include resume_sha256 here — parser.py will insert its own row
+    # with the SHA256, and having it on the placeholder causes a UniqueViolation.
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                f"""INSERT INTO {CANDIDATES_TABLE} (resume_filename, resume_sha256, resume_parse_status)
-                    VALUES (%s, %s, 'processing')
+                f"""INSERT INTO {CANDIDATES_TABLE} (resume_filename, resume_parse_status)
+                    VALUES (%s, 'processing')
                     RETURNING id""",
-                (relative_filename, file_sha256),
+                (relative_filename,),
             )
             placeholder_row = cursor.fetchone()
         conn.commit()
