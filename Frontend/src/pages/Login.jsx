@@ -95,10 +95,9 @@ export default function Login() {
                   required
                   placeholder="Enter admin username"
                   value={username}
-                  onChange={e => setUsername(e.target.value.toLowerCase())}
+                  onChange={e => setUsername(e.target.value)}
                   disabled={loading}
                   className="admin-form-input"
-                  style={{ textTransform: 'lowercase' }}
                   autoFocus
                 />
               </div>
@@ -171,9 +170,8 @@ export default function Login() {
                     type="text"
                     placeholder="Your username"
                     value={forgotUser}
-                    onChange={e => setForgotUser(e.target.value.toLowerCase())}
+                    onChange={e => setForgotUser(e.target.value)}
                     className="admin-form-input"
-                    style={{ textTransform: 'lowercase' }}
                   />
                   <div className="admin-forgot-buttons">
                     <button type="button" onClick={() => setShowForgot(false)} className="admin-forgot-cancel">Cancel</button>
