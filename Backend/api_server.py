@@ -1500,13 +1500,48 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                     parser_row = cursor.fetchone()
 
                     if parser_row:
-                        # Parser created its own row — delete our placeholder and mark parser row completed
-                        cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
+                        parser_id = parser_row["id"]
+                        # Capture parsed data from the parser's row
                         cursor.execute(
-                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
-                            (parser_row["id"],),
+                            f"""SELECT first_name, last_name, address, phone, email,
+                                       qualification, visa_support, work_authorization_type,
+                                       linkedin, profile_picture_url, resume_sha256, parsed_at
+                                FROM {CANDIDATES_TABLE} WHERE id = %s""",
+                            (parser_id,),
                         )
-                        final_candidate_id = parser_row["id"]
+                        parsed_data = cursor.fetchone()
+                        # Move skills to placeholder before deleting parser row (ON DELETE CASCADE)
+                        cursor.execute(
+                            f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
+                            (placeholder_id, parser_id),
+                        )
+                        # Delete parser's duplicate row (frees resume_sha256 UNIQUE constraint)
+                        cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
+                        # Merge parsed data into our placeholder — keeps placeholder_id valid for frontend polling
+                        if parsed_data:
+                            cursor.execute(
+                                f"""UPDATE {CANDIDATES_TABLE}
+                                    SET first_name = %s, last_name = %s, address = %s,
+                                        phone = %s, email = %s, qualification = %s,
+                                        visa_support = %s, work_authorization_type = %s,
+                                        linkedin = %s, profile_picture_url = %s,
+                                        resume_sha256 = %s, parsed_at = %s,
+                                        resume_parse_status = 'completed'
+                                    WHERE id = %s""",
+                                (parsed_data["first_name"], parsed_data["last_name"],
+                                 parsed_data["address"], parsed_data["phone"],
+                                 parsed_data["email"], parsed_data["qualification"],
+                                 parsed_data["visa_support"], parsed_data["work_authorization_type"],
+                                 parsed_data["linkedin"], parsed_data["profile_picture_url"],
+                                 parsed_data["resume_sha256"], parsed_data["parsed_at"],
+                                 placeholder_id),
+                            )
+                        else:
+                            cursor.execute(
+                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                                (placeholder_id,),
+                            )
+                        final_candidate_id = placeholder_id
                     else:
                         # Parser updated our placeholder row in-place
                         cursor.execute(
