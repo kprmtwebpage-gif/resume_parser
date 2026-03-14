@@ -1,0 +1,250 @@
+================================================================
+  MANUAL DEPLOYMENT GUIDE – Resume Parser (KPRMT)
+  Local → DEV → UAT → PRODUCTION
+================================================================
+
+SERVER     : 89.167.60.41
+GIT REPO   : https://github.com/kprmtwebpage-gif/resume_parser
+SSH KEY    : C:\Users\prave\.ssh\id_ed25519
+
+ENVIRONMENT  │  GIT BRANCH  │  PORT  │  URL
+─────────────┼──────────────┼────────┼────────────────────────────────────
+DEV          │  dev         │  8002  │  http://kprmtglobalsolutions.duckdns.org/dev
+UAT          │  uat         │  8001  │  http://kprmtglobalsolutions.duckdns.org/uat
+PRODUCTION   │  prod        │  8000  │  http://kprmtglobalsolutions.duckdns.org
+
+==============================================================
+  STEP 1: LOCAL → DEV
+==============================================================
+
+1. Make and test your code changes locally.
+
+2. Stage and commit:
+     cd "Resume_Parsing -Latest -Updated_UI"
+     git add .
+     git commit -m "your commit message"
+
+3. Push to dev branch (auto-triggers GitHub Actions deploy):
+     git push origin dev
+
+4. VERIFY deployment via GitHub Actions:
+     Go to: https://github.com/kprmtwebpage-gif/resume_parser/actions
+     Watch the "Deploy" workflow run complete (green tick).
+
+5. VERIFY DEV is live:
+     http://kprmtglobalsolutions.duckdns.org/dev
+
+   OR test via SSH:
+     ssh -i "C:\Users\prave\.ssh\id_ed25519" root@89.167.60.41
+     docker ps --filter name=resume-api-dev
+     # Should show: Up X minutes (healthy)
+
+--------------------------------------------------------------
+  MANUAL DEV DEPLOY (if GitHub Actions is down):
+--------------------------------------------------------------
+   ssh -i "C:\Users\prave\.ssh\id_ed25519" root@89.167.60.41
+   cd /root/resume-parser
+   git fetch origin && git reset --hard origin/dev
+   bash deploy_dev.sh
+
+
+==============================================================
+  STEP 2: DEV → UAT
+==============================================================
+
+IMPORTANT: Test thoroughly on DEV before promoting to UAT.
+
+1. Merge dev into uat branch:
+     git checkout uat
+     git merge dev
+     git push origin uat
+
+   This auto-triggers the UAT deploy via GitHub Actions.
+
+2. VERIFY via GitHub Actions:
+     https://github.com/kprmtwebpage-gif/resume_parser/actions
+
+3. VERIFY UAT is live:
+     http://kprmtglobalsolutions.duckdns.org/uat
+
+4. (Optional) Sync production resumes into UAT for realistic testing:
+     ssh -i "C:\Users\prave\.ssh\id_ed25519" root@89.167.60.41
+     cd /root/resume-parser
+     bash sync_prod_resumes_to_uat.sh
+
+5. Run UAT acceptance tests before proceeding to prod.
+
+--------------------------------------------------------------
+  MANUAL UAT DEPLOY (if GitHub Actions is down):
+--------------------------------------------------------------
+   ssh -i "C:\Users\prave\.ssh\id_ed25519" root@89.167.60.41
+   cd /root/resume-parser
+   git fetch origin && git reset --hard origin/uat
+   bash deploy_uat.sh
+
+
+==============================================================
+  STEP 3: UAT → PRODUCTION (SAFE DEPLOYMENT)
+==============================================================
+
+WARNING: Production push does NOT auto-deploy – manual approval required.
+
+RECOMMENDED: Use safe_deploy_to_production.sh which automatically:
+  - Backs up the production database
+  - Syncs prod resumes to UAT
+  - Verifies UAT health
+  - Deploys to production
+  - Runs health check
+
+--- Option A: Safe Orchestrated Deploy (RECOMMENDED) ----------
+
+1. SSH into the server:
+     ssh -i "C:\Users\prave\.ssh\id_ed25519" root@89.167.60.41
+
+2. Switch to the prod branch on server and merge uat:
+     cd /root/resume-parser
+     git fetch origin
+     git checkout prod
+     git merge origin/uat
+     git push origin prod
+
+3. Run the safe deploy script:
+     bash safe_deploy_to_production.sh
+
+   This script will:
+     [1/5] Pre-flight checks (checks prod API health)
+     [2/5] Backup production DB → database_backups/production_backup_YYYYMMDD_HHMMSS.sql
+     [3/5] Sync latest prod resumes to UAT
+     [4/5] Verify UAT health checks pass
+     [5/5] Deploy to production via deploy_prod.sh
+
+--- Option B: GitHub Actions Manual Trigger -------------------
+
+1. Go to: https://github.com/kprmtwebpage-gif/resume_parser/actions
+2. Click "Deploy" workflow → "Run workflow"
+3. Select environment: prod
+4. Click "Run workflow"
+
+   Note: This skips the DB backup/UAT tests – use Option A for safety.
+
+--- Option C: Direct Manual Deploy ----------------------------
+
+1. SSH into server:
+     ssh -i "C:\Users\prave\.ssh\id_ed25519" root@89.167.60.41
+
+2. Backup database FIRST (always):
+     docker exec resume-db-prod pg_dump -U postgres resume_prod \
+       > /root/resume-parser/database_backups/manual_backup_$(date +%Y%m%d_%H%M%S).sql
+
+3. Pull and deploy:
+     cd /root/resume-parser
+     git fetch origin && git reset --hard origin/prod
+     bash deploy_prod.sh
+
+4. Verify production:
+     curl http://localhost:8000/health
+
+
+==============================================================
+  ROLLBACK PROCEDURE
+==============================================================
+
+If production deployment breaks something:
+
+--- Quick Rollback (revert to previous Docker image) ----------
+   ssh -i "C:\Users\prave\.ssh\id_ed25519" root@89.167.60.41
+   cd /root/resume-parser
+   git revert HEAD --no-edit
+   git push origin prod
+   # Then trigger GitHub Actions or run deploy_prod.sh
+
+--- Database Rollback -----------------------------------------
+   # List available backups
+   ls /root/resume-parser/database_backups/
+
+   # Restore a backup
+   docker exec -i resume-db-prod psql -U postgres -d postgres -c "DROP DATABASE resume_prod;"
+   docker exec -i resume-db-prod psql -U postgres -d postgres -c "CREATE DATABASE resume_prod;"
+   docker exec -i resume-db-prod psql -U postgres -d resume_prod \
+     < /root/resume-parser/database_backups/production_backup_YYYYMMDD_HHMMSS.sql
+
+
+==============================================================
+  USEFUL COMMANDS ON SERVER
+==============================================================
+
+# SSH into server
+ssh -i "C:\Users\prave\.ssh\id_ed25519" -o StrictHostKeyChecking=no root@89.167.60.41
+
+# Check all running containers
+docker ps | grep resume
+
+# Check DEV API logs (last 50 lines)
+docker logs resume-api-dev --tail 50
+
+# Check UAT API logs
+docker logs resume-api-uat --tail 50
+
+# Check PROD API logs
+docker logs resume-api-prod --tail 50
+
+# Restart DEV API only (without rebuild)
+docker restart resume-api-dev
+
+# Force rebuild DEV (rebuilds images from scratch)
+cd /root/resume-parser
+docker compose -p resume-dev --env-file .env.dev \
+  -f docker-compose.yml -f docker-compose.dev.yml \
+  up -d --build api ingestion
+
+# Force rebuild PROD
+docker compose -p resume-prod --env-file .env.prod \
+  -f docker-compose.yml -f docker-compose.prod.yml \
+  up -d --build api ingestion
+
+# Check DEV database
+docker exec -it resume-db-dev psql -U postgres -d resume_dev
+
+# Clear DEV database (DANGER – deletes all data)
+docker exec -i resume-db-dev psql -U postgres -d resume_dev -c \
+  "DELETE FROM candidate_skills_profile; DELETE FROM candidate_profile; \
+   UPDATE users SET resumes_uploaded = 0; \
+   UPDATE login_sessions SET resumes_uploaded_this_session = 0;"
+
+# Health checks
+curl http://localhost:8002/health    # DEV
+curl http://localhost:8001/health    # UAT
+curl http://localhost:8000/health    # PROD
+
+
+==============================================================
+  GITHUB ACTIONS SECRETS (Settings → Secrets → Actions)
+==============================================================
+
+  SSH_HOST         = 89.167.60.41
+  SSH_USER         = root
+  SSH_PRIVATE_KEY  = (contents of C:\Users\prave\.ssh\id_ed25519)
+
+
+==============================================================
+  DEPLOYMENT CHECKLIST
+==============================================================
+
+Before DEV deploy:
+  [ ] Code tested locally (syntax check, logic review)
+  [ ] No secrets / credentials committed to git
+  [ ] git status clean (all changes committed)
+
+Before UAT deploy:
+  [ ] DEV is stable and tested
+  [ ] All known bugs from DEV are fixed
+  [ ] Upload a batch of resumes on DEV, verify parsing
+
+Before PRODUCTION deploy:
+  [ ] UAT has been tested with real-world data
+  [ ] DB backup completed
+  [ ] Deployment window planned (low-traffic period)
+  [ ] Rollback plan ready (backup file identified)
+  [ ] test on UAT: http://kprmtglobalsolutions.duckdns.org/uat
+
+================================================================

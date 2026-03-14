@@ -1,36 +1,16 @@
 {
   "daily_stats": {
-    "2026-03-09": {
-      "llm_calls": 53,
-      "high_confidence_skips": 393,
-      "total_resumes": 446,
+    "2026-03-14": {
+      "llm_calls": 278,
+      "high_confidence_skips": 1866,
+      "total_resumes": 2144,
       "extraction_methods": {
-        "regex": 226,
-        "hybrid": 0,
-        "llm": 0
-      }
-    },
-    "2026-03-11": {
-      "llm_calls": 296,
-      "high_confidence_skips": 1684,
-      "total_resumes": 1980,
-      "extraction_methods": {
-        "regex": 1006,
-        "hybrid": 0,
-        "llm": 0
-      }
-    },
-    "2026-03-12": {
-      "llm_calls": 120,
-      "high_confidence_skips": 645,
-      "total_resumes": 765,
-      "extraction_methods": {
-        "regex": 383,
+        "regex": 1107,
         "hybrid": 0,
         "llm": 0
       }
     }
   },
-  "total_lifetime_calls": 469,
-  "last_reset": "2026-03-09T18:24:31.898960"
+  "total_lifetime_calls": 278,
+  "last_reset": "2026-03-14T01:01:59.183378"
 }
