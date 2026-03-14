@@ -74,7 +74,7 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
 # Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
-_parse_semaphore = asyncio.Semaphore(3)
+_parse_semaphore = asyncio.Semaphore(2)
 
 # ── Resume Download Quota Tracking ────────────────────────────────────────────
 DAILY_DOWNLOAD_LIMIT = 10
@@ -1577,11 +1577,127 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                 (placeholder_id,),
                             )
                         else:
-                            # Parser didn't populate placeholder — mark failed
-                            cursor.execute(
-                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed' WHERE id = %s",
-                                (placeholder_id,),
-                            )
+                            # Parser returned rc=0 but didn't populate placeholder.
+                            # Likely a transient text extraction failure (resource contention).
+                            # Retry once — by now other concurrent parsers have finished.
+                            print(f"[PARSE RETRY] file={save_name} — parser skipped file, retrying once", flush=True)
+                            conn.commit()  # commit current state before retry
+                            try:
+                                retry_result = await loop.run_in_executor(None, _run_parser)
+                                retry_rc = retry_result.returncode
+                                retry_stderr = (retry_result.stderr or b"").decode("utf-8", errors="replace")
+                                if retry_rc != 0:
+                                    print(f"[PARSE RETRY FAILED] file={save_name} rc={retry_rc}\nSTDERR: {retry_stderr[:500]}", flush=True)
+                            except Exception as retry_err:
+                                print(f"[PARSE RETRY ERROR] file={save_name} {retry_err}", flush=True)
+                                retry_rc = -1
+
+                            # Re-check placeholder after retry
+                            with get_db() as conn2:
+                                with conn2.cursor() as cur2:
+                                    # Check for parser row from retry (email/name match)
+                                    cur2.execute(
+                                        f"""SELECT id FROM {CANDIDATES_TABLE}
+                                            WHERE resume_filename = %s AND id != %s
+                                            ORDER BY id DESC LIMIT 1""",
+                                        (relative_filename, placeholder_id),
+                                    )
+                                    retry_parser_row = cur2.fetchone()
+                                    if retry_parser_row:
+                                        rpid = retry_parser_row["id"]
+                                        cur2.execute(
+                                            f"""SELECT first_name, last_name, address, phone, email,
+                                                       qualification, visa_support, work_authorization_type,
+                                                       linkedin, profile_picture_url, parsed_at
+                                                FROM {CANDIDATES_TABLE} WHERE id = %s""",
+                                            (rpid,),
+                                        )
+                                        rpdata = cur2.fetchone()
+                                        cur2.execute(
+                                            f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
+                                            (placeholder_id, rpid),
+                                        )
+                                        cur2.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (rpid,))
+                                        if rpdata:
+                                            cur2.execute(
+                                                f"""UPDATE {CANDIDATES_TABLE}
+                                                    SET first_name=%s, last_name=%s, address=%s,
+                                                        phone=%s, email=%s, qualification=%s,
+                                                        visa_support=%s, work_authorization_type=%s,
+                                                        linkedin=%s, profile_picture_url=%s,
+                                                        parsed_at=%s, resume_parse_status='completed'
+                                                    WHERE id=%s""",
+                                                (rpdata["first_name"], rpdata["last_name"],
+                                                 rpdata["address"], rpdata["phone"],
+                                                 rpdata["email"], rpdata["qualification"],
+                                                 rpdata["visa_support"], rpdata["work_authorization_type"],
+                                                 rpdata["linkedin"], rpdata["profile_picture_url"],
+                                                 rpdata["parsed_at"], placeholder_id),
+                                            )
+                                        else:
+                                            cur2.execute(
+                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='completed' WHERE id=%s",
+                                                (placeholder_id,),
+                                            )
+                                    else:
+                                        cur2.execute(
+                                            f"SELECT parsed_at FROM {CANDIDATES_TABLE} WHERE id = %s",
+                                            (placeholder_id,),
+                                        )
+                                        recheck = cur2.fetchone()
+                                        if recheck and recheck.get("parsed_at"):
+                                            cur2.execute(
+                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='completed' WHERE id=%s",
+                                                (placeholder_id,),
+                                            )
+                                        else:
+                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — marking failed after retry", flush=True)
+                                            cur2.execute(
+                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='failed' WHERE id=%s",
+                                                (placeholder_id,),
+                                            )
+                                conn2.commit()
+                            # Skip the outer conn.commit() — already committed above
+                            final_candidate_id = placeholder_id
+                            # Jump past the outer commit
+                            conn.commit()
+
+                            # Stamp uploaded_by
+                            if AUTH_AVAILABLE and auth_header.startswith("Bearer "):
+                                try:
+                                    from auth import decode_token, get_user_by_username
+                                    payload = decode_token(auth_header[7:])
+                                    uploader_username = payload.get("sub")
+                                    if uploader_username:
+                                        uploader = get_user_by_username(uploader_username)
+                                        if uploader and uploader.get("id"):
+                                            uploader_id = uploader["id"]
+                                            with get_db() as conn:
+                                                with conn.cursor() as cursor:
+                                                    cursor.execute(
+                                                        f"UPDATE {CANDIDATES_TABLE} SET uploaded_by = %s WHERE id = %s",
+                                                        (uploader_id, final_candidate_id),
+                                                    )
+                                                    cursor.execute(
+                                                        "UPDATE users SET resumes_uploaded = resumes_uploaded + 1 WHERE id = %s",
+                                                        (uploader_id,),
+                                                    )
+                                                    cursor.execute("""
+                                                        UPDATE login_sessions
+                                                        SET resumes_uploaded_this_session = resumes_uploaded_this_session + 1
+                                                        WHERE id = (
+                                                            SELECT id FROM login_sessions
+                                                            WHERE user_id = %s
+                                                            ORDER BY logged_in_at DESC
+                                                            LIMIT 1
+                                                        )
+                                                    """, (uploader_id,))
+                                                conn.commit()
+                                except Exception:
+                                    import traceback
+                                    traceback.print_exc()
+                            return
+
                         final_candidate_id = placeholder_id
                 conn.commit()
 
