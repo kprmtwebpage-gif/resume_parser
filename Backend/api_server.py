@@ -534,6 +534,13 @@ async def _create_indexes():
                     EXCEPTION WHEN duplicate_column THEN NULL;
                     END $$
                 """)
+                # Add parse_failure_reason column if missing
+                cur.execute(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN parse_failure_reason TEXT;
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$
+                """)
             conn.commit()
         print("[OK] Performance indexes and schema verified")
     except Exception as e:
@@ -1501,12 +1508,15 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
 
             if returncode != 0:
+                # Extract a concise reason from stderr
+                _reason_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.startswith(' ')]
+                _reason = _reason_lines[0][:300] if _reason_lines else f"Parser exited with code {returncode}"
                 print(f"[PARSER FAILED] file={save_name} rc={returncode}\nSTDERR: {stderr_text[:1000]}", flush=True)
                 with get_db() as conn:
                     with conn.cursor() as cursor:
                         cursor.execute(
-                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed' WHERE id = %s",
-                            (placeholder_id,),
+                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = %s WHERE id = %s",
+                            (_reason, placeholder_id),
                         )
                     conn.commit()
                 return
@@ -1580,6 +1590,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             # Parser returned rc=0 but didn't populate placeholder.
                             # Likely a transient text extraction failure (resource contention).
                             # Retry once with semaphore + delay so other parsers finish first.
+                            _skip_reason = "Parser skipped file (text extraction failed — will retry)"
                             print(f"[PARSE RETRY] file={save_name} — parser skipped file, retrying once", flush=True)
                             conn.commit()  # commit current state before retry
                             try:
@@ -1654,9 +1665,12 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                             )
                                         else:
                                             print(f"[PARSE RETRY EXHAUSTED] file={save_name} — marking failed after retry", flush=True)
+                                            _retry_stderr = (retry_result.stderr or b"").decode("utf-8", errors="replace") if hasattr(retry_result, 'stderr') and retry_result.stderr else ""
+                                            _skip_lines = [l.strip() for l in _retry_stderr.splitlines() if "Skipped" in l or "error" in l.lower()]
+                                            _exhausted_reason = _skip_lines[0][:300] if _skip_lines else "Text extraction failed after retry (possible file corruption or unsupported format)"
                                             cur2.execute(
-                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='failed' WHERE id=%s",
-                                                (placeholder_id,),
+                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='failed', parse_failure_reason=%s WHERE id=%s",
+                                                (_exhausted_reason, placeholder_id),
                                             )
                                 conn2.commit()
                             # Skip the outer conn.commit() — already committed above
@@ -1832,12 +1846,13 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         except Exception as e:
             import traceback
             print(f"[BG PARSE ERROR] {save_name}: {e}\n{traceback.format_exc()}", flush=True)
+            _bg_reason = f"{e.__class__.__name__}: {str(e)[:250]}"
             try:
                 with get_db() as conn:
                     with conn.cursor() as cursor:
                         cursor.execute(
-                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed' WHERE id = %s",
-                            (placeholder_id,),
+                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = %s WHERE id = %s",
+                            (_bg_reason, placeholder_id),
                         )
                     conn.commit()
             except Exception:
@@ -1860,7 +1875,7 @@ async def get_upload_status(candidate_id: int):
         with conn.cursor() as cursor:
             cursor.execute(
                 f"""SELECT c.id, c.first_name, c.last_name, c.email, c.resume_parse_status,
-                           s.job_title
+                           c.parse_failure_reason, s.job_title
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                     WHERE c.id = %s""",
@@ -1882,7 +1897,8 @@ async def get_upload_status(candidate_id: int):
             "job_title": row.get("job_title"),
         })
     elif status == "failed":
-        result["message"] = "Resume parsing failed"
+        failure_reason = row.get("parse_failure_reason")
+        result["message"] = failure_reason or "Resume parsing failed"
 
     return result
 
