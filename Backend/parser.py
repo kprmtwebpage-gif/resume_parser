@@ -8045,10 +8045,11 @@ def main() -> int:
         pdf_timeout_seconds = 45.0
 
     # Optional: allow processing only a subset of files (used by retry loops).
+    # NOTE: Do NOT split on commas — filenames can legitimately contain commas.
     only_raw = os.getenv("RESUME_PROCESS_ONLY", "").strip()
     only_set: set[str] | None = None
     if only_raw:
-        parts = re.split(r"[;\n\r,]+", only_raw)
+        parts = re.split(r"[;\n\r]+", only_raw)
         cleaned = [Path(p.strip()).name for p in parts if p and p.strip()]
         only_set = {c for c in cleaned if c}
 

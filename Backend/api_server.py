@@ -1579,11 +1579,13 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                         else:
                             # Parser returned rc=0 but didn't populate placeholder.
                             # Likely a transient text extraction failure (resource contention).
-                            # Retry once — by now other concurrent parsers have finished.
+                            # Retry once with semaphore + delay so other parsers finish first.
                             print(f"[PARSE RETRY] file={save_name} — parser skipped file, retrying once", flush=True)
                             conn.commit()  # commit current state before retry
                             try:
-                                retry_result = await loop.run_in_executor(None, _run_parser)
+                                await asyncio.sleep(2)  # brief delay to let other parsers finish
+                                async with _parse_semaphore:
+                                    retry_result = await loop.run_in_executor(None, _run_parser)
                                 retry_rc = retry_result.returncode
                                 retry_stderr = (retry_result.stderr or b"").decode("utf-8", errors="replace")
                                 if retry_rc != 0:
