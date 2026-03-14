@@ -518,12 +518,43 @@ def extract_text_from_pdf(path: str) -> str:
     return result
 
 
+def _strip_multipart_wrapper(path: str) -> str:
+    """If a PDF file is wrapped in an HTTP multipart form boundary, strip it.
+
+    Some upload pipelines accidentally save the raw multipart body instead of
+    just the file content.  Detect this by checking if the file starts with
+    ``------`` (boundary marker) instead of ``%PDF-``, locate the embedded PDF
+    data, and rewrite the file in-place.
+    """
+    with open(path, "rb") as f:
+        header = f.read(20)
+    if header.startswith(b"%PDF-") or b"------" not in header[:20]:
+        return path  # already a proper PDF
+    with open(path, "rb") as f:
+        raw = f.read()
+    pdf_start = raw.find(b"%PDF-")
+    if pdf_start < 0:
+        return path  # no embedded PDF found
+    # Find the trailing boundary
+    boundary = raw[: raw.find(b"\r\n")].strip()
+    end_marker = boundary + b"--"
+    pdf_end = raw.rfind(end_marker)
+    if pdf_end <= pdf_start:
+        pdf_end = len(raw)
+    pdf_data = raw[pdf_start:pdf_end].rstrip()
+    with open(path, "wb") as f:
+        f.write(pdf_data)
+    return path
+
+
 def extract_text_and_first_page_from_pdf(path: str) -> tuple[str, str]:
     """Return (full_text, first_page_text).
 
     Many resumes put name/contact/location/linkedin + target role on page 1.
     Using the first page as a priority source improves accuracy.
     """
+    # Strip multipart form wrapper if present (corrupt upload).
+    path = _strip_multipart_wrapper(path)
 
     text_parts: list[str] = []
     first_page_text = ""
