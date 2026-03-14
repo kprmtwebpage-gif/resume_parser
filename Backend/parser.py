@@ -666,11 +666,17 @@ def extract_pdf_with_timeout(path: str, *, timeout_seconds: float) -> tuple[str,
         full_text, first_page_text = extract_text_and_first_page_from_pdf(path)
         return full_text, extract_links_from_pdf(path), first_page_text
 
-    ctx = mp.get_context("spawn")
-    recv_end, send_end = ctx.Pipe(duplex=False)
-    proc = ctx.Process(target=_pdf_extract_worker, args=(path, send_end), daemon=True)
-    proc.start()
-    send_end.close()
+    try:
+        ctx = mp.get_context("spawn")
+        recv_end, send_end = ctx.Pipe(duplex=False)
+        proc = ctx.Process(target=_pdf_extract_worker, args=(path, send_end), daemon=True)
+        proc.start()
+        send_end.close()
+    except RuntimeError:
+        # multiprocessing spawn fails when running as a subprocess (e.g. from uvicorn).
+        # Fall back to direct (in-process) extraction without timeout protection.
+        full_text, first_page_text = extract_text_and_first_page_from_pdf(path)
+        return full_text, extract_links_from_pdf(path), first_page_text
 
     try:
         # On some Windows/Python combinations, Pipe.poll() can block longer than
@@ -720,7 +726,6 @@ def extract_links_from_pdf(path: str) -> list[str]:
 def extract_text_from_docx(path: str) -> str:
     if Document is None:
         raise RuntimeError("python-docx is not installed; cannot parse DOCX")
-    doc = Document(path)
 
     def _extract_xml_text() -> str:
         """Best-effort extraction of text from DOCX XML.
@@ -769,6 +774,17 @@ def extract_text_from_docx(path: str) -> str:
                 lines.append(ln)
 
     parts: list[str] = []
+
+    # Try opening with python-docx; corrupt files (bad CRC, truncated ZIP)
+    # fall back to raw XML text extraction which skips media files.
+    try:
+        doc = Document(path)
+    except Exception:
+        # BadZipFile / corrupt media — extract text from XML directly
+        xml_text = _extract_xml_text()
+        if xml_text and xml_text.strip():
+            return xml_text
+        raise  # truly unreadable
 
     # ── Header/footer content FIRST — this is where candidate name,
     # contact info, and job title typically live in professionally
