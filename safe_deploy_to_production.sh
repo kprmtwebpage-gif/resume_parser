@@ -118,6 +118,21 @@ fi
 echo "" | tee -a "$LOG_FILE"
 
 # ───────────────────────────────────────────────────────────────
+# STEP 2.5: SYNC UAT USERS TO PRODUCTION
+# ───────────────────────────────────────────────────────────────
+log "${YELLOW}[2.5/4] Syncing UAT user accounts to production...${NC}"
+
+# Export users from UAT DB → import into PROD DB (upsert: skip existing)
+if docker exec resume-db-uat pg_dump -U postgres resume_parser \
+    --table users --data-only --column-inserts --on-conflict-do-nothing 2>/dev/null \
+    | docker exec -i resume-db-prod psql -U postgres -d resume_parser 2>&1 | tee -a "$LOG_FILE"; then
+    success "UAT users synced to production"
+else
+    log "${YELLOW}⚠  User sync skipped (users may already exist in PROD)${NC}"
+fi
+echo "" | tee -a "$LOG_FILE"
+
+# ───────────────────────────────────────────────────────────────
 # STEP 3: UAT SANITY CHECK (optional)
 # ───────────────────────────────────────────────────────────────
 log "${YELLOW}[3/4] Checking UAT health...${NC}"

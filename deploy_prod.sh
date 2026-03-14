@@ -2,7 +2,17 @@
 # ================================================================
 # deploy_prod.sh  –  Deploy PROD environment from prod branch
 #
-# ⚠️  PRODUCTION DEPLOYMENT – use with caution!
+# This builds Docker images from the current code (prod branch)
+# with PROD-specific configuration and starts the PROD stack.
+# No separate source copy needed.
+#
+# Usage (on server):
+#   cd /root/resume-parser
+#   bash deploy_prod.sh
+#
+# Prerequisites:
+#   - .env.prod file exists (copy from .env.prod.example)
+#   - Docker + Docker Compose installed
 # ================================================================
 set -euo pipefail
 
@@ -16,8 +26,10 @@ echo "════════════════════════�
 
 cd "$PROJECT_DIR"
 
+# ── 1. Verify .env.prod exists ───────────────────────────────
 if [ ! -f "$ENV_FILE" ]; then
     echo "❌ Missing $ENV_FILE"
+    echo "   Copy from .env.prod.example and fill in values:"
     echo "   cp .env.prod.example .env.prod"
     exit 1
 fi
@@ -27,6 +39,7 @@ echo "📂 Project dir: $PROJECT_DIR"
 echo "🔧 Compose project: $COMPOSE_PROJECT"
 echo ""
 
+# ── 2. Pull latest code (if on a git repo) ──────────────────
 if [ -d ".git" ]; then
     CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
     echo "🔄 Current branch: $CURRENT_BRANCH"
@@ -35,6 +48,7 @@ if [ -d ".git" ]; then
     echo ""
 fi
 
+# ── 3. Build & start PROD stack ─────────────────────────────
 echo "🏗️  Building PROD containers (this may take a few minutes)..."
 docker compose \
     -p "$COMPOSE_PROJECT" \
@@ -47,6 +61,7 @@ echo ""
 echo "⏳ Waiting for services to start..."
 sleep 15
 
+# ── 4. Health check ─────────────────────────────────────────
 echo "🩺 Running health check..."
 if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
     echo "✅ PROD API is healthy"
