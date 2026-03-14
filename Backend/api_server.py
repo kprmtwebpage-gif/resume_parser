@@ -525,6 +525,8 @@ async def _create_indexes():
                 cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_resume_sha256 ON {CANDIDATES_TABLE}(resume_sha256)")
                 cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_parsed_at ON {CANDIDATES_TABLE}(parsed_at DESC)")
                 cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SKILLS_TABLE}_job_title_lower ON {SKILLS_TABLE}(LOWER(job_title))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_parse_status ON {CANDIDATES_TABLE}(resume_parse_status)")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SKILLS_TABLE}_candidate_id ON {SKILLS_TABLE}(candidate_id)")
                 # Add resume_parse_status column if missing
                 cur.execute(f"""
                     DO $$ BEGIN
@@ -1432,19 +1434,41 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     save_name = dest_path.name
     relative_filename = f"resumes_cache/{save_name}"
 
-    # Insert a placeholder candidate row with status 'processing'
-    # Note: Do NOT include resume_sha256 here — parser.py will insert its own row
-    # with the SHA256, and having it on the placeholder causes a UniqueViolation.
+    # Insert a placeholder row WITH SHA256 so parser.py's ON CONFLICT (resume_sha256)
+    # updates the placeholder in-place instead of creating a separate row.
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(
-                f"""INSERT INTO {CANDIDATES_TABLE} (resume_filename, resume_parse_status)
-                    VALUES (%s, 'processing')
-                    RETURNING id""",
-                (relative_filename,),
-            )
-            placeholder_row = cursor.fetchone()
-        conn.commit()
+            try:
+                cursor.execute(
+                    f"""INSERT INTO {CANDIDATES_TABLE} (resume_filename, resume_sha256, resume_parse_status)
+                        VALUES (%s, %s, 'processing')
+                        RETURNING id""",
+                    (relative_filename, file_sha256),
+                )
+                placeholder_row = cursor.fetchone()
+                conn.commit()
+            except Exception as _insert_exc:
+                conn.rollback()
+                # Concurrent upload of same file — race between SHA256 check and INSERT
+                if 'unique' in str(_insert_exc).lower() or 'duplicate' in str(_insert_exc).lower():
+                    cursor.execute(
+                        f"""SELECT c.id, c.first_name, c.last_name, c.email, s.job_title, c.resume_parse_status
+                            FROM {CANDIDATES_TABLE} c
+                            LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
+                            WHERE c.resume_sha256 = %s LIMIT 1""",
+                        (file_sha256,),
+                    )
+                    dup = cursor.fetchone()
+                    if dup:
+                        _n = " ".join(filter(None, [dup.get("first_name"), dup.get("last_name")])) or None
+                        return {
+                            "status": dup.get("resume_parse_status") or "completed",
+                            "message": "This exact resume is already being processed",
+                            "id": dup["id"], "name": _n,
+                            "email": dup.get("email"), "job_title": dup.get("job_title"),
+                            "duplicate": True,
+                        }
+                raise
 
     placeholder_id = placeholder_row["id"]
 
@@ -1487,10 +1511,13 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                     conn.commit()
                 return
 
-            # Parser succeeded — check if parser created its own row (it usually does)
+            # Parser succeeded.
+            # With SHA256 on the placeholder, parser's ON CONFLICT (resume_sha256)
+            # updates the placeholder in-place (most common case).
+            # If parser matched by email/name, it may have updated a different row instead.
             with get_db() as conn:
                 with conn.cursor() as cursor:
-                    # Find the row the parser created (by filename, different from our placeholder)
+                    # Check if parser created / updated a DIFFERENT row (email/name match case)
                     cursor.execute(
                         f"""SELECT id FROM {CANDIDATES_TABLE}
                             WHERE resume_filename = %s AND id != %s
@@ -1501,23 +1528,20 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
 
                     if parser_row:
                         parser_id = parser_row["id"]
-                        # Capture parsed data from the parser's row
+                        # Parser matched an existing record by email/name — merge into placeholder
                         cursor.execute(
                             f"""SELECT first_name, last_name, address, phone, email,
                                        qualification, visa_support, work_authorization_type,
-                                       linkedin, profile_picture_url, resume_sha256, parsed_at
+                                       linkedin, profile_picture_url, parsed_at
                                 FROM {CANDIDATES_TABLE} WHERE id = %s""",
                             (parser_id,),
                         )
                         parsed_data = cursor.fetchone()
-                        # Move skills to placeholder before deleting parser row (ON DELETE CASCADE)
                         cursor.execute(
                             f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
                             (placeholder_id, parser_id),
                         )
-                        # Delete parser's duplicate row (frees resume_sha256 UNIQUE constraint)
                         cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
-                        # Merge parsed data into our placeholder — keeps placeholder_id valid for frontend polling
                         if parsed_data:
                             cursor.execute(
                                 f"""UPDATE {CANDIDATES_TABLE}
@@ -1525,16 +1549,14 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                         phone = %s, email = %s, qualification = %s,
                                         visa_support = %s, work_authorization_type = %s,
                                         linkedin = %s, profile_picture_url = %s,
-                                        resume_sha256 = %s, parsed_at = %s,
-                                        resume_parse_status = 'completed'
+                                        parsed_at = %s, resume_parse_status = 'completed'
                                     WHERE id = %s""",
                                 (parsed_data["first_name"], parsed_data["last_name"],
                                  parsed_data["address"], parsed_data["phone"],
                                  parsed_data["email"], parsed_data["qualification"],
                                  parsed_data["visa_support"], parsed_data["work_authorization_type"],
                                  parsed_data["linkedin"], parsed_data["profile_picture_url"],
-                                 parsed_data["resume_sha256"], parsed_data["parsed_at"],
-                                 placeholder_id),
+                                 parsed_data["parsed_at"], placeholder_id),
                             )
                         else:
                             cursor.execute(
@@ -1543,11 +1565,23 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             )
                         final_candidate_id = placeholder_id
                     else:
-                        # Parser updated our placeholder row in-place
+                        # Parser updated placeholder in-place via ON CONFLICT — verify it has data
                         cursor.execute(
-                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                            f"SELECT parsed_at FROM {CANDIDATES_TABLE} WHERE id = %s",
                             (placeholder_id,),
                         )
+                        check = cursor.fetchone()
+                        if check and check.get("parsed_at"):
+                            cursor.execute(
+                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                                (placeholder_id,),
+                            )
+                        else:
+                            # Parser didn't populate placeholder — mark failed
+                            cursor.execute(
+                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed' WHERE id = %s",
+                                (placeholder_id,),
+                            )
                         final_candidate_id = placeholder_id
                 conn.commit()
 
