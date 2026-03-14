@@ -94,10 +94,10 @@ log "${YELLOW}[1/4] Backing up production database...${NC}"
 
 mkdir -p "$BACKUP_DIR"
 
-if docker exec resume-db-prod pg_dump -U postgres resume_parser > "$BACKUP_FILE" 2>/dev/null; then
+if docker exec resume-db-prod pg_dump -U postgres resume_prod > "$BACKUP_FILE" 2>/dev/null; then
     BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
     success "Database backed up to: $BACKUP_FILE ($BACKUP_SIZE)"
-    log "  Rollback: docker exec resume-db-prod psql -U postgres -d resume_parser < $BACKUP_FILE"
+    log "  Rollback: docker exec resume-db-prod psql -U postgres -d resume_prod < $BACKUP_FILE"
 else
     fail "Database backup failed!"
     exit 1
@@ -123,9 +123,9 @@ echo "" | tee -a "$LOG_FILE"
 log "${YELLOW}[2.5/4] Syncing UAT user accounts to production...${NC}"
 
 # Export users from UAT DB → import into PROD DB (upsert: skip existing)
-if docker exec resume-db-uat pg_dump -U postgres resume_parser \
+if docker exec resume-db-uat pg_dump -U postgres resume_uat \
     --table users --data-only --column-inserts --on-conflict-do-nothing 2>/dev/null \
-    | docker exec -i resume-db-prod psql -U postgres -d resume_parser 2>&1 | tee -a "$LOG_FILE"; then
+    | docker exec -i resume-db-prod psql -U postgres -d resume_prod 2>&1 | tee -a "$LOG_FILE"; then
     success "UAT users synced to production"
 else
     log "${YELLOW}⚠  User sync skipped (users may already exist in PROD)${NC}"
@@ -164,7 +164,7 @@ else
     log "  1. Revert last git commit:"
     log "     cd $PROJECT_DIR && git reset --hard HEAD~1"
     log "  2. Restore database:"
-    log "     docker exec resume-db-prod psql -U postgres -d resume_parser < $BACKUP_FILE"
+    log "     docker exec resume-db-prod psql -U postgres -d resume_prod < $BACKUP_FILE"
     log "  3. Redeploy:"
     log "     bash deploy_prod.sh"
     exit 1
