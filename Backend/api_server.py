@@ -606,6 +606,13 @@ async def get_candidates(
 
             # Exclude resumes still being parsed or that failed parsing
             where_conditions.append("(c.resume_parse_status IS NULL OR c.resume_parse_status = 'completed')")
+
+            # Exclude duplicate profiles — show only newest record per email
+            where_conditions.append(f"""(c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                SELECT 1 FROM {CANDIDATES_TABLE} newer
+                WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
+                AND (newer.resume_parse_status IS NULL OR newer.resume_parse_status = 'completed')
+            ))""")
             
             # Name search - supports comma-separated names with OR logic
             if name:
@@ -742,8 +749,14 @@ async def get_candidates(
             cursor.execute(data_sql, data_params)
             rows = cursor.fetchall()
 
-            # Get grand total (only fully parsed) for UI display (e.g. "14 / 729")
-            cursor.execute(f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE} WHERE resume_parse_status IS NULL OR resume_parse_status = 'completed'")
+            # Get grand total (only fully parsed, deduplicated by email) for UI display
+            cursor.execute(f"""SELECT COUNT(*) as total FROM {CANDIDATES_TABLE} c
+                WHERE (c.resume_parse_status IS NULL OR c.resume_parse_status = 'completed')
+                AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                    SELECT 1 FROM {CANDIDATES_TABLE} newer
+                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
+                    AND (newer.resume_parse_status IS NULL OR newer.resume_parse_status = 'completed')
+                ))""")
             grand_total = cursor.fetchone()["total"]
             
             candidates = [
@@ -1353,6 +1366,75 @@ async def update_candidate(candidate_id: int, data: CandidateUpdate):
             return {"success": True, "id": candidate_id}
 
 
+async def _dedup_candidate(candidate_id: int, label: str = ""):
+    """Remove duplicate candidate records (same email), keeping the newest.
+
+    Waits briefly so concurrent parsers have time to commit their data,
+    then uses FOR UPDATE locking to safely deduplicate.
+    """
+    await asyncio.sleep(3)
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT email, first_name, last_name FROM {CANDIDATES_TABLE} WHERE id = %s",
+                    (candidate_id,),
+                )
+                rec = cursor.fetchone()
+                if not rec:
+                    return
+
+                _email = (rec.get("email") or "").strip()
+                _fn = (rec.get("first_name") or "").strip()
+                _ln = (rec.get("last_name") or "").strip()
+
+                dup_ids = []
+                keep_id = candidate_id
+
+                if _email:
+                    cursor.execute(
+                        f"""SELECT id FROM {CANDIDATES_TABLE}
+                            WHERE LOWER(email) = LOWER(%s)
+                            ORDER BY id DESC
+                            FOR UPDATE""",
+                        (_email,),
+                    )
+                    all_ids = [r["id"] for r in cursor.fetchall()]
+                    if len(all_ids) > 1:
+                        keep_id = all_ids[0]
+                        dup_ids = all_ids[1:]
+
+                if not dup_ids and _fn and _ln and len(_ln) > 1:
+                    cursor.execute(
+                        f"""SELECT id FROM {CANDIDATES_TABLE}
+                            WHERE LOWER(first_name) = LOWER(%s)
+                              AND LOWER(last_name) = LOWER(%s)
+                            ORDER BY id DESC
+                            FOR UPDATE""",
+                        (_fn, _ln),
+                    )
+                    all_ids = [r["id"] for r in cursor.fetchall()]
+                    if len(all_ids) > 1:
+                        keep_id = all_ids[0]
+                        dup_ids = all_ids[1:]
+
+                if dup_ids:
+                    for did in dup_ids:
+                        cursor.execute(
+                            f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
+                            (keep_id, did),
+                        )
+                        cursor.execute(
+                            f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
+                            (did,),
+                        )
+                    print(f"[DEDUP] {label} — kept id={keep_id}, removed {len(dup_ids)} duplicate(s) for {_fn} {_ln} <{_email}>", flush=True)
+            conn.commit()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
+
 @app.post("/upload-resume")
 async def upload_resume_endpoint(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Upload a resume file, save it, and parse in background. Returns immediately."""
@@ -1679,40 +1761,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             conn.commit()
 
                             # Person-level dedup (same as main path)
-                            try:
-                                with get_db() as conn_dd:
-                                    with conn_dd.cursor() as cur_dd:
-                                        cur_dd.execute(
-                                            f"SELECT email, first_name, last_name FROM {CANDIDATES_TABLE} WHERE id = %s",
-                                            (final_candidate_id,),
-                                        )
-                                        cr = cur_dd.fetchone()
-                                        if cr:
-                                            _em = (cr.get("email") or "").strip()
-                                            _f = (cr.get("first_name") or "").strip()
-                                            _l = (cr.get("last_name") or "").strip()
-                                            d_ids = []
-                                            if _em:
-                                                cur_dd.execute(
-                                                    f"SELECT id FROM {CANDIDATES_TABLE} WHERE LOWER(email) = LOWER(%s) AND id != %s",
-                                                    (_em, final_candidate_id),
-                                                )
-                                                d_ids.extend(r["id"] for r in cur_dd.fetchall())
-                                            if not d_ids and _f and _l and len(_l) > 1:
-                                                cur_dd.execute(
-                                                    f"SELECT id FROM {CANDIDATES_TABLE} WHERE LOWER(first_name)=LOWER(%s) AND LOWER(last_name)=LOWER(%s) AND id != %s",
-                                                    (_f, _l, final_candidate_id),
-                                                )
-                                                d_ids.extend(r["id"] for r in cur_dd.fetchall())
-                                            for did in d_ids:
-                                                cur_dd.execute(f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s", (final_candidate_id, did))
-                                                cur_dd.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (did,))
-                                            if d_ids:
-                                                print(f"[DEDUP] file={save_name} — removed {len(d_ids)} older duplicate(s) for {_f} {_l} <{_em}>", flush=True)
-                                    conn_dd.commit()
-                            except Exception:
-                                import traceback
-                                traceback.print_exc()
+                            await _dedup_candidate(final_candidate_id, f"file={save_name}")
 
                             # Stamp uploaded_by
                             if AUTH_AVAILABLE and auth_header.startswith("Bearer "):
@@ -1754,59 +1803,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 conn.commit()
 
             # ── Person-level de-duplication ──────────────────────────────
-            # Same person may have been uploaded previously with a different
-            # file (different SHA256). Detect via email or first+last name
-            # and remove older duplicate rows, keeping the newest (placeholder).
-            try:
-                with get_db() as conn:
-                    with conn.cursor() as cursor:
-                        cursor.execute(
-                            f"SELECT email, first_name, last_name FROM {CANDIDATES_TABLE} WHERE id = %s",
-                            (final_candidate_id,),
-                        )
-                        cur_rec = cursor.fetchone()
-                        if cur_rec:
-                            _email = (cur_rec.get("email") or "").strip()
-                            _fn = (cur_rec.get("first_name") or "").strip()
-                            _ln = (cur_rec.get("last_name") or "").strip()
-
-                            dup_ids = []
-                            # Match by email (strongest signal)
-                            if _email:
-                                cursor.execute(
-                                    f"""SELECT id FROM {CANDIDATES_TABLE}
-                                        WHERE LOWER(email) = LOWER(%s) AND id != %s""",
-                                    (_email, final_candidate_id),
-                                )
-                                dup_ids.extend(r["id"] for r in cursor.fetchall())
-
-                            # Match by name if no email dups found
-                            if not dup_ids and _fn and _ln and len(_ln) > 1:
-                                cursor.execute(
-                                    f"""SELECT id FROM {CANDIDATES_TABLE}
-                                        WHERE LOWER(first_name) = LOWER(%s)
-                                          AND LOWER(last_name) = LOWER(%s)
-                                          AND id != %s""",
-                                    (_fn, _ln, final_candidate_id),
-                                )
-                                dup_ids.extend(r["id"] for r in cursor.fetchall())
-
-                            if dup_ids:
-                                for dup_id in dup_ids:
-                                    # Move skills that don't already exist on the kept record
-                                    cursor.execute(
-                                        f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
-                                        (final_candidate_id, dup_id),
-                                    )
-                                    cursor.execute(
-                                        f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
-                                        (dup_id,),
-                                    )
-                                print(f"[DEDUP] file={save_name} — removed {len(dup_ids)} older duplicate(s) for {_fn} {_ln} <{_email}>", flush=True)
-                    conn.commit()
-            except Exception:
-                import traceback
-                traceback.print_exc()
+            await _dedup_candidate(final_candidate_id, f"file={save_name}")
 
             # Stamp uploaded_by
             if AUTH_AVAILABLE and auth_header.startswith("Bearer "):
