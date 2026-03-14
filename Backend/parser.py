@@ -8947,28 +8947,39 @@ def main() -> int:
 
             if _existing_id is not None:
                 # Update the existing candidate row instead of inserting a duplicate.
-                cursor.execute(
-                    f"""UPDATE {CANDIDATES_TABLE} SET
-                            first_name = %s, last_name = %s, address = %s,
-                            phone = %s, email = %s, qualification = %s,
-                            visa_support = %s, work_authorization_type = %s,
-                            linkedin = %s, resume_filename = %s,
-                            resume_sha256 = %s, parsed_at = %s,
-                            education_structured = %s
-                        WHERE id = %s
-                        RETURNING id""",
-                    (
-                        _safe_fn, _safe_ln, address,
-                        phone_to_store, email, qualification or None,
-                        visa_support, visa_type,
-                        linkedin, resume_file_ref,
-                        resume_sha256, parsed_at,
-                        _edu_structured,
-                        _existing_id,
-                    ),
-                )
-                candidate_id = _existing_id
-            else:
+                # Use a savepoint so a UniqueViolation on resume_sha256
+                # (e.g. placeholder row already owns that hash) can be recovered.
+                try:
+                    cursor.execute("SAVEPOINT sp_update_existing")
+                    cursor.execute(
+                        f"""UPDATE {CANDIDATES_TABLE} SET
+                                first_name = %s, last_name = %s, address = %s,
+                                phone = %s, email = %s, qualification = %s,
+                                visa_support = %s, work_authorization_type = %s,
+                                linkedin = %s, resume_filename = %s,
+                                resume_sha256 = %s, parsed_at = %s,
+                                education_structured = %s
+                            WHERE id = %s
+                            RETURNING id""",
+                        (
+                            _safe_fn, _safe_ln, address,
+                            phone_to_store, email, qualification or None,
+                            visa_support, visa_type,
+                            linkedin, resume_file_ref,
+                            resume_sha256, parsed_at,
+                            _edu_structured,
+                            _existing_id,
+                        ),
+                    )
+                    cursor.execute("RELEASE SAVEPOINT sp_update_existing")
+                    candidate_id = _existing_id
+                except psycopg2.errors.UniqueViolation:
+                    # SHA256 already claimed by placeholder row — fall through
+                    # to the ON CONFLICT INSERT which will update the placeholder.
+                    cursor.execute("ROLLBACK TO SAVEPOINT sp_update_existing")
+                    _existing_id = None
+
+            if _existing_id is None:
                 cursor.execute(
                     f"""
                     INSERT INTO {CANDIDATES_TABLE}
