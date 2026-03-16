@@ -1,0 +1,378 @@
+/* ============================================
+   Autocomplete / Scrollable Dropdown — Styles
+   ============================================ */
+
+.ac-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.ac-input {
+  width: 100%;
+}
+
+/* ─── Shared dropdown panel (used by Autocomplete + Dropdown) ─── */
+.ac-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 250px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 10000;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+/* Scrollbar */
+.ac-dropdown::-webkit-scrollbar { width: 6px; }
+.ac-dropdown::-webkit-scrollbar-track { background: transparent; }
+.ac-dropdown::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.ac-dropdown::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+
+/* Item */
+.ac-item {
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ac-item:hover,
+.ac-item--active {
+  background: #f0f4ff;
+  color: #1e1e2f;
+}
+
+.ac-item--empty {
+  color: #9ca3af;
+  cursor: default;
+  font-style: italic;
+}
+.ac-item--empty:hover { background: transparent; color: #9ca3af; }
+
+/* Highlight matched text */
+.ac-highlight { color: #4f46e5; font-weight: 700; }
+
+/* ─── Dropdown trigger button ─── */
+.dd-wrapper { position: relative; width: 100%; }
+
+.dd-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.dd-trigger--open { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+
+.dd-placeholder { color: #9ca3af; }
+.dd-value { color: #111827; }
+
+.dd-chevron {
+  flex-shrink: 0;
+  color: #6b7280;
+  transition: transform 0.15s ease;
+}
+.dd-trigger--open .dd-chevron { transform: rotate(180deg); }
+
+.dd-item--selected { font-weight: 600; color: #4f46e5; }
+.dd-check { flex-shrink: 0; color: #4f46e5; }
+
+.dd-hidden-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ============================================
+   Salary Range — Styles
+   ============================================ */
+
+.cjm-salary-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 12px;
+  grid-column: 1 / -1;
+  align-items: end;
+}
+
+.cjm-salary-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.cjm-salary-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.cjm-salary-prefix {
+  position: absolute;
+  left: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #6b7280;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cjm-salary-input {
+  width: 100%;
+  padding: 9px 12px 9px 28px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+}
+
+.cjm-salary-input::-webkit-outer-spin-button,
+.cjm-salary-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.cjm-salary-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+}
+
+.cjm-salary-input::placeholder { color: #9ca3af; }
+
+.cjm-salary-error {
+  color: #ef4444;
+  font-size: 0.75rem;
+  margin-top: 4px;
+  grid-column: 1 / -1;
+}
+
+/* Currency select in salary row */
+.cjm-currency-select {
+  width: 100%;
+  min-width: 90px;
+  padding: 9px 32px 9px 12px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 8px center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+}
+.cjm-currency-select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+}
+
+/* ============================================
+   React Quill — Overrides (Snow theme)
+   ============================================ */
+
+.quill-rte-wrapper {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.quill-rte-wrapper .ql-toolbar.ql-snow {
+  border: 1px solid #d1d5db;
+  border-radius: 8px 8px 0 0;
+  background: #f3f4f6;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cjm-quill-toolbar .ql-formats {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.quill-rte-wrapper .ql-container.ql-snow {
+  border: 1px solid #d1d5db;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+
+.quill-rte-wrapper .ql-editor {
+  direction: ltr !important;
+  text-align: left !important;
+  min-height: 220px;
+  max-height: 400px;
+  overflow-y: auto;
+  line-height: 1.6;
+  color: #111827;
+  padding: 12px 14px;
+}
+
+.quill-rte-wrapper .ql-editor.ql-blank::before {
+  color: #9ca3af;
+  font-style: normal;
+  direction: ltr;
+}
+
+/* Focus ring */
+.quill-rte-wrapper .ql-container.ql-snow:focus-within,
+.quill-rte-wrapper:focus-within .ql-toolbar.ql-snow {
+  border-color: #6366f1;
+}
+.quill-rte-wrapper:focus-within {
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+  border-radius: 8px;
+}
+
+/* Readonly mode — hide toolbar, flat look */
+.quill-rte--readonly .ql-toolbar { display: none; }
+.quill-rte--readonly .ql-container.ql-snow {
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+/* Image resize handles */
+.quill-rte-wrapper .ql-editor img {
+  max-width: 100%;
+  height: auto;
+  cursor: pointer;
+}
+
+.quill-rte-wrapper .ql-align-center img {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.quill-rte-wrapper .ql-align-right img {
+  margin-left: auto;
+}
+
+.quill-rte-wrapper .ql-align-justify img {
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.quill-rte-wrapper .ql-toolbar button,
+.quill-rte-wrapper .ql-toolbar .ql-picker-label,
+.quill-rte-wrapper .ql-toolbar .ql-picker-item,
+.quill-rte-wrapper .ql-toolbar select {
+  border-radius: 6px;
+  min-width: 32px;
+  height: 32px;
+  color: #4b5563;
+}
+
+.quill-rte-wrapper .ql-toolbar button:hover,
+.quill-rte-wrapper .ql-toolbar .ql-picker-label:hover,
+.quill-rte-wrapper .ql-toolbar .ql-picker-item:hover {
+  background: #f3f4f6;
+}
+
+.rte-link-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 12000;
+  padding: 16px;
+}
+
+.rte-link-dialog {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 16px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.rte-link-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.rte-link-label {
+  display: block;
+  font-size: 0.85rem;
+  color: #374151;
+  margin: 8px 0 4px;
+}
+
+.rte-link-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.rte-link-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.rte-link-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* Image resize module styles */
+.quill-rte-wrapper .ql-editor .image-resizing {
+  position: relative;
+  display: inline-block;
+}
+
+/* Resize handles */
+.quill-rte-wrapper .ql-editor img.image-resizing {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+/* Display size tooltip */
+.quill-rte-wrapper .ql-editor .ql-image-size-display {
+  position: absolute;
+  bottom: -24px;
+  right: 0;
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .cjm-salary-row { grid-template-columns: 1fr; }
+}

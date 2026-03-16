@@ -1,0 +1,140 @@
+.find-jobs-page {
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+.find-jobs-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+/* Search Bar Styling */
+.find-jobs-page input[type="text"],
+.find-jobs-page input[type="number"] {
+  font-size: 14px;
+}
+
+.find-jobs-page input::placeholder {
+  color: #9ca3af;
+}
+
+.find-jobs-page input:focus {
+  outline: none;
+}
+
+/* Custom checkbox styling */
+.find-jobs-page input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+/* Job cards grid responsive */
+@media (max-width: 1024px) {
+  .find-jobs-page .grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+  
+  .find-jobs-page aside {
+    display: none;
+  }
+  
+  .find-jobs-page main > div.flex {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 768px) {
+  .find-jobs-page .find-jobs-header .max-w-7xl {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .find-jobs-page .search-bar-container {
+    flex-direction: column;
+  }
+  
+  .find-jobs-page .flex-wrap {
+    flex-direction: column;
+  }
+  
+  .find-jobs-page .min-w-\[200px\],
+  .find-jobs-page .min-w-\[150px\] {
+    width: 100%;
+    min-width: 100%;
+  }
+}
+
+/* Animation for cards */
+.find-jobs-page .grid > div {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.find-jobs-page .grid > div:hover {
+  transform: translateY(-2px);
+}
+
+/* Filter panel sticky positioning */
+.find-jobs-page aside .sticky {
+  top: 100px;
+}
+
+/* Scrollbar styling for panels */
+.find-jobs-page .overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.find-jobs-page .overflow-y-auto::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.find-jobs-page .overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.find-jobs-page .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Button hover effects */
+.find-jobs-page button {
+  transition: all 0.2s ease;
+}
+
+/* Tab toggle animation */
+.find-jobs-page .rounded-md {
+  transition: all 0.2s ease;
+}
+
+/* Badge animation */
+.find-jobs-page .rounded-full {
+  transition: transform 0.2s ease;
+}
+
+.find-jobs-page button:hover .rounded-full {
+  transform: scale(1.1);
+}
+
+/* Mobile filter button (hidden by default) */
+.mobile-filter-btn {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .mobile-filter-btn {
+    display: flex;
+  }
+}
+
+/* Loading spinner animation */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.find-jobs-page .animate-spin {
+  animation: spin 1s linear infinite;
+}

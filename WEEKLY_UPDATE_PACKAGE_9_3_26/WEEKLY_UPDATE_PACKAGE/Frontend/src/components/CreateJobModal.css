@@ -1,0 +1,526 @@
+/* ============================================
+   CreateJobModal — Styles (SignalHire-style)
+   ============================================ */
+
+/* Overlay */
+.cjm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  animation: cjm-fade-in 0.2s ease-out;
+}
+
+/* Modal container */
+.cjm-modal {
+  position: relative;
+  width: 95%;
+  max-width: 860px;
+  max-height: 85vh;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: cjm-slide-up 0.25s ease-out;
+}
+
+/* ── Header ── */
+.cjm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 28px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.cjm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cjm-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.cjm-review-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+
+/* ── Autosave status indicator (Feature 2) ── */
+.cjm-autosave-status {
+  margin-left: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.cjm-autosave--saving {
+  color: #6b7280;
+}
+
+.cjm-autosave--saved {
+  color: #059669;
+}
+
+.cjm-autosave--unsaved {
+  color: #d97706;
+}
+
+.cjm-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cjm-close-btn:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+/* ── Body — scrollable ── */
+.cjm-body {
+  overflow-y: auto;
+  padding: 24px 28px;
+  flex: 1;
+}
+
+/* ── Top row: Title + Company (left 70%) + Logo (right 30%) ── */
+.cjm-top-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.cjm-top-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cjm-top-logo {
+  flex-shrink: 0;
+  width: 130px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 20px;
+}
+
+.cjm-logo-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 110px;
+  height: 110px;
+  border: 2px dashed #d1d5db;
+  border-radius: 10px;
+  background: #f9fafb;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  gap: 4px;
+}
+.cjm-logo-placeholder:hover {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.cjm-logo-text {
+  font-size: 0.7rem;
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+.cjm-logo-preview-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.cjm-logo-preview {
+  width: 110px;
+  height: 110px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 2px solid #e5e7eb;
+}
+
+.cjm-logo-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cjm-logo-remove:hover {
+  background: #dc2626;
+}
+
+/* ── Grid layout ── */
+.cjm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.cjm-field {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.cjm-full {
+  grid-column: 1 / -1;
+}
+
+/* ── Label ── */
+.cjm-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 5px;
+}
+
+.cjm-req {
+  color: #ef4444;
+}
+
+/* ── Inputs ── */
+.cjm-input,
+.cjm-select,
+.cjm-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+  direction: ltr;
+  text-align: left;
+}
+
+.cjm-input:focus,
+.cjm-select:focus,
+.cjm-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.cjm-input::placeholder,
+.cjm-textarea::placeholder {
+  color: #9ca3af;
+}
+
+.cjm-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-repeat: no-repeat;
+  background-size: 18px;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.cjm-textarea {
+  resize: vertical;
+  min-height: 70px;
+}
+
+/* ── Read-only value (review mode) ── */
+.cjm-readonly-value {
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+/* ── Read-only tags wrapper ── */
+.cjm-readonly-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  min-height: 40px;
+}
+
+.cjm-readonly-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #374151;
+  background: #e5e7eb;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+/* ── Read-only RTE wrapper ── */
+.rte-wrapper--readonly {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+
+.rte-wrapper--readonly .rte-editor {
+  cursor: default;
+  color: #374151;
+}
+
+/* ── Validation error ── */
+.cjm-field-error {
+  color: #ef4444;
+  font-size: 0.72rem;
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+/* ── Footer ── */
+.cjm-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.cjm-footer-left,
+.cjm-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cjm-btn-cancel,
+.cjm-btn-submit {
+  padding: 10px 22px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+}
+
+.cjm-btn-cancel {
+  background: transparent;
+  color: #6b7280;
+}
+.cjm-btn-cancel:hover {
+  color: #111827;
+  background: #f3f4f6;
+}
+
+.cjm-btn-submit {
+  background: #3b82f6;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.35);
+}
+.cjm-btn-submit:hover {
+  background: #2563eb;
+}
+
+.cjm-btn-danger {
+  background: #dc2626;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.35);
+  padding: 10px 22px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+}
+.cjm-btn-danger:hover {
+  background: #b91c1c;
+}
+
+.cjm-btn-secondary {
+  background: #f3f4f6;
+  color: #374151;
+  padding: 10px 22px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid #d1d5db;
+}
+.cjm-btn-secondary:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+/* Salary no-prefix variant */
+.cjm-salary-input--no-prefix {
+  padding-left: 14px !important;
+}
+
+/* ── Animations ── */
+@keyframes cjm-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cjm-slide-up {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Field spacing for professional layout ── */
+.cjm-field-qualification {
+  margin-bottom: 20px;
+}
+
+.cjm-field-description {
+  margin-top: 20px;
+}
+
+/* ── Comments textarea + char counter ── */
+.cjm-textarea-wrap {
+  position: relative;
+}
+
+.cjm-textarea {
+  resize: vertical;
+  min-height: 72px;
+  max-height: 160px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.cjm-char-count {
+  display: block;
+  text-align: right;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 4px;
+}
+
+/* ── Unsaved changes dialog ── */
+.cjm-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 16px;
+}
+
+.cjm-confirm-dialog {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 20px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.cjm-confirm-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #111827;
+}
+
+.cjm-confirm-message {
+  font-size: 0.95rem;
+  color: #4b5563;
+  margin-bottom: 16px;
+}
+
+.cjm-confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .cjm-modal {
+    width: 98%;
+    max-height: 90vh;
+    border-radius: 10px;
+  }
+
+  .cjm-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cjm-top-row {
+    flex-direction: column;
+  }
+
+  .cjm-top-logo {
+    width: 100%;
+    justify-content: flex-start;
+    padding-top: 0;
+  }
+
+  .cjm-header {
+    padding: 16px 18px;
+  }
+
+  .cjm-body {
+    padding: 18px;
+  }
+
+  .cjm-salary-row {
+    grid-template-columns: 1fr;
+  }
+}

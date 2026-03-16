@@ -1,0 +1,177 @@
+/* ============================================
+   TagInput — Multi-select Tags with Autocomplete
+   ============================================ */
+
+.ti-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.ti-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 42px;
+  padding: 6px 10px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: text;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ti-container:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.ti-container--readonly {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+  cursor: default;
+}
+
+.ti-container--readonly:focus-within {
+  border-color: #e5e7eb;
+  box-shadow: none;
+}
+
+/* Tag pill */
+.ti-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1e40af;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.ti-tag:hover {
+  background: #bfdbfe;
+  border-color: #60a5fa;
+}
+
+/* Remove button in tag */
+.ti-tag-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.ti-tag-remove:hover {
+  color: #1e40af;
+}
+
+/* Input field inside container */
+.ti-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 4px 2px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: transparent;
+  border: none;
+  outline: none;
+  direction: ltr;
+  text-align: left;
+}
+
+.ti-input::placeholder {
+  color: #9ca3af;
+}
+
+.ti-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Dropdown suggestions */
+.ti-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 250px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 10000;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+/* Scrollbar styling */
+.ti-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+.ti-dropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ti-dropdown::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.ti-dropdown::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6;
+}
+
+/* Dropdown item */
+.ti-item {
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ti-item:hover,
+.ti-item--active {
+  background: #f0f4ff;
+  color: #1e1e2f;
+}
+
+.ti-item--empty {
+  color: #9ca3af;
+  cursor: default;
+  font-style: italic;
+  font-size: 0.8125rem;
+}
+.ti-item--empty:hover {
+  background: transparent;
+  color: #9ca3af;
+}
+
+/* Highlight matched text */
+.ti-highlight {
+  color: #3b82f6;
+  font-weight: 700;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .ti-input {
+    min-width: 80px;
+  }
+  
+  .ti-tag {
+    font-size: 0.75rem;
+    padding: 4px 8px;
+  }
+}

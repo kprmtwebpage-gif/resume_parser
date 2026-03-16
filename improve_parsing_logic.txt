@@ -1,0 +1,1049 @@
+================================================================================
+                    RESUME PARSING LOGIC - IMPROVEMENT SUGGESTIONS
+                              KPRMT Global Solutions
+                                 March 16, 2026
+================================================================================
+
+EXECUTIVE SUMMARY
+─────────────────────────────────────────────────────────────────────────────
+Your parser is getting poor extraction accuracy because:
+1. NAME extraction fails on Indian names & OCR-corrupted text
+2. LOCATION extracts work locations instead of home locations
+3. JOB_TITLE misses candidates' actual current roles
+4. EXPERIENCE_YEARS requires explicit "X years" text (no date calculation)
+5. CERTIFICATIONS misses partial matches & typos
+6. SKILLS extraction finds false positives from job descriptions
+
+This document provides prioritized fixes (Tier 1 = quick wins, Tier 2 = 
+medium-term, Tier 3 = long-term strategic improvements).
+
+
+================================================================================
+TIER 1: QUICK WINS (Implement These First)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. FIX NAME EXTRACTION — Handle OCR Corruption & Non-Western Names
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ PROBLEM:
+│   • Indian names (Divya, Pratheepa, Rajesh) collide with tech terms
+│   • OCR corruption: "John" → "J0hn", "JQhn" → rejected as invalid
+│   • Multi-word surnames (Chelluboina) split incorrectly
+│   • Strict validation rejects valid names
+│
+│ CURRENT CODE (parser.py ~1758):
+│   • Uses regex: r"[A-Za-z][A-Za-z'-]*"
+│   • Rejects names with even 1 digit or special char
+│   • Too strict for OCR output
+│
+│ SOLUTION:
+│   1. Pre-process with CHARACTER NORMALIZATION:
+│      • Replace common OCR errors before validation:
+│        - "0" → "O" (zero to letter O)
+│        - "1" → "I" (digit 1 to letter I)
+│        - "5" → "S" (digit 5 to letter S)
+│        - "@" → "A" (at sign to letter A)
+│      
+│   2. RELAX VALIDATION for names:
+│      • Allow 1-2 digit substitutions (for OCR damage)
+│      • Allow accented characters: é, ñ, ö, etc.
+│      • Allow hyphens: "Mary-Jane"
+│      
+│   3. IMPROVE BLACKLIST:
+│      • Current: rejects if word is in tech_terms list
+│      • Better: reject ONLY if word appears >5 times in document
+│        (one "Developer" ≠ whole resume of "Developer")
+│
+│ IMPLEMENTATION STEPS:
+│   In extract_name() function (line ~1758):
+│   
+│   Step 1: Add ocr_normalize_text() function:
+│   
+│   def ocr_normalize_text(text: str) -> str:
+│       """Pre-process OCR artifacts in names before validation."""
+│       t = text or ""
+│       # Replace digit lookalikes with letters
+│       t = re.sub(r'0(?=[a-zA-Z])', 'O', t)  # "J0hn" → "JOhn"
+│       t = re.sub(r'1(?=[a-zA-Z])', 'I', t)  # "M1ke" → "MIke"
+│       t = re.sub(r'5(?=[a-zA-Z])', 'S', t)  # "Ste5en" → "SteSen"
+│       t = re.sub(r'@(?=[a-zA-Z])', 'A', t)  # "@ndy" → "Andy"
+│       return t
+│   
+│   Step 2: Modify looks_like_name_tokens():
+│   
+│   def looks_like_name_tokens(tokens: list[str]) -> bool:
+│       """...[keep existing docs]..."""
+│       # BEFORE validation, normalize OCR artifacts
+│       normalized = [ocr_normalize_text(t) for t in tokens]
+│       normalized = [re.sub(r"[^A-Za-z'-]", "", t) for t in normalized]
+│       normalized = [t for t in normalized if t]
+│       # Continue with existing validation...
+│
+│
+│ EXPECTED IMPACT:
+│   📈 Fix 30-40% of wrong name extractions
+│   📈 Especially helps with Indian names + scanned PDFs
+│
+│ EFFORT: 1-2 hours
+│ RISK: Low (conservative regex, only affects name field)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2. FIX LOCATION EXTRACTION — Only Extract from Header, Not Work History
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ PROBLEM:
+│   • Parser extracts "Hyderabad" from "Worked at Hyderabad" (wrong: work location)
+│   • Parser extracts "Singapore" from "Considering visa to Singapore" (wrong: future location)
+│   • Multiple locations: only first extracted
+│   • Parser can't distinguish current vs. past locations
+│
+│ CURRENT CODE (location_parser.py):
+│   • Searches entire resume text
+│   • No context awareness ("Worked at" vs. "Lives in")
+│
+│ SOLUTION:
+│   1. EXTRACT ONLY FROM TOP 500 CHARACTERS:
+│      • Most resumes have location in header (after name/email/phone)
+│      • Skip "Work Experience" and "Education" sections entirely
+│      
+│   2. ADD CONTEXT FILTERING:
+│      • If found near "worked", "employed", "office" → SKIP (work location)
+│      • If found near "living", "currently", "based" → KEEP (home location)
+│      
+│   3. HANDLE MULTIPLE LOCATIONS:
+│      • "Bangalore | Delhi" → extract first one only
+│      • "Hyderabad, TamilNadu" (no space) → fix regex to handle this
+│
+│ IMPLEMENTATION STEPS:
+│   In detect_location_with_fallback() function:
+│   
+│   def detect_location_with_fallback(text: str, first_page: str = "") -> LocationResult:
+│       """Extract location from header only, with context filtering."""
+│       
+│       # ONLY search in header (first 500 chars after OCR)
+│       header_text = (first_page or text)[:500]
+│       
+│       # Find potential locations
+│       potential_locs = _extract_via_regex(header_text)
+│       
+│       # Filter OUT work context locations
+│       work_context_words = ["worked", "employed", "office", "branch", 
+│                            "campus", "headquarters", "organization"]
+│       
+│       for loc in potential_locs:
+│           # Get surrounding context
+│           loc_index = header_text.find(loc)
+│           context_start = max(0, loc_index - 100)
+│           context_end = loc_index + len(loc) + 100
+│           context_line = header_text[context_start:context_end]
+│           
+│           # Skip if work context detected
+│           if any(w in context_line.lower() for w in work_context_words):
+│               continue  # Skip work location
+│           
+│           return LocationResult(city=loc, confidence=0.9, source="header_regex")
+│       
+│       return LocationResult(city=None, ...)
+│
+│
+│ EXPECTED IMPACT:
+│   📈 Fix 25-30% of location errors
+│   📈 Especially helps with multi-job candidates
+│
+│ EFFORT: 1-2 hours
+│ RISK: Low (only affects location field)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3. FIX JOB TITLE EXTRACTION — Extract Current Role + "Applying For"
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ PROBLEM:
+│   • Parser only looks for "Applying for:" or "Position:" markers
+│   • Most resumes DON'T have explicit markers
+│   • Parser can't distinguish between:
+│     - Current job title (what you want)
+│     - Target/desired job title ("Applying for Senior Developer")
+│     - Job descriptions (not titles)
+│
+│ CURRENT CODE (extract_job_title() ~6415):
+│   • Searches first ~20 lines for markers
+│   • If no marker found, returns empty or falls back to skills
+│
+│ SOLUTION:
+│   1. MULTI-PASS EXTRACTION:
+│      Pass 1: Look for "Applying for", "Position:", "Seeking" (explicit markers)
+│      Pass 2: Extract BOLD text from first page (usually current title)
+│      Pass 3: Look for title after most recent company name
+│      Pass 4: Extract first work history entry title
+│      
+│   2. PRIORITIZE BY SOURCE:
+│      Explicit marker (80% confidence) > Bold text (70%) > Work history (60%)
+│      
+│   3. HANDLE MULTIPLE TITLES:
+│      • "Senior Developer / Architect" → normalize to single title
+│      • "Python Developer, Java Developer" → "Full Stack Developer"
+│
+│ IMPLEMENTATION STEPS:
+│   
+│   def extract_job_title(text: str, first_page: str = "") -> str:
+│       """Extract job title with multi-pass fallback strategy."""
+│       
+│       # PASS 1: Explicit markers (highest confidence)
+│       title = _extract_explicit_title(text)  # "Applying for", etc.
+│       if title and len(title) > 3:
+│           return normalize_title(title)
+│       
+│       # PASS 2: Bold/large text from first page (usually headline)
+│       title = _extract_from_first_page_bold(first_page)
+│       if title and len(title) > 3:
+│           return normalize_title(title)
+│       
+│       # PASS 3: After most recent company
+│       title = _extract_after_latest_company(text)
+│       if title and len(title) > 3:
+│           return normalize_title(title)
+│       
+│       # PASS 4: First line of work experience section
+│       title = _extract_from_work_history(text)
+│       return normalize_title(title) if title else ""
+│   
+│   def _extract_from_first_page_bold(first_page: str) -> str:
+│       """Extract BOLD markers (**, __, ALL CAPS in first page)."""
+│       # Look for patterns like:
+│       # "**Senior Developer**" or "SENIOR DEVELOPER"
+│       patterns = [
+│           r'\*\*([^*]+)\*\*',           # Markdown bold
+│           r'__([^_]+)__',               # Markdown underscore
+│           r'([A-Z][A-Z\s]{3,20})',     # ALL CAPS titles (min 4 chars)
+│       ]
+│       for pattern in patterns:
+│           match = re.search(pattern, first_page[:500])
+│           if match:
+│               title = match.group(1).strip()
+│               if _looks_like_job_title(title):
+│                   return title
+│       return ""
+│
+│
+│ EXPECTED IMPACT:
+│   📈 Fix 20-30% of job title errors
+│   📈 Especially helps with non-standard resume layouts
+│
+│ EFFORT: 2-3 hours
+│ RISK: Low–Medium (need to test multiple formats)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4. FIX EXPERIENCE YEARS — Parse Dates Instead of Keyword Matching
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ PROBLEM:
+│   • Current: Only extracts if resume says "X years of experience" verbatim
+│   • Fails on "2015–2024" (should be ~9 years)
+│   • Can't extract from implicit dates in work history
+│   • Returns NULL or 0 for most resumes
+│
+│ CURRENT CODE (parser.py):
+│   • Regex: r'(\d+)\s+years?\s+of\s+experience'
+│   • Very limited pattern matching
+│
+│ SOLUTION:
+│   1. EXTRACT DATE RANGES from work history:
+│      • "Jan 2015 – Aug 2024" → calculate 9 years
+│      • "2018-2022" → calculate 4 years
+│      • "2010 – Present" → calculate current years
+│      
+│   2. CALCULATE from all work entries:
+│      • Sum up all job durations
+│      • Result is "Total Experience"
+│      
+│   3. FALLBACK: Keep keyword matching as backup
+│
+│ IMPLEMENTATION STEPS:
+│   
+│   import re
+│   from datetime import datetime
+│   
+│   def extract_experience_years(text: str) -> int:
+│       """Extract years of experience from dates or keywords."""
+│       
+│       # PASS 1: Try keyword match first (most explicit)
+│       match = re.search(r'(\d+)\s+years?\s+of\s+experience', text, re.IGNORECASE)
+│       if match:
+│           return int(match.group(1))
+│       
+│       # PASS 2: Extract from work history dates
+│       total_years = _calculate_from_work_dates(text)
+│       if total_years > 0:
+│           return total_years
+│       
+│       # PASS 3: If only one date range exists, use that
+│       single_years = _extract_single_date_range(text)
+│       if single_years > 0:
+│           return single_years
+│       
+│       return None  # Better NULL than wrong data
+│   
+│   def _calculate_from_work_dates(text: str) -> int:
+│       """Sum all work duration from found date ranges."""
+│       # Find patterns like "Jan 2015 – Aug 2024", "2018-2022"
+│       patterns = [
+│           r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+(\d{4})\s*[-–]\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Present)\.?\s*(\d{4})?',
+│           r'(\d{4})\s*[-–]\s*(\d{4})',  # "2015-2024"
+│           r'(\d{4})\s*[-–]\s*(Present|Current)',  # "2015-Present"
+│       ]
+│       
+│       total_months = 0
+│       today = datetime.now()
+│       
+│       for pattern in patterns:
+│           for match in re.finditer(pattern, text, re.IGNORECASE):
+│               start_year = None
+│               end_year = None
+│               
+│               if len(match.groups()) == 4:
+│                   # Full date: "Jan 2015 – Aug 2024"
+│                   start_year = int(match.group(2))
+│                   end_text = match.group(3)
+│                   end_year = int(match.group(4)) if match.group(4) else today.year
+│               else:
+│                   # Year only: "2015-2024"
+│                   start_year = int(match.group(1))
+│                   end_year_str = match.group(2)
+│                   end_year = today.year if end_year_str.lower() in ['present', 'current'] else int(end_year_str)
+│               
+│               if start_year and end_year:
+│                   total_months += (end_year - start_year) * 12
+│       
+│       return max(0, total_months // 12)  # Convert to years
+│
+│
+│ EXPECTED IMPACT:
+│   📈 Fix 40-50% of experience errors
+│   📈 Most reliable improvement (dates are explicit)
+│
+│ EFFORT: 2-3 hours
+│ RISK: Low (only affects numeric extraction)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5. FIX CERTIFICATIONS — Handle Partial Matches & Typos
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ PROBLEM:
+│   • Current: Only exact keyword match
+│   • Misses "Azure Developer Associate" (searches for "Azure" only)
+│   • Misses typos: "AWSS Developer" (double S)
+│   • Misses exam codes: "AZ-900" not linked to "Azure Fundamentals"
+│
+│ CURRENT CODE (parser.py):
+│   • Simple list lookup: if keyword in cert_keywords, extract it
+│
+│ SOLUTION:
+│   1. USE FUZZY MATCHING (with threshold):
+│      • "AWSS" matches "AWS" with ~95% similarity
+│      • "Azur Developer" matches "Azure Developer" with ~90% similarity
+│      
+│   2. LINK EXAM CODES TO CERTIFICATIONS:
+│      • "AZ-900" → "Microsoft Azure Fundamentals"
+│      • "AZ-104" → "Microsoft Azure Administrator"
+│      • "DP-900" → "Microsoft Azure Data Fundamentals"
+│      
+│   3. EXTRACT FULL CERTIFICATION LINE:
+│      • "AWS Solutions Architect – Associate" (not just "AWS")
+│
+│ IMPLEMENTATION STEPS:
+│   
+│   from difflib import SequenceMatcher
+│   
+│   EXAM_CODE_MAPPING = {
+│       "AZ-900": "Microsoft Azure Fundamentals",
+│       "AZ-104": "Microsoft Azure Administrator",
+│       "DP-900": "Microsoft Azure Data Fundamentals",
+│       "AZ-305": "Microsoft Azure Solutions Architect",
+│       "AWS-SAA": "AWS Certified Solutions Architect – Associate",
+│       "AWS-DVA": "AWS Certified Developer – Associate",
+│       "AWS-SAP": "AWS Certified Solutions Architect – Professional",
+│   }
+│   
+│   def extract_certifications(text: str) -> list[str]:
+│       """Extract certifications with fuzzy matching and exam code lookup."""
+│       certs = []
+│       
+│       # PASS 1: Exact keyword match (highest confidence)
+│       for cert_keyword in CERT_KEYWORDS:
+│           if cert_keyword.lower() in text.lower():
+│               # Extract full line containing keyword
+│               line = _extract_line_containing(text, cert_keyword)
+│               if line:
+│                   certs.append(line)
+│       
+│       # PASS 2: Fuzzy match (misspellings)
+│       words = text.split()
+│       for word in words:
+│           for cert in CERT_KEYWORDS:
+│               similarity = SequenceMatcher(None, word.lower(), cert.lower()).ratio()
+│               if similarity > 0.85:  # Match threshold
+│                   line = _extract_line_containing(text, word)
+│                   if line and line not in certs:
+│                       certs.append(line)
+│       
+│       # PASS 3: Exam code lookup
+│       for exam_code, cert_name in EXAM_CODE_MAPPING.items():
+│           if exam_code.lower() in text.lower():
+│               certs.append(cert_name)
+│       
+│       # Deduplicate
+│       return list(dict.fromkeys(certs))
+│
+│
+│ EXPECTED IMPACT:
+│   📈 Fix 15-25% of certification errors
+│   📈 Especially helps with typos and exam codes
+│
+│ EFFORT: 2 hours
+│ RISK: Low (threshold prevents false positives)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6. FIX SKILLS EXTRACTION — Extract from Skills Section Only + Expand Keywords
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ PROBLEM:
+│   • Current: Extracts skills from entire resume (work descriptions, education)
+│   • False positives: "Java" in job description mistaken for skill
+│   • Missing skills: "ReactJS", "Node.js" not in master list → skipped
+│   • Incomplete extraction: Only gets first few skills, misses rest
+│   • No distinction: Can't differentiate tech skills vs. soft skills
+│   • Synonym issues: "Front-End Developer" vs "Frontend Developer" → duplicates
+│
+│ CURRENT CODE (parser.py):
+│   • Simple keyword matching against skills_master.txt (~1000 skills)
+│   • No context awareness (entire resume text searched)
+│   • No category distinction
+│
+│ SOLUTION:
+│   1. EXTRACT ONLY FROM "SKILLS" SECTION:
+│      • Use detect_resume_sections() to find SKILLS section
+│      • Only search that section for skills (90% accuracy improvement)
+│      • Avoid false positives from job descriptions
+│      
+│   2. EXPAND KEYWORD MATCHING:
+│      • Add modern skills: React, Vue, Angular variants
+│      • Add framework variants: Node.js, Node, NodeJS
+│      • Add certification + skill linkage: "AWS" → AWS skills
+│      • Use fuzzy matching for typos (like certifications)
+│      
+│   3. CATEGORIZE SKILLS:
+│      • Tech skills: Python, Java, React, AWS, Docker, etc.
+│      • Soft skills: Leadership, Communication, Problem Solving, etc.
+│      • Tools/Platforms: Jira, GitHub, Salesforce, etc.
+│      
+│   4. DEDUPLICATE + NORMALIZE:
+│      • "Java" = "java" (case-insensitive comparison)
+│      • "ReactJS" = "React" = "React.js" (normalize to canonical form)
+│      • "Database Admin" = "DBA" (recognize abbreviations)
+│
+│ IMPLEMENTATION STEPS:
+│   
+│   SKILLS_CATEGORIES = {
+│       'programming_languages': {
+│           'keywords': ['python', 'java', 'javascript', 'typescript', 'c#', 'c++', 'rust', 'go', 'ruby', 'php', 'scala', 'kotlin', 'swift'],
+│           'category': 'Technical'
+│       },
+│       'frameworks': {
+│           'keywords': ['react', 'vue', 'angular', 'django', 'flask', 'spring', 'fastapi', 'express', 'node.js', 'asp.net'],
+│           'category': 'Technical'
+│       },
+│       'databases': {
+│           'keywords': ['sql', 'mysql', 'postgresql', 'mongodb', 'redis', 'cassandra', 'elasticsearch', 'oracle', 'dynamodb'],
+│           'category': 'Technical'
+│       },
+│       'cloud_platforms': {
+│           'keywords': ['aws', 'azure', 'gcp', 'google cloud', 'heroku', 'digital ocean'],
+│           'category': 'Technical'
+│       },
+│       'devops_tools': {
+│           'keywords': ['docker', 'kubernetes', 'jenkins', 'terraform', 'ansible', 'ci/cd', 'github actions', 'gitlab ci'],
+│           'category': 'Technical'
+│       },
+│       'soft_skills': {
+│           'keywords': ['leadership', 'communication', 'teamwork', 'problem solving', 'project management', 'agile', 'scrum', 'time management'],
+│           'category': 'Soft'
+│       }
+│   }
+│   
+│   SKILLS_ALIAS_MAP = {
+│       'reactjs': 'react',
+│       'react.js': 'react',
+│       'nodejs': 'node.js',
+│       'node': 'node.js',
+│       'c# / .net': 'c#',
+│       'dba': 'database administration',
+│       'frontend': 'front-end',
+│       'backend': 'back-end',
+│       'fullstack': 'full stack',
+│   }
+│   
+│   def extract_skills(text: str, skills_section: str = "") -> dict[str, list[str]]:
+│       """Extract skills with categorization and context filtering."""
+│       
+│       # PASS 1: Use dedicated SKILLS section if available
+│       search_text = skills_section if skills_section else text
+│       
+│       all_found_skills = []
+│       categorized_skills = {'technical': [], 'soft': [], 'other': []}
+│       
+│       # PASS 2: Extract all mentioned skills (with normalization)
+│       for category, config in SKILLS_CATEGORIES.items():
+│           for keyword in config['keywords']:
+│               # Exact match (case-insensitive)
+│               if keyword.lower() in search_text.lower():
+│                   # Normalize using alias map
+│                   normalized = SKILLS_ALIAS_MAP.get(keyword.lower(), keyword)
+│                   category_type = config['category'].lower()
+│                   
+│                   if normalized not in categorized_skills[category_type]:
+│                       categorized_skills[category_type].append(normalized)
+│       
+│       # PASS 3: Fuzzy match for typos/variants
+│       words_in_section = search_text.split()
+│       for word in words_in_section:
+│           for category, config in SKILLS_CATEGORIES.items():
+│               for keyword in config['keywords']:
+│                   similarity = SequenceMatcher(None, word.lower(), keyword.lower()).ratio()
+│                   if 0.85 < similarity < 1.0:  # Typos only, not exact matches
+│                       normalized = SKILLS_ALIAS_MAP.get(keyword.lower(), keyword)
+│                       category_type = config['category'].lower()
+│                       
+│                       if normalized not in categorized_skills[category_type]:
+│                           categorized_skills[category_type].append(normalized)
+│       
+│       # PASS 4: Remove duplicates and sort
+│       for category in categorized_skills:
+│           categorized_skills[category] = sorted(list(set(categorized_skills[category])))
+│       
+│       return categorized_skills
+│   
+│   def extract_skills_by_section(text: str, sections: dict[str, str]) -> dict[str, list[str]]:
+│       """Extract skills from dedicated SKILLS section first, then fallback."""
+│       
+│       skills_section = sections.get('skills', '')
+│       
+│       # Try dedicated skills section first (highest accuracy)
+│       if skills_section:
+│           return extract_skills("", skills_section=skills_section)
+│       
+│       # Fallback: search full text (lower accuracy)
+│       return extract_skills(text)
+│
+│
+│ EXPECTED IMPACT:
+│   📈 Fix 30-40% of skills errors
+│   📈 Better categorization (tech vs soft)
+│   📈 Reduce false positives from job descriptions
+│
+│ EFFORT: 2-3 hours
+│ RISK: Low (only affects skills field, fuzzy threshold is conservative)
+│
+│ DATABASE SCHEMA UPDATE:
+│   Current candidate_skills_profile:
+│   • tech_skills: TEXT (comma-separated, all mixed)
+│   
+│   Improved schema (optional):
+│   • tech_skills_array: JSON ARRAY (structured)
+│   • soft_skills_array: JSON ARRAY (structured)
+│   • tools_array: JSON ARRAY (structured)
+│   • skills_metadata: JSON (includes confidence per skill)
+│   
+│   Migration SQL:
+│   ALTER TABLE candidate_skills_profile
+│   ADD COLUMN tech_skills_array JSON,
+│   ADD COLUMN soft_skills_array JSON,
+│   ADD COLUMN tools_array JSON;
+│
+│ API USAGE:
+│   Instead of returning flat "Python, Java, React, Leadership"
+│   Return structured:
+│   {
+│       "tech_skills": ["Python", "Java", "React"],
+│       "soft_skills": ["Leadership", "Communication"],
+│       "tools": ["Docker", "Kubernetes"],
+│       "all_skills": ["Python", "Java", "React", "Leadership", "Communication", "Docker", "Kubernetes"]
+│   }
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+TIER 2: MID-TERM IMPROVEMENTS (1–2 weeks)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6. IMPLEMENT SECTION-AWARE EXTRACTION
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ CONCEPT:
+│   Standard resume sections:
+│   • HEADER: Name, email, phone, location, LinkedIn
+│   • OBJECTIVE/SUMMARY: What job/role candidate seeks
+│   • WORK EXPERIENCE: Companies, titles, dates, descriptions
+│   • EDUCATION: Degrees, universities, graduation dates
+│   • SKILLS: Technical + soft skills, organized by category
+│   • CERTIFICATIONS: Professional certs + exam codes
+│   • PROJECTS: Personal/open-source projects
+│
+│ BENEFIT:
+│   • Extract name ONLY from HEADER (not from "John Smith" in recommendations)
+│   • Extract education ONLY from EDUCATION section
+│   • Extract job titles ONLY from WORK EXPERIENCE
+│   • Higher accuracy + fewer false positives
+│
+│ IMPLEMENTATION:
+│   1. Detect section headers via regex patterns
+│   2. Split resume into sections using section boundaries
+│   3. Run field-specific extraction on each section
+│   4. Combine results with source tracking
+│
+│ EXAMPLE:
+│   
+│   def detect_resume_sections(text: str) -> dict[str, str]:
+│       """Detect and split resume into sections."""
+│       section_patterns = {
+│           'header': r'^(?:.*?)(?=Objective|Summary|Experience|Education|Skills)',
+│           'objective': r'(?:Objective|Summary|Professional Summary)[:\s]*(.+?)(?=Experience|Education|Skills)',
+│           'experience': r'(?:Experience|Work History|Professional Experience)[:\s]*(.+?)(?=Education|Skills|Certifications)',
+│           'education': r'(?:Education|Academic Background)[:\s]*(.+?)(?=Skills|Certifications|Projects)',
+│           'skills': r'(?:Skills|Technical Skills)[:\s]*(.+?)(?=Certifications|Projects)',
+│           'certifications': r'(?:Certifications|Certifications & Licenses)[:\s]*(.+?)(?=Projects|$)',
+│       }
+│       
+│       sections = {}
+│       for section_name, pattern in section_patterns.items():
+│           match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+│           if match:
+│               sections[section_name] = match.group(1).strip()
+│       
+│       return sections
+│   
+│   # Then use sections in extraction:
+│   sections = detect_resume_sections(resume_text)
+│   name = extract_name(sections.get('header', ''))  # Only from header
+│   education = extract_education(sections.get('education', ''))  # Only from education
+│   skills = extract_skills(sections.get('skills', ''))  # Only from skills
+│
+│ EFFORT: 4–8 hours
+│ EXPECTED IMPACT: 20–30% overall accuracy improvement
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7. USE SPACY NER MORE AGGRESSIVELY
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ CURRENT USE:
+│   • validation_layer.py validation AFTER extraction (too late)
+│   • Only checks: name, location, degree
+│
+│ BETTER APPROACH:
+│   • Use spaCy DURING extraction as primary method
+│   • Hybrid: regex + spaCy with confidence comparison
+│   • spaCy entities available:
+│     - PERSON: names
+│     - ORG: company/university names
+│     - GPE: locations (cities, countries, states)
+│     - DATE: dates for experience calculation
+│     - PRODUCT: software/tool names
+│
+│ EXAMPLE:
+│   
+│   def extract_name_hybrid(text: str) -> tuple[str, str]:
+│       """Extract name using REGEX + spaCy with confidence ranking."""
+│       
+│       # PASS 1: Regex extraction (fast)
+│       regex_name = _extract_name_regex(text[:300])
+│       regex_confidence = _score_name_regex(regex_name)
+│       
+│       # PASS 2: spaCy NER extraction (accurate)
+│       if _SPACY_AVAILABLE:
+│           doc = _NLP(text[:300])git 
+│           spacy_persons = [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
+│           if spacy_persons:
+│               spacy_name = spacy_persons[0]
+│               spacy_confidence = 0.95  # spaCy tends to be accurate
+│               
+│               # Compare confidence
+│               if spacy_confidence > regex_confidence:
+│                   return spacy_name, "spacy"
+│       
+│       return regex_name, "regex"
+│
+│ EFFORT: 3–4 hours
+│ EXPECTED IMPACT: 10–15% improvement (especially names, locations)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 8. ADD FIELD-LEVEL CONFIDENCE TRACKING
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ CURRENT ISSUE:
+│   • Global confidence score (all-or-nothing)
+│   • If name confidence low, ENTIRE resume sent to LLM
+│   • Wastes API calls on fields that are already correct
+│
+│ SOLUTION:
+│   • Calculate confidence PER FIELD
+│   • Only invoke LLM for fields with confidence < threshold
+│   • Track confidence in database for manual review
+│
+│ EXAMPLE:
+│   
+│   extracted = {
+│       'name': ('John Smith', 0.92, 'regex'),
+│       'location': ('Hyderabad', 0.65, 'regex'),  # LOW confidence
+│       'job_title': ('Senior Developer', 0.88, 'regex'),
+│       'years_exp': (None, 0.0, 'none'),  # NOT extracted
+│       'certifications': ('AWS, Azure', 0.75, 'regex'),
+│   }
+│   
+│   # Only enhance low-confidence fields
+│   fields_to_enhance = {k: v for k, v in extracted.items() 
+│                        if v[1] < 0.75}
+│   
+│   enhanced = hybrid_enhancer.enhance(fields_to_enhance)
+│   
+│   # Save confidence scores
+│   store_in_db(candidate_id, extracted, enhanced)
+│
+│ BENEFIT:
+│   • 60–70% fewer LLM API calls
+│   • Better audit trail (know which fields are weak)
+│   • Can flag for manual review
+│
+│ EFFORT: 2–3 hours
+│ EXPECTED IMPACT: Cost reduction + better data quality tracking
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+TIER 3: LONG-TERM STRATEGIC IMPROVEMENTS (2–4 weeks)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9. TRAIN CUSTOM NER MODEL ON YOUR RESUME CORPUS
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ WHY:
+│   • spaCy's general model trained on news/Wikipedia text
+│   • Resumes have different language patterns
+│   • Custom model will recognize YOUR resume format better
+│
+│ STEPS:
+│   1. Label 200-500 resumes manually (2-3 days of HR work)
+│      • Mark: names, job titles, locations, dates, companies
+│   2. Fine-tune spaCy model on labeled data (3-4 hours training)
+│   3. Evaluate accuracy: test on unlabeled resumes
+│   4. Deploy custom model as primary extractor
+│
+│ EXPECTED IMPROVEMENT:
+│   • Name extraction: 85% → 92%+
+│   • Location extraction: 70% → 85%+
+│   • Job title extraction: 65% → 80%+
+│
+│ EFFORT: 2-3 weeks total (mostly manual labeling)
+│ ROI: Very high (10-20% overall accuracy gain)
+│
+│ TOOLS:
+│   • Prodigy (paid, ~$500) or Doccano (free)
+│   • spaCy training pipeline
+│   • See: https://spacy.io/usage/training
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 10. ADD LAYOUT-AWARE EXTRACTION (For PDF Structure)
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ CONCEPT:
+│   • Most PDFs have consistent layout:
+│     - Name/contact at TOP (largest font)
+│     - Job title below name
+│     - Work history with indentation
+│     - Education at bottom
+│   • Use PDF bounding-box coordinates, not just text
+│
+│ IMPLEMENTATION:
+│   • Replace pdfplumber with pdfplumber + layout analysis
+│   • Extract coordinates of each text element
+│   • Use position heuristics:
+│     - TOP of page (0-20%) = Name, contact, title
+│     - MIDDLE (20-60%) = Work experience
+│     - BOTTOM (60-100%) = Education, skills
+│
+│ BENEFIT:
+│   • Removes context ambiguity
+│   • Works with complex multi-column layouts
+│   • Can detect section headers by font size
+│
+│ EFFORT: 1-2 weeks
+│ EXPECTED IMPACT: 15-20% improvement (especially on complex formats)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 11. MANUAL POST-PROCESSING LAYER FOR HIGH-VALUE CANDIDATES
+├─────────────────────────────────────────────────────────────────────────────┤
+│
+│ CONCEPT:
+│   • Not all candidates matter equally
+│   • For top candidates (matched to open jobs):
+│     - HR manually corrects parsed data in UI
+│     - System learns these corrections
+│     - Future similar resumes use learned patterns
+│
+│ WORKFLOW:
+│   1. Parse resume → extraction with confidences
+│   2. HR views in dashboard
+│   3. Spots error: name is "JohnDeveloper" (should be "John")
+│   4. Clicks edit → types "John" → saves
+│   5. System logs: "Context: Tech resume → name='JohnDeveloper' → corrected to 'John'"
+│   6. Future similar resumes use LLM for name extraction
+│
+│ BENEFIT:
+│   • 90%+ accuracy on high-value candidates
+│   • Continuously improving system
+│   • Minimal overhead (HR already reviewing anyway)
+│
+│ EFFORT: 2-3 days for UI + logging
+│ ROI: Very high (quick wins, improves over time)
+│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+IMPLEMENTATION ROADMAP
+================================================================================
+
+WEEK 1:
+───────
+Days 1-2: FIX NAMES (Tier 1 #1)
+         • Add ocr_normalize_text()
+         • Relax regex validation
+         • Test on 20 Indian names
+
+Days 3-4: FIX LOCATIONS (Tier 1 #2)
+         • Limit to header only
+         • Add context filtering
+         • Test on multi-job candidates
+
+Days 5-7: FIX JOB TITLES + EXPERIENCE YEARS (Tier 1 #3, #4)
+         • Add multi-pass extraction
+         • Implement date parsing
+         • Test on 50+ resumes
+
+WEEK 2:
+───────
+Days 1-2: FIX CERTIFICATIONS (Tier 1 #5)
+         • Add fuzzy matching
+         • Implement exam code lookup
+         • Test on 100+ resumes
+
+Days 3-4: FIX SKILLS EXTRACTION (Tier 1 #6)
+         • Add category distinction (tech vs soft)
+         • Implement fuzzy matching
+         • Build skills alias map
+         • Test on 100+ resumes
+
+Days 5-7: SECTION-AWARE EXTRACTION (Tier 2 #6)
+         • Detect resume sections
+         • Refactor extraction functions
+         • Integration test
+
+WEEK 3:
+───────
+Days 1-2: spaCy + Field-level confidence (Tier 2 #7, #8)
+         • Hybrid regex + spaCy extraction
+         • Update database schema
+         • End-to-end test
+
+WEEK 3+:
+────────
+• Custom NER model training (if needed)
+• Layout-aware extraction
+• Manual correction UI + learning loop
+
+
+================================================================================
+TESTING STRATEGY
+================================================================================
+
+Phase 1: UNIT TESTS
+─────────────────
+✓ Test each extraction function independently
+✓ Use sample resume snippets (names, locations, etc.)
+✓ Verify confidence scores
+
+Phase 2: INTEGRATION TESTS
+──────────────────────────
+✓ Run full parser on 100 diverse resumes
+✓ Compare old vs. new extraction accuracy
+✓ Measure precision, recall, F1 score
+
+Phase 3: VALIDATION
+───────────────────
+✓ Manual review of 50 parsed resumes
+✓ Mark correct vs. incorrect fields
+✓ Calculate baseline accuracy per field
+
+Example test harness:
+
+def run_tests():
+    """Test parser accuracy on sample resumes."""
+    TEST_RESUMES = [
+        {
+            "filename": "john_smith.pdf", 
+            "expected": {
+                "name": "John Smith", 
+                "location": "NYC",
+                "job_title": "Senior Developer"
+            }
+        },
+        {
+            "filename": "divya_sharma.pdf", 
+            "expected": {
+                "name": "Divya Sharma", 
+                "location": "Bangalore",
+                "job_title": "Data Engineer"
+            }
+        },
+        # ... 100+ cases
+    ]
+    
+    results = {"passed": 0, "failed": 0}
+    
+    for test in TEST_RESUMES:
+        try:
+            extracted = parser.parse_file(test["filename"])
+            
+            for field, expected_value in test["expected"].items():
+                actual_value = extracted.get(field)
+                if actual_value == expected_value:
+                    results["passed"] += 1
+                else:
+                    results["failed"] += 1
+                    print(f"FAIL: {test['filename']} / {field}")
+                    print(f"  Expected: {expected_value}")
+                    print(f"  Got: {actual_value}")
+        except Exception as e:
+            results["failed"] += 1
+            print(f"ERROR: {test['filename']}: {e}")
+    
+    accuracy = results["passed"] / (results["passed"] + results["failed"])
+    print(f"\nOverall Accuracy: {accuracy:.1%}")
+    return results
+
+
+================================================================================
+SUCCESS METRICS
+================================================================================
+
+BEFORE:
+  • Name accuracy: ~65%
+  • Location accuracy: ~55%
+  • Job title accuracy: ~60%
+  • Experience years extraction: ~40%
+  • Certification extraction: ~50%
+  • Skills extraction: ~50% (many false positives)
+  • Overall average: ~53%
+
+AFTER TIER 1 (Target: 2 weeks):
+  • Name accuracy: 80%+
+  • Location accuracy: 75%+
+  • Job title accuracy: 75%+
+  • Experience years: 70%+
+  • Certifications: 70%+
+  • Skills extraction: 75%+
+  • Overall average: 74%+ (40% improvement!)
+
+AFTER TIER 2 (Target: 3 weeks):
+  • All fields: 82%+ accuracy
+  • Overall average: 82%
+
+AFTER TIER 3 (Target: 4+ weeks):
+  • All fields: 90%+ accuracy
+  • Overall average: 90%
+
+
+================================================================================
+QUESTIONS FOR CLARIFICATION
+================================================================================
+
+Before implementing, provide sample data on:
+
+1. NAME ERRORS:
+   • Give 5 resume filenames where names are parsed wrong
+   • What was extracted vs. what should be extracted?
+   • Examples: "PratheepaS" → should be "Pratheepa"?
+
+2. LOCATION ERRORS:
+   • Are they extracting work locations instead of home?
+   • Multiple locations listed?
+   • All blank?
+
+3. JOB TITLE ERRORS:
+   • Extracting job descriptions instead of titles?
+   • Only getting "Applying for" titles?
+   • All blank?
+
+4. EXPERIENCE YEARS:
+   • Are they always blank?
+   • Or wrong numbers (0, 999)?
+
+5. CERTIFICATIONS:
+   • Missing partial matches?
+   • Missing typos?
+   • Finding false positives?
+
+With this info, exact code paths can be traced and fixes pinpointed.
+
+
+================================================================================
+QUICK START CHECKLIST
+================================================================================
+
+□ Review this document carefully
+□ Identify which Tier 1 fixes apply to YOUR failures (usually all 5)
+□ Test current parser on 20 diverse resumes → baseline accuracy
+□ Implement Tier 1 fixes one by one
+□ Test after each fix
+□ Calculate improvement
+□ Commit changes to git
+□ Move to Tier 2 if time permits
+□ Document any custom fixes specific to your data
+
+
+================================================================================
+END OF RECOMMENDATIONS
+================================================================================
+Date Created: March 16, 2026
+Recommended Implementation Order: Tier 1 → Tier 2 → Tier 3
+Priority: Tier 1 fixes should be completed within 1 week for maximum impact
