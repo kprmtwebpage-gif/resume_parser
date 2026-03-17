@@ -147,49 +147,103 @@
     return texts;
   }
 
+  // ─── Helper: is this span text a date range? ──────────────────────
+  function isDateRange(t) {
+    return /\d{4}/.test(t) && (t.includes(" - ") || /\bpresent\b|\bcurrent\b/i.test(t));
+  }
+
+  // ─── Helper: parse one experience DOM item into {title,company,dates,location} ─
+  function parseExpItem(item) {
+    // Deduplicate spans while preserving order
+    const seen = new Set();
+    const visuals = Array.from(item.querySelectorAll("span[aria-hidden='true']"))
+      .map(s => s.textContent.trim())
+      .filter(t => {
+        if (!t || seen.has(t)) return false;
+        seen.add(t);
+        return true;
+      });
+
+    if (!visuals.length) return null;
+
+    const title = visuals[0];
+    let company = "", dates = "", location = "";
+
+    for (let i = 1; i < visuals.length; i++) {
+      const t = visuals[i];
+      // Skip long text — these are job descriptions, not metadata
+      if (t.length > 250) continue;
+      // First non-date, non-numeric line after title = company
+      if (!company && !isDateRange(t) && !/^\d+$/.test(t)) {
+        company = t.split("·")[0].trim();
+        continue;
+      }
+      // Date range line
+      if (!dates && isDateRange(t)) {
+        dates = t;
+        continue;
+      }
+      // First short line after dates = location (skip if > 100 chars = description)
+      if (dates && !location && !isDateRange(t) && t.length < 100) {
+        location = t;
+        break;
+      }
+    }
+
+    return { title, company, dates, location };
+  }
+
   // ─── EXPERIENCE extraction ─────────────────────────────────────────
-  function extractExperience() {
-    const experiences = [];
+  async function extractExperience() {
+    // Step 1: try background tab on the /details/experience/ page
+    // (gets full hydrated DOM — all positions, correct descriptions vs locations)
+    const showAllLink = Array.from(document.querySelectorAll("a[href*='/details/experience']")).find(el => {
+      return el.textContent.trim().length < 80;
+    });
+
+    if (showAllLink && showAllLink.href) {
+      try {
+        const result = await chrome.runtime.sendMessage({
+          action: "extractExperienceViaTab",
+          url: showAllLink.href,
+        });
+        if (result && Array.isArray(result.experiences) && result.experiences.length > 0) {
+          return result.experiences;
+        }
+      } catch (_) {
+        // background not responding — fall through
+      }
+    }
+
+    // Step 2: fall back to on-page parsing with smart field detection
     const section = findSection("experience", "Experience");
-    if (!section) return experiences;
+    if (!section) return [];
 
     const items = getSectionItems(section);
+    const experiences = [];
+    const titleSeen = new Set();
 
     items.forEach((item) => {
-      // Check if multi-position (company with sub-roles)
-      const subList = item.querySelector("ul.pvs-list li");
+      const subItems = item.querySelectorAll("ul.pvs-list > li");
 
-      if (subList && item.querySelectorAll("ul.pvs-list li").length > 0) {
+      if (subItems.length > 0) {
         // Multi-position under one company
-        const companyEl = item.querySelector(
-          "span.t-bold span[aria-hidden='true']"
-        ) || item.querySelector("span.t-bold");
+        const companyEl = item.querySelector("span.t-bold span[aria-hidden='true']");
         const company = companyEl ? companyEl.textContent.trim() : "";
 
-        const subItems = item.querySelectorAll("ul.pvs-list li");
         subItems.forEach((sub) => {
-          const visuals = getVisualTexts(sub);
-          const title = visuals[0] || "";
-          const dates = visuals[1] || "";
-          const location = visuals[2] || "";
-
-          if (title) {
-            experiences.push({ title, company, dates, location });
+          const exp = parseExpItem(sub);
+          if (exp && exp.title && !titleSeen.has(exp.title)) {
+            titleSeen.add(exp.title);
+            if (!exp.company) exp.company = company;
+            experiences.push(exp);
           }
         });
       } else {
-        // Single position
-        const visuals = getVisualTexts(item);
-
-        // Usually: [title, company · type, dates · duration, location]
-        const title = visuals[0] || "";
-        const companyRaw = visuals[1] || "";
-        const company = companyRaw.split("·")[0].trim();
-        const dates = visuals[2] || "";
-        const location = visuals[3] || "";
-
-        if (title) {
-          experiences.push({ title, company, dates, location });
+        const exp = parseExpItem(item);
+        if (exp && exp.title && !titleSeen.has(exp.title)) {
+          titleSeen.add(exp.title);
+          experiences.push(exp);
         }
       }
     });
@@ -242,59 +296,133 @@
     return educations;
   }
 
-  // ─── SKILLS extraction ─────────────────────────────────────────────
-  function extractSkills() {
+  // ─── SKILLS: collect from any container ────────────────────────────
+  function collectSkillsFromContainer(container) {
     const skills = [];
-    const section = findSection("skills", "Skills");
-    if (!section) return skills;
+    if (!container) return skills;
+    const seen = new Set();
 
-    const items = getSectionItems(section);
-    items.forEach((item) => {
-      // Try bold span first
-      const nameEl = item.querySelector(
-        "span.t-bold span[aria-hidden='true']"
-      );
-      if (nameEl) {
-        const skill = nameEl.textContent.trim();
-        if (skill && !skills.includes(skill)) {
-          skills.push(skill);
-        }
-        return;
+    // Person-name filter: 2+ capitalized words, no tech chars
+    function looksLikePersonName(t) {
+      const words = t.split(/\s+/);
+      if (words.length < 2 || words.length > 4) return false;
+      const allCap = words.every(w => /^[A-Z]/.test(w) && /^[A-Za-z'.\-]+$/.test(w));
+      return allCap && !/[#\+\/\(\)\d]/.test(t);
+    }
+
+    function addSkill(t) {
+      t = (t || "").trim();
+      if (t && t.length > 1 && t.length < 80 && !/^\d+$/.test(t)
+          && !t.toLowerCase().includes("endorsement")
+          && !looksLikePersonName(t)
+          && !seen.has(t.toLowerCase())) {
+        seen.add(t.toLowerCase());
+        skills.push(t);
       }
-      // Fallback: first aria-hidden span
-      const visuals = getVisualTexts(item);
-      if (visuals[0] && !skills.includes(visuals[0])) {
-        skills.push(visuals[0]);
-      }
+    }
+
+    // Strategy 1: Clone-and-strip — physically remove endorser sub-sections
+    const items = getSectionItems({ querySelectorAll: (s) => container.querySelectorAll(s) });
+    items.forEach(item => {
+      if (item.closest('.pvs-entity__sub-components')) return;
+      const clone = item.cloneNode(true);
+      clone.querySelectorAll('.pvs-entity__sub-components, .pvs-list__outer-container ul ul, [class*="sub-components"]').forEach(el => el.remove());
+      const span = clone.querySelector("span[aria-hidden='true']");
+      if (span) addSkill(span.textContent);
+    });
+    if (skills.length > 0) return skills;
+
+    // Strategy 2: hoverable-link-text spans outside sub-components
+    container.querySelectorAll(".hoverable-link-text span[aria-hidden='true']").forEach(el => {
+      if (!el.closest('.pvs-entity__sub-components')) addSkill(el.textContent);
     });
 
     return skills;
   }
 
-  // ─── CONTACT INFO extraction ───────────────────────────────────────
-  function extractContactInfo() {
-    // Contact info is in a modal, may not be visible
-    // Try to extract email/phone if visible on page
-    const contact = { email: "", phone: "", linkedin_url: "" };
+  // ─── SKILLS extraction ─────────────────────────────────────────────
+  async function extractSkills() {
+    // Step 1: find "Show all X skills" link and delegate to background service worker
+    // (opening a real tab gets the fully React-hydrated DOM, unlike fetch() which
+    //  returns SSR HTML where class names like t-bold haven't been applied yet)
+    const showAllLink = Array.from(document.querySelectorAll("a[href*='/details/skills']")).find(el => {
+      const txt = el.textContent.trim().toLowerCase();
+      return txt.length < 80;
+    });
 
-    // LinkedIn URL from current page
-    contact.linkedin_url = window.location.href.split("?")[0];
-
-    // Try email patterns visible on page
-    const pageText = document.body.innerText;
-    const emailMatch = pageText.match(
-      /[\w.+-]+@[\w-]+\.[\w.-]+/
-    );
-    if (emailMatch) {
-      contact.email = emailMatch[0];
+    if (showAllLink && showAllLink.href) {
+      try {
+        const result = await chrome.runtime.sendMessage({
+          action: "extractSkillsViaTab",
+          url: showAllLink.href,
+        });
+        if (result && Array.isArray(result.skills) && result.skills.length > 0) {
+          return result.skills;
+        }
+      } catch (_) {
+        // background not responding — fall through
+      }
     }
 
-    // Try phone patterns visible on page
-    const phoneMatch = pageText.match(
-      /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/
+    // Step 2: fall back to the skills section visible on the current profile page
+    const section = findSection("skills", "Skills");
+    if (section) {
+      const skills = collectSkillsFromContainer(section);
+      if (skills.length > 0) return skills;
+    }
+
+    // Step 3: broader scan — any section whose heading contains "skill"
+    for (const sec of document.querySelectorAll("section")) {
+      for (const h of sec.querySelectorAll("h2, h3, [class*='pvs-header'] span")) {
+        if (h.textContent.trim().toLowerCase().includes("skill")) {
+          const skills = collectSkillsFromContainer(sec);
+          if (skills.length > 0) return skills;
+        }
+      }
+    }
+
+    return [];
+  }
+
+  // ─── CONTACT INFO extraction ───────────────────────────────────────
+  async function extractContactInfo() {
+    const contact = { email: "", phone: "", linkedin_url: "" };
+
+    // Clean LinkedIn URL from current page
+    const cleanUrl = window.location.href.split("?")[0].replace(/\/$/, "");
+    contact.linkedin_url = cleanUrl;
+
+    // Build contact overlay URL directly from profile URL
+    // Format: https://www.linkedin.com/in/username/overlay/contact-info/
+    const contactOverlayUrl = cleanUrl + "/overlay/contact-info/";
+
+    // Also try finding a link/button on the page
+    const contactLink = document.querySelector(
+      'a[href*="/overlay/contact-info"], a[id*="contact-info"], [href*="contact-info"]'
     );
-    if (phoneMatch) {
-      contact.phone = phoneMatch[0];
+    const urlToOpen = (contactLink && contactLink.href) ? contactLink.href : contactOverlayUrl;
+
+    try {
+      const result = await chrome.runtime.sendMessage({
+        action: "extractContactViaTab",
+        url: urlToOpen,
+      });
+      if (result) {
+        if (result.email) contact.email = result.email;
+        if (result.phone) contact.phone = result.phone;
+      }
+    } catch (_) {
+      // background unavailable — fall through to page scan
+    }
+
+    // Fallback: scan visible page text
+    if (!contact.email) {
+      const m = document.body.innerText.match(/[\w.+\-]+@[\w\-]+\.[\w.\-]+/);
+      if (m) contact.email = m[0];
+    }
+    if (!contact.phone) {
+      const m = document.body.innerText.match(/(?:\+?\d[\d\s().\-]{6,20}\d)/);
+      if (m) contact.phone = m[0].trim();
     }
 
     return contact;
@@ -330,15 +458,15 @@
   }
 
   // ─── MAIN: Extract all profile data ────────────────────────────────
-  function extractProfileData() {
+  async function extractProfileData() {
     const name = extractName();
     const headline = extractHeadline();
     const location = extractLocation();
     const about = extractAbout();
-    const experience = extractExperience();
+    const experience = await extractExperience();  // async: may open background tab
     const education = extractEducation();
-    const skills = extractSkills();
-    const contact = extractContactInfo();
+    const skills = await extractSkills();   // async: may open background tab
+    const contact = await extractContactInfo();  // async: may open contact overlay tab
     const yearsOfExperience = calculateExperienceYears(experience);
 
     // Current company from most recent experience
@@ -372,21 +500,16 @@
 
   // ─── Auto-scroll to load lazy sections ──────────────────────────────
   async function scrollToLoadAll() {
-    const scrollStep = 600;
     const delay = (ms) => new Promise(r => setTimeout(r, ms));
     const totalHeight = document.body.scrollHeight;
     let pos = 0;
-
-    // Scroll down incrementally
     while (pos < totalHeight) {
-      pos += scrollStep;
+      pos += 600;
       window.scrollTo({ top: pos, behavior: "instant" });
-      await delay(300);
+      await delay(250);
     }
-    // Scroll a bit past bottom to trigger any remaining lazy loads
     window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" });
-    await delay(500);
-    // Scroll back to top
+    await delay(400);
     window.scrollTo({ top: 0, behavior: "instant" });
     await delay(200);
   }
@@ -394,19 +517,12 @@
   // ─── Listen for messages from popup ────────────────────────────────
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "extractProfile") {
-      // Scroll page first to load lazy sections, then extract
-      scrollToLoadAll().then(() => {
-        try {
-          const data = extractProfileData();
-          sendResponse({ success: true, data: data });
-        } catch (err) {
-          sendResponse({ success: false, error: err.message });
-        }
-      }).catch(err => {
-        sendResponse({ success: false, error: err.message });
-      });
+      scrollToLoadAll()
+        .then(() => extractProfileData())
+        .then(data => sendResponse({ success: true, data }))
+        .catch(err => sendResponse({ success: false, error: err.message }));
     }
-    return true; // Keep message channel open for async response
+    return true; // Keep channel open for async response
   });
 
   // ─── Inject floating KPRMT badge on LinkedIn profile pages ────────

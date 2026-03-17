@@ -130,8 +130,29 @@
         throw new Error("Not on a LinkedIn profile page");
       }
 
-      // Send message to content script
-      const response = await chrome.tabs.sendMessage(tab.id, { action: "extractProfile" });
+      // Send message to content script (auto-inject if not loaded)
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, { action: "extractProfile" });
+      } catch (connErr) {
+        if (connErr.message && (connErr.message.includes("Receiving end") || connErr.message.includes("Cannot access"))) {
+          // Content script not loaded — inject it and retry
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content.js"],
+          });
+          // Also inject CSS
+          await chrome.scripting.insertCSS({
+            target: { tabId: tab.id },
+            files: ["content.css"],
+          });
+          // Wait a moment for script to initialize
+          await new Promise(r => setTimeout(r, 500));
+          response = await chrome.tabs.sendMessage(tab.id, { action: "extractProfile" });
+        } else {
+          throw connErr;
+        }
+      }
 
       if (!response || !response.success) {
         throw new Error(response?.error || "Extraction failed - try refreshing the page");

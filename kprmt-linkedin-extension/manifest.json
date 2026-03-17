@@ -38,6 +38,7 @@
     "activeTab",
     "storage",
     "alarms",
-    "tabs"
+    "tabs",
+    "scripting"
   ]
 }
