@@ -1,7 +1,0 @@
- python -m streamlit run stock_streamlit.py --server.headless true --logger.level debug
-
-   - This runs the script named sample.py. Replace with the name of your Streamlit script if different.
-   - The flags enable headless mode and more logging so startup logs appear in the console.
-
-   Simpler alternative:
-   streamlit run stock_streamlit.py
