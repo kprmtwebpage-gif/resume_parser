@@ -24,6 +24,11 @@
 
   // ─── INIT: Check if already logged in ──────────────────────────────
   chrome.storage.local.get(["jwt_token", "api_url", "daily_count", "daily_date"], (result) => {
+    // Auto-migrate: if old production URL stored (no /dev), update it silently
+    if (result.api_url === "https://kprmtglobalsolutions.duckdns.org") {
+      result.api_url = "https://kprmtglobalsolutions.duckdns.org/dev";
+      chrome.storage.local.set({ api_url: result.api_url });
+    }
     if (result.jwt_token && result.api_url) {
       showMainScreen();
       updateRateLimit(result.daily_count || 0, result.daily_date);
@@ -93,6 +98,31 @@
       btnLogin.disabled = false;
       btnLogin.textContent = "Login";
     }
+  });
+
+  // ─── SETTINGS (change API URL without logout) ─────────────────────
+  const btnSettings = document.getElementById("btn-settings");
+  const settingsPanel = document.getElementById("settings-panel");
+  const settingsUrlInput = document.getElementById("settings-api-url");
+  const btnSaveSettings = document.getElementById("btn-save-settings");
+  const settingsMsg = document.getElementById("settings-msg");
+
+  btnSettings.addEventListener("click", () => {
+    const isHidden = settingsPanel.classList.toggle("hidden");
+    if (!isHidden) {
+      chrome.storage.local.get(["api_url"], (r) => {
+        settingsUrlInput.value = r.api_url || "https://kprmtglobalsolutions.duckdns.org/dev";
+      });
+    }
+  });
+
+  btnSaveSettings.addEventListener("click", () => {
+    const newUrl = settingsUrlInput.value.trim().replace(/\/+$/, "");
+    if (!newUrl) return;
+    chrome.storage.local.set({ api_url: newUrl }, () => {
+      settingsMsg.style.display = "block";
+      setTimeout(() => { settingsMsg.style.display = "none"; settingsPanel.classList.add("hidden"); }, 1500);
+    });
   });
 
   // ─── LOGOUT ────────────────────────────────────────────────────────

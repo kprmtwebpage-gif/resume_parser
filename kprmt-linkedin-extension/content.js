@@ -440,10 +440,12 @@
     }
 
     // Return DOM result only if it appears complete (≥80% of expected entries).
-    // If LinkedIn is hiding older entries behind "Show all experiences", fall through
-    // to code tags / background tab to get the full history.
+    // If expectedExpCount === 0 the "Show all" link wasn't found — LinkedIn may be
+    // hiding older entries without showing a count. Never trust DOM as complete in
+    // that case; always fall through to background tab for the full history.
     const domIsComplete = domExperiences.length > 0 &&
-      (expectedExpCount === 0 || domExperiences.length >= Math.floor(expectedExpCount * 0.8));
+      expectedExpCount > 0 &&
+      domExperiences.length >= Math.floor(expectedExpCount * 0.8);
 
     if (domIsComplete) {
       console.log('[KPRMT] DOM has', domExperiences.length, 'experience entries (complete)');
@@ -1527,9 +1529,9 @@
       .kp-logo-row { display:flex; align-items:center; gap:9px; }
       .kp-logo-box {
         width:34px; height:34px; border-radius:9px;
-        background:rgba(255,255,255,.18); display:flex;
+        overflow:hidden; display:flex;
         align-items:center; justify-content:center;
-        font-weight:900; font-size:16px; letter-spacing:-.5px;
+        background:rgba(255,255,255,.18);
       }
       .kp-brand { font-weight:700; font-size:14px; letter-spacing:.3px; }
       .kp-sub { font-size:10px; opacity:.75; margin-top:1px; }
@@ -1622,7 +1624,13 @@
       .kp-tag {
         background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;
         padding:3px 8px; border-radius:12px; font-size:11px; font-weight:500;
+        display:inline-flex; align-items:center; gap:3px;
       }
+      .kp-tag-remove {
+        background:none; border:none; cursor:pointer; color:#1d4ed8;
+        font-size:13px; padding:0; line-height:1; opacity:.5; font-family:inherit;
+      }
+      .kp-tag-remove:hover { opacity:1; }
       .kp-exp { padding:8px 0; border-bottom:1px solid #f1f5f9; }
       .kp-exp:last-child { border-bottom:none; }
       .kp-exp-title { font-weight:600; font-size:12px; color:#0f172a; }
@@ -1656,19 +1664,17 @@
     document.head.appendChild(styleEl);
 
     // ── Root HTML ────────────────────────────────────────────────────
+    const logoUrl = chrome.runtime.getURL('icons/kprmt_company_new_logo.jpeg');
     const root = document.createElement('div');
     root.id = 'kprmt-root';
     root.innerHTML = `
       <div id="kprmt-fab" title="KPRMT Extractor">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-          <circle cx="12" cy="7" r="4"/>
-        </svg>
+        <img src="${logoUrl}" style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
       </div>
       <div id="kprmt-panel">
         <div class="kp-hdr">
           <div class="kp-logo-row">
-            <div class="kp-logo-box">K</div>
+            <div class="kp-logo-box"><img src="${logoUrl}" style="width:100%;height:100%;object-fit:cover;"></div>
             <div><div class="kp-brand">KPRMT</div><div class="kp-sub">LinkedIn Extractor</div></div>
           </div>
           <button id="kprmt-close" title="Close">✕</button>
@@ -1703,8 +1709,8 @@
                 <input type="email" id="kp-email" class="kp-field" placeholder="Not found — enter manually"></div>
               <div class="kp-item"><label>Phone</label>
                 <input type="tel" id="kp-phone" class="kp-field" placeholder="Not found — enter manually"></div>
-              <div class="kp-item"><label>Company</label><div class="kp-val" id="kp-company">—</div></div>
-              <div class="kp-item"><label>Experience</label><div class="kp-val" id="kp-years">—</div></div>
+              <div class="kp-item"><label>Company</label><input type="text" id="kp-company" class="kp-field" placeholder="Not found"></div>
+              <div class="kp-item"><label>Experience</label><input type="text" id="kp-years" class="kp-field" placeholder="—"></div>
             </div>
             <div class="kp-sect">
               <div class="kp-sect-hdr" data-kp="kp-skills-body">
@@ -1808,6 +1814,18 @@
       });
     });
 
+    // ── Remove skill tag ─────────────────────────────────────────────
+    document.getElementById('kp-skills-tags').addEventListener('click', (e) => {
+      const btn = e.target.closest('.kp-tag-remove');
+      if (!btn) return;
+      const skill = btn.dataset.skill;
+      btn.closest('.kp-tag').remove();
+      if (extractedData && extractedData.skills) {
+        extractedData.skills = extractedData.skills.filter(s => s !== skill);
+        document.getElementById('kp-skills-n').textContent = extractedData.skills.length;
+      }
+    });
+
     // ── Extract button ────────────────────────────────────────────────
     extractBtn.addEventListener('click', async () => {
       const s = await checkAuth();
@@ -1840,13 +1858,13 @@
         document.getElementById('kp-loc').textContent    = data.location  || '';
         document.getElementById('kp-email').value  = data.email || '';
         document.getElementById('kp-phone').value  = data.phone || '';
-        document.getElementById('kp-company').textContent = data.current_company || '—';
-        document.getElementById('kp-years').textContent   = data.years_of_experience
-          ? data.years_of_experience + ' years' : '—';
+        document.getElementById('kp-company').value = data.current_company || '';
+        document.getElementById('kp-years').value   = data.years_of_experience
+          ? data.years_of_experience + ' years' : '';
 
         // Skills
         document.getElementById('kp-skills-tags').innerHTML =
-          (data.skills||[]).map(sk => `<span class="kp-tag">${esc(sk)}</span>`).join('');
+          (data.skills||[]).map(sk => `<span class="kp-tag">${esc(sk)}<button class="kp-tag-remove" data-skill="${esc(sk)}" title="Remove">×</button></span>`).join('');
         document.getElementById('kp-skills-n').textContent = (data.skills||[]).length;
 
         // Experience
@@ -1912,8 +1930,10 @@
       errorEl.style.display   = 'none';
 
       try {
-        const email = document.getElementById('kp-email').value.trim();
-        const phone = document.getElementById('kp-phone').value.trim();
+        const email   = document.getElementById('kp-email').value.trim();
+        const phone   = document.getElementById('kp-phone').value.trim();
+        const company = document.getElementById('kp-company').value.trim();
+        const yearsRaw = parseFloat(document.getElementById('kp-years').value) || extractedData.years_of_experience || 0;
 
         const resp = await fetch(`${s.api_url}/api/linkedin/parse`, {
           method:'POST',
@@ -1928,13 +1948,13 @@
             phone:  phone || null,
             job_title:       extractedData.job_title,
             headline:        extractedData.headline,
-            current_company: extractedData.current_company,
+            current_company: company || extractedData.current_company,
             location:        extractedData.location,
             linkedin_url:    extractedData.linkedin_url,
             skills:     extractedData.skills    || [],
             experience: extractedData.experience|| [],
             education:  extractedData.education || [],
-            years_of_experience: extractedData.years_of_experience || 0,
+            years_of_experience: yearsRaw,
             about: extractedData.about || '',
           }),
         });
