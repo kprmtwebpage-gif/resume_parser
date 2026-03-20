@@ -1,0 +1,30 @@
+
+pdfplumber>=0.11
+python-docx>=1.1
+pandas>=2.0
+openpyxl>=3.1
+psycopg2-binary>=2.9
+python-dotenv>=1.0
+sqlalchemy>=2.0
+phonenumbers>=8.13
+pycountry>=23.12
+pytesseract>=0.3.10
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.9
+
+# NER-based name validation (validate_name in validation_layer.py)
+# Required for consistent name parsing across environments
+spacy>=3.7
+
+# Optional: Google Drive folder sync (RESUME_INPUT_MODE=gdrive)
+google-api-python-client>=2.120
+google-auth>=2.25
+google-auth-oauthlib>=1.2
+
+# Optional: LLM-powered extraction layer (set LLM_EXTRACT_ENABLED=true to activate)
+# Choose ONE depending on your LLM provider:
+#   OpenAI / Groq / any OpenAI-compatible API:
+# openai>=1.0
+#   Anthropic Claude:
+# anthropic>=0.20

@@ -1,0 +1,277 @@
+LINKEDIN CHROME EXTENSION PLAN - Resume Parser Auto-Population
+
+TL;DR
+Build a Chrome extension that extracts candidate data from LinkedIn profiles (Name, Email, Phone, Experience, Education, Skills) and safely auto-populates into your Resume Parser API. Use DOM parsing to avoid IP blocks (SignalHire strategy). Key: 50 submissions/day limit + 3-5 second delays between requests.
+
+================================================================================
+PHASE 1: CORE EXTENSION (WEEK 1)
+================================================================================
+
+1. Create manifest.json (v3) with LinkedIn profile permissions
+2. Build content.js (LinkedIn DOM parser) to extract visible data:
+   - Name, Title, Location from profile header
+   - Work experience (loop through experience cards, extract title/company/dates)
+   - Education & Skills sections
+3. Create popup.html/js (UI) to preview extracted data with "Extract" & "Auto-Populate" buttons
+4. Build background.js (Service Worker) to store JWT token from Resume Parser
+5. Test on 5 LinkedIn profiles manually
+
+================================================================================
+PHASE 2: API INTEGRATION & ANTI-BLOCKING (WEEK 2)
+================================================================================
+
+1. Implement JWT authentication flow (popup login screen)
+2. Add rate limiting: 50 submissions/day per HR user (prevents LinkedIn's "50 actions/24h" block)
+3. Add request throttling: 3-5 second minimum delay between submissions
+4. Call Resume Parser's PATCH /candidates/{id} endpoint with extracted data
+5. Implement exponential backoff on API errors (5s → 10s → 20s if fails)
+6. Log submission history in extension storage
+7. Test 50 sequential submissions, verify no LinkedIn blocks
+
+================================================================================
+PHASE 3: POLISH & DISTRIBUTION (WEEK 3)
+================================================================================
+
+1. Add user-friendly error messages (rate limit reached, token expired, API errors)
+2. Include icons/branding matching Resume Parser
+3. Optional: Create dedicated POST /api/linkedin/parse backend endpoint
+4. Package as .zip for manual Chrome installation
+5. Acceptance testing: 5 diverse profiles, verify accuracy 95%+
+
+================================================================================
+HOW TO AVOID LINKEDIN IP BLOCKS
+================================================================================
+
+Strategy 1: DOM Parsing Only
+- Parse visible profile HTML instead of API calls
+- LinkedIn doesn't see bot behavior
+- Result: No blocking
+
+Strategy 2: 50/day Limit
+- LinkedIn allows ~50 significant actions/24h
+- Cap extension at 50 submissions/day
+- Prevents automated detection
+
+Strategy 3: Request Delays
+- 3-5 seconds between submissions
+- Spreads load (not machine-like rapid-fire)
+- Appears human behavior
+
+Strategy 4: Browser Extension
+- Runs in authenticated user session (not headless bot)
+- Legitimate Chrome manifest
+- Same IP as human user
+
+Strategy 5: Rotating User Agents
+- Different browser signatures per request
+- Minor security bonus
+
+Strategy 6: Exponential Backoff
+- If Resume Parser returns error, wait longer before retry
+- Not hammering = not bot-like
+
+KEY INSIGHT: SignalHire works because it uses DOM parsing + low frequency, NOT API scraping.
+
+================================================================================
+FILES TO CREATE
+================================================================================
+
+NEW FILES (Chrome Extension):
+- chrome-extension/manifest.json
+- chrome-extension/content.js
+- chrome-extension/popup.html
+- chrome-extension/popup.js
+- chrome-extension/background.js
+- chrome-extension/styles.css
+- chrome-extension/icons/ (16x48x128px)
+
+OPTIONAL BACKEND:
+- POST /api/linkedin/parse endpoint in Resume Parser
+
+================================================================================
+API INTEGRATION
+================================================================================
+
+Resume Parser API: PATCH /candidates/{id}
+
+Example Request Body:
+{
+  "first_name": "John",
+  "last_name": "Doe",
+  "email": "john.doe@linkedin.com",
+  "phone": "+1-234-567-8900",
+  "skills": ["Python", "FastAPI", "React"],
+  "linkedin": "https://linkedin.com/in/johndoe"
+}
+
+Headers:
+Authorization: Bearer <jwt_token>
+
+Rate Limit (Extension Side):
+- 50 submissions/day per HR user
+- 3-5 second minimum delay between submissions
+- Exponential backoff on errors
+
+================================================================================
+VERIFICATION & TESTING
+================================================================================
+
+✓ Extension installs without errors on HR Chrome
+✓ Manual extract from 5 LinkedIn profiles → verify 95%+ accuracy vs actual profile
+✓ 50 sequential submissions to Resume Parser → zero LinkedIn blocks, 98%+ API success
+✓ Rate limit UI shows "X/50 submissions used today"
+✓ Candidates appear in Resume Parser dashboard post-submission
+✓ No "IP blocked" messages or unusual activity challenges
+
+================================================================================
+DECISIONS & SCOPE
+================================================================================
+
+INCLUDED:
+✓ Chrome extension (V3) with manifest + scripts
+✓ LinkedIn DOM parsing (visible fields only)
+✓ JWT authentication to Resume Parser
+✓ Rate limiting (50/day per HR user)
+✓ Error handling + user feedback
+
+
+
+✓ Local logging (extension history)
+
+EXCLUDED (Future):
+❌ Email/Phone extraction from premium LinkedIn features
+❌ Auto-refresh of existing candidates
+❌ Mobile LinkedIn app support
+❌ Chrome Web Store publishing (manual install via .zip)
+
+================================================================================
+ARCHITECTURE COMPONENTS
+================================================================================
+
+manifest.json (v3):
+- Permissions: activeTab, scripting, storage, webRequest, alarms
+- Matches: https://www.linkedin.com/in/* (LinkedIn profile URLs only)
+- Host permissions: Your Resume Parser API domain
+- Background Service Worker: background.js
+- Icons: 16, 48, 128 pixels
+
+content.js (LinkedIn page injection):
+- Inject listener when user lands on /in/{profile-name} URL
+- Parse DOM for: Name, Email, Phone, Work history, Education, Skills
+- Send extracted data to popup as message
+- Status indicator badge on page
+
+popup.js (UI):
+- Display extracted candidate data in popup
+- Show preview with fields: Name, Email, Phone, Experience (count), Education, Skills
+- Buttons: "Auto-Populate", "Edit & Save", "View in App"
+- Status: "Parsing...", "Ready", "Sending...", "Success", "Error"
+- Rate limit indicator: "Requests today: X/50"
+
+background.js (Service Worker):
+- Manage JWT token (store in chrome.storage.local, refresh at expiry)
+- Rate limiting: Track daily request count per HR user
+  - Limit: 50 candidates/day per user
+- Request queue with exponential backoff
+- Handle retries on 429 (Too Many Requests)
+- Listen for extraction messages from content.js
+
+================================================================================
+DATA EXTRACTION STRATEGY
+================================================================================
+
+Approach 1: DOM Parsing (RECOMMENDED - No blocking)
+
+const name = document.querySelector('[data-test-id="profile-top-card-profile-name"]')?.textContent;
+const title = document.querySelector('[data-test-id="top-card-headline"]')?.textContent;
+const location = document.querySelector('[data-test-id="top-card-headline"] span')?.textContent;
+
+// Experience section
+const experiences = Array.from(document.querySelectorAll('[data-test-id="profile-experience-item"]'))
+  .map(el => ({
+    title: el.querySelector('[data-test-id="profile-experience-section__title"]')?.textContent,
+    company: el.querySelector('[data-test-id="profile-experience-section__company-name"]')?.textContent,
+    dates: el.querySelector('[data-test-id="profile-experience-section__start-date"]')?.textContent
+  }));
+
+// Skills
+const skills = Array.from(document.querySelectorAll('[data-test-id="profile-skills-section"] li'))
+  .map(li => li.textContent.trim());
+
+Email/Phone Extraction:
+- Public Display: If user shared email on headline
+- LinkedIn's "Open to Work" cards: May contain email
+- Fallback: Suggest user add email/phone to "Contact Info" section
+- Disclaimer: "Email/Phone must be public on your LinkedIn profile"
+
+================================================================================
+QUESTIONS BEFORE IMPLEMENTATION
+================================================================================
+
+1. Resume Parser API URL – What domain:port? (e.g., https://prod.yourdomain.com:8000 or http://localhost:8000)
+2. Dedicated endpoint preference – Add /api/linkedin/parse backend endpoint, or reuse PATCH /candidates/{id}?
+3. HR team size – How many HR users? (affects rate limit design)
+4. Data priority – If LinkedIn field missing (email/phone), should extraction still succeed, or require all fields?
+
+================================================================================
+KNOWN RISKS & MITIGATIONS
+================================================================================
+
+Risk: LinkedIn changes DOM structure
+Severity: HIGH
+Mitigation: Content.js must be updated quarterly; use data-test-id selectors (more stable)
+
+Risk: User exceeds rate limit
+Severity: MEDIUM
+Mitigation: Daily cap with UI warning; suggest next-day retry
+
+Risk: JWT token expires mid-submission
+Severity: MEDIUM
+Mitigation: Auto-refresh token before API call; catch 403 and retry
+
+Risk: Email/Phone unavailable on profile
+Severity: MEDIUM
+Mitigation: Mark as optional fields; show UI disclaimer before extraction
+
+Risk: IP block from LinkedIn
+Severity: LOW (with strategy)
+Mitigation: Rate limiting + DOM-only parsing prevents; if occurs, user waits 24h
+
+================================================================================
+SUCCESS METRICS
+================================================================================
+
+1. Extension installs without errors on HR team's Chrome
+2. Data extraction accuracy: 95%+ for Name, Title, Experience (vs. manual review)
+3. Zero LinkedIn IP blocks in first 1000 submissions (50/day × 20 days)
+4. API submission success rate: 98%+ (4xx/5xx errors < 2%)
+5. User adoption: HR team uses for 80%+ of new candidate profiles
+6. Resume parsing accuracy improvement: 54% → 65%+ (due to LinkedIn-sourced data quality)
+
+================================================================================
+IMPLEMENTATION ROADMAP TIMELINE
+================================================================================
+
+Week 1 (Phase 1: Core Extension)
+- Day 1-2: Setup manifest.json (v3), create basic folder structure
+- Day 3-4: Build content.js (DOM parser for Name, Title, Experience, Skills)
+- Day 5: Create popup.html/js (UI template and basic styling)
+- Day 6: Build background.js (basic JWT token storage)
+- Day 7: Manual testing on 5 LinkedIn profiles
+
+Week 2 (Phase 2: API Integration & Anti-Blocking)
+- Day 1: Implement JWT authentication flow (popup login)
+- Day 2-3: Add rate limiting (50/day per HR user)
+- Day 4: Add request throttling (3-5 second delays)
+- Day 5: Integrate PATCH /candidates/{id} API call
+- Day 6: Implement exponential backoff error handling
+- Day 7: Test 50 sequential submissions, verify no blocks
+
+Week 3 (Phase 3: Polish & Distribution)
+- Day 1-2: Add user-friendly error messages
+- Day 3: Icons and branding
+- Day 4: Optional backend endpoint creation
+- Day 5: Package as .zip
+- Day 6-7: Acceptance testing (5 diverse profiles, 95%+ accuracy)
+
+Ready to begin Phase 1 implementation?

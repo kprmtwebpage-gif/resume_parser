@@ -1,0 +1,329 @@
+/* ============================================
+   PublicJobCard — Professional Job Card Styles
+   ============================================ */
+
+.pjc-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+.pjc-card:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+/* ── Top row: date + job ID + applicant badge ── */
+.pjc-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.pjc-posted-date {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.pjc-top-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pjc-job-id {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.pjc-applicant-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+  background: #16a34a;
+  color: #fff;
+}
+
+.pjc-applicant-badge--first {
+  background: #2563eb;
+}
+
+/* ── Title ── */
+.pjc-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 10px;
+  line-height: 1.3;
+}
+.pjc-title:hover {
+  color: #2563eb;
+}
+
+/* ── Tags ── */
+.pjc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pjc-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+}
+
+.pjc-tag--category {
+  background: #1e40af;
+  color: #fff;
+}
+
+.pjc-tag--salary {
+  background: #f59e0b;
+  color: #fff;
+}
+
+.pjc-tag--type {
+  background: #16a34a;
+  color: #fff;
+}
+
+/* ── Company section ── */
+.pjc-company-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pjc-logo {
+  flex-shrink: 0;
+}
+
+.pjc-logo-img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.pjc-logo-fallback {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.pjc-company-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
+}
+
+.pjc-qualification {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 2px 0 0;
+}
+
+/* ── Description preview ── */
+.pjc-description-preview {
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+.pjc-read-more {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+}
+.pjc-read-more:hover {
+  text-decoration: underline;
+}
+
+/* ── Expanded content ── */
+.pjc-expanded {
+  border-top: 1px solid #f3f4f6;
+  padding-top: 14px;
+  margin-bottom: 16px;
+}
+
+.pjc-section {
+  margin-bottom: 14px;
+}
+
+.pjc-section h4 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 6px;
+}
+
+.pjc-section div,
+.pjc-section p {
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.7;
+}
+
+.pjc-skills-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pjc-skill-tag {
+  display: inline-flex;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 6px;
+}
+
+.pjc-read-less {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.pjc-read-less:hover {
+  color: #2563eb;
+}
+
+/* ── Bottom actions ── */
+.pjc-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.pjc-apply-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 22px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  letter-spacing: 0.5px;
+}
+.pjc-apply-btn:hover {
+  background: #1d4ed8;
+}
+
+.pjc-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 16px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.pjc-share-btn:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.pjc-share-wrapper {
+  position: relative;
+}
+
+.pjc-share-menu {
+  position: absolute;
+  bottom: 110%;
+  left: 0;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+  min-width: 140px;
+  overflow: hidden;
+}
+
+.pjc-share-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: #374151;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.pjc-share-menu button:hover {
+  background: #f3f4f6;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .pjc-card {
+    padding: 16px;
+  }
+  .pjc-top-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .pjc-title {
+    font-size: 17px;
+  }
+  .pjc-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pjc-apply-btn,
+  .pjc-share-btn {
+    justify-content: center;
+    width: 100%;
+  }
+}

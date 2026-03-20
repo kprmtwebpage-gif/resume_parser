@@ -1,0 +1,410 @@
+/* ============================================
+   JobCard — Styles (Compact ATS Design)
+   ============================================ */
+
+.jc-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.jc-card:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* ── Logo column ── */
+.jc-logo-col {
+  flex-shrink: 0;
+}
+
+.jc-logo-img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.jc-logo-fallback {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+  border-radius: 8px;
+  color: #9ca3af;
+}
+
+.jc-logo-fallback svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ── Info column ── */
+.jc-info-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.jc-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Issue 7: Clickable job title to open review popup */
+.jc-title--clickable {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.jc-title--clickable:hover {
+  color: #6366f1;
+  text-decoration: underline;
+}
+
+.jc-company {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0 0 4px;
+}
+
+.jc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+
+.jc-meta-item {
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.jc-meta-item::before {
+  content: '';
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #d1d5db;
+  flex-shrink: 0;
+}
+
+.jc-meta-item:first-child::before {
+  display: none;
+}
+
+.jc-meta-date {
+  color: #9ca3af;
+}
+
+/* ── Badges ── */
+.jc-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.jc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  letter-spacing: 0.01em;
+}
+
+.jc-badge--blue {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.jc-badge--green {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.jc-badge--red {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.jc-badge--amber {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.jc-badge--gray {
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.jc-badge--slate {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+/* ── Actions column ── */
+.jc-actions-col {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+}
+
+.jc-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.jc-action-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.jc-action-btn--blue {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+.jc-action-btn--blue:hover {
+  background: #bfdbfe;
+}
+
+.jc-action-btn--green {
+  color: #166534;
+  background: #dcfce7;
+}
+.jc-action-btn--green:hover {
+  background: #bbf7d0;
+}
+
+.jc-action-btn--red {
+  color: #991b1b;
+  background: #fee2e2;
+}
+.jc-action-btn--red:hover {
+  background: #fecaca;
+}
+
+.jc-action-btn--disabled {
+  color: #9ca3af;
+  background: #f3f4f6;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.jc-action-btn--post {
+  color: #fff;
+  background: #dc2626;
+}
+.jc-action-btn--post:hover {
+  background: #b91c1c;
+}
+
+.jc-action-btn--gray {
+  color: #6b7280;
+  background: #f3f4f6;
+}
+.jc-action-btn--gray:hover {
+  background: #e5e7eb;
+  color: #dc2626;
+}
+
+.jc-action-btn--menu {
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 6px;
+}
+.jc-action-btn--menu:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+/* ── 3-dot Menu ── */
+.jc-menu-wrapper {
+  position: relative;
+}
+
+.jc-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: #f3f4f6;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.jc-menu-trigger:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+.jc-menu-trigger svg {
+  width: 16px;
+  height: 16px;
+}
+
+.jc-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  min-width: 140px;
+  margin-top: 4px;
+  padding: 4px 0;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.jc-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s ease;
+  text-align: left;
+}
+.jc-menu-item:hover {
+  background: #f3f4f6;
+}
+.jc-menu-item svg {
+  width: 16px;
+  height: 16px;
+  color: #6b7280;
+}
+
+.jc-menu-item--hold {
+  color: #d97706;
+}
+.jc-menu-item--hold svg {
+  color: #d97706;
+}
+
+.jc-menu-item--close,
+.jc-menu-item--danger {
+  color: #dc2626;
+}
+.jc-menu-item--close svg,
+.jc-menu-item--danger svg {
+  color: #dc2626;
+}
+
+/* ── Live Badge (status indicator) ── */
+.jc-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 9999px;
+}
+
+.jc-live-badge--live {
+  color: #dc2626;
+  background: #fee2e2;
+}
+.jc-live-badge--live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: #dc2626;
+  border-radius: 50%;
+  animation: pulse-live 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+.jc-live-badge--hold {
+  color: #d97706;
+  background: #fef3c7;
+}
+
+.jc-live-badge--closed {
+  color: #6b7280;
+  background: #f3f4f6;
+}
+
+/* ── Applied Button ── */
+.jc-action-btn--applied {
+  color: #7c3aed;
+  background: #ede9fe;
+}
+.jc-action-btn--applied:hover {
+  background: #ddd6fe;
+}
+
+/* ── Card states (hold/closed) ── */
+.jc-card--hold {
+  border-color: #fbbf24;
+  background: linear-gradient(135deg, #fffbeb 0%, #fff 100%);
+}
+
+.jc-card--closed {
+  border-color: #d1d5db;
+  background: linear-gradient(135deg, #f9fafb 0%, #fff 100%);
+  opacity: 0.85;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .jc-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .jc-actions-col {
+    flex-direction: row;
+    width: 100%;
+    padding-top: 8px;
+    border-top: 1px solid #f3f4f6;
+    margin-top: 4px;
+  }
+
+  .jc-menu-dropdown {
+    right: auto;
+    left: 0;
+  }
+}

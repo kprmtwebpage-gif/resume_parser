@@ -1,0 +1,174 @@
+This folder contains the developer's weekly update files.
+Generated: 2026-03-09
+
+Instructions for Copilot:
+
+Scan this folder recursively and integrate all contained files into the existing project.
+
+For each file:
+
+• If the same file exists in the project, replace it with the updated file.
+• If the file does not exist, create the required folder structure and add it.
+
+Do not delete unrelated files.
+
+After integration:
+
+• Resolve import errors
+• Resolve dependency issues
+• Fix build errors
+• Ensure backend and frontend run successfully.
+
+Final Result:
+
+The project should now reflect all updates contained in this folder.
+
+==============================================================
+FILES INCLUDED IN THIS UPDATE PACKAGE (81 files)
+==============================================================
+
+BACKEND CHANGES
+---------------
+Backend\.env.example.jobs
+Backend\add_archive_columns.sql
+Backend\api_server.py
+Backend\candidate_comments_module\__init__.py
+Backend\candidate_comments_module\database.py
+Backend\candidate_comments_module\models.py
+Backend\candidate_comments_module\routes.py
+Backend\comment_standalone_module\__init__.py
+Backend\comment_standalone_module\database.py
+Backend\company_jobs_module\__init__.py
+Backend\company_jobs_module\database.py
+Backend\company_jobs_module\models.py
+Backend\company_jobs_module\routes.py
+Backend\create_jobs_table.sql
+Backend\jobs_module\__init__.py
+Backend\jobs_module\database.py
+Backend\jobs_module\models.py
+Backend\jobs_module\public_models.py
+Backend\jobs_module\public_routes.py
+Backend\jobs_module\routes.py
+Backend\jobs_module\schemas.py
+Backend\jobs_table_queries.sql
+Backend\JOBS_TABLE_README.md
+Backend\migrate_add_job_posting_fields.py
+Backend\requirements.txt
+Backend\run_archive_migration.py
+Backend\run_migrations.py
+Backend\setup_jobs_table.py
+
+FRONTEND CHANGES
+----------------
+Frontend\.env
+Frontend\open_user_login.bat
+Frontend\package.json
+Frontend\package-lock.json
+Frontend\README.md
+Frontend\src\App.jsx
+Frontend\src\assets\company-logo.png
+Frontend\src\assets\company-logo2.png
+Frontend\src\assets\onlyBird.png
+Frontend\src\components\AppliedCandidatesModal.jsx
+Frontend\src\components\ApplyJobModal.jsx
+Frontend\src\components\Autocomplete.css
+Frontend\src\components\CandidateProfileModal.jsx
+Frontend\src\components\CommentModal.jsx
+Frontend\src\components\CreateJobModal.css
+Frontend\src\components\CreateJobModal.jsx
+Frontend\src\components\EditProfileModal.jsx
+Frontend\src\components\ErrorBoundary.jsx
+Frontend\src\components\FloatingInput.css
+Frontend\src\components\FloatingInput.jsx
+Frontend\src\components\JobCard.css
+Frontend\src\components\JobCard.jsx
+Frontend\src\components\JobDetailsModal.jsx
+Frontend\src\components\ProfileCard.jsx
+Frontend\src\components\ProfileModal.jsx
+Frontend\src\components\PublicJobCard.css
+Frontend\src\components\PublicJobCard.jsx
+Frontend\src\components\RichTextEditor.jsx
+Frontend\src\components\SavedJobsPanel.jsx
+Frontend\src\components\SearchHistoryPanel.jsx
+Frontend\src\components\ServerStatus.jsx
+Frontend\src\components\TagInput.css
+Frontend\src\components\TagInput.jsx
+Frontend\src\components\TopNavbar.jsx
+Frontend\src\layouts\DashboardLayout.jsx
+Frontend\src\login\authStore.js
+Frontend\src\login\login.css
+Frontend\src\login\LoginPage.jsx
+Frontend\src\pages\FindJobs.css
+Frontend\src\pages\FindJobs.jsx
+Frontend\src\pages\Jobs.jsx
+Frontend\src\services\api.js
+Frontend\vite.config.js
+
+JOB MANAGEMENT APP CHANGES
+---------------------------
+JobManagementApp\package.json
+JobManagementApp\package-lock.json
+JobManagementApp\src\App.css
+JobManagementApp\src\components\JobModal.jsx
+JobManagementApp\src\components\RichTextEditor.jsx
+
+PROJECT ROOT CHANGES
+--------------------
+FIXES_APPLIED.md
+setup_and_run.ps1
+START_APPLICATION.bat
+start_servers.ps1
+start-project.bat
+
+==============================================================
+KEY CHANGES SUMMARY
+==============================================================
+
+1. NEW BACKEND MODULES INTEGRATED:
+   - comment_standalone_module  → /standalone-comments/ (POST/GET/DELETE)
+   - candidate_comments_module  → /api/candidate-comments/ (POST/GET/DELETE)
+   - company_jobs_module        → /company-jobs/ (POST/GET)
+   All modules now have database.py with init_db() that auto-creates tables.
+
+2. JOBS MODULE UPDATES:
+   - New fields: job_id, posted_date, archive support (archived column)
+   - New public job portal routes
+   - Migration scripts: run_migrations.py, migrate_add_job_posting_fields.py,
+     run_archive_migration.py
+
+3. STARTUP SCRIPTS FIXED:
+   - start_servers.ps1 and setup_and_run.ps1 updated to use .venv_new
+     (Python 3.12) instead of broken .venv (Python 3.14 reference)
+   - Frontend URL corrected to port 5175
+
+4. FRONTEND API FIXES:
+   - CommentModal.jsx, EditProfileModal.jsx, ProfileModal.jsx:
+     Removed hardcoded "http://localhost:8001" URL references.
+     Now use centralized api client from services/api.js (relative URLs).
+
+5. DEPENDENCY UPDATE:
+   - requirements.txt: Added sqlalchemy>=2.0 (required by all new modules)
+
+==============================================================
+INTEGRATION NOTES
+==============================================================
+
+Backend startup command (use .venv_new):
+  cd Backend
+  .venv_new\Scripts\activate
+  python -m uvicorn api_server:app --host 127.0.0.1 --port 8000 --reload
+
+Database tables auto-created on first startup:
+  - standalone_candidate_comments
+  - candidate_comments
+  - company_jobs
+
+Run pending migrations (once):
+  python run_migrations.py
+  python migrate_add_job_posting_fields.py
+  python run_archive_migration.py
+
+Frontend startup:
+  cd Frontend
+  npm install   (if first run)
+  npm run dev   (starts on port 5175)

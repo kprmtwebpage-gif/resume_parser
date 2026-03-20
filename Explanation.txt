@@ -1,0 +1,899 @@
+================================================================================
+            RESUME PARSING APPLICATION — COMPLETE PROJECT EXPLANATION
+================================================================================
+Generated: March 13, 2026
+Project Name: KPRMT Global Solutions — Resume Parser & Talent Management Platform
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. WHAT IS THIS PROJECT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is a full-stack AI-powered Resume Parsing and Talent Management platform
+built for KPRMT Global Solutions. The system:
+
+  • Automatically ingests resumes from Google Drive (PDF, DOCX, DOC, XLS formats)
+  • Parses and extracts structured data (name, email, phone, skills, experience,
+    education, certifications, location, LinkedIn URL, job title)
+  • Stores everything in a PostgreSQL database
+  • Exposes a REST API (FastAPI) for searching, filtering, and managing candidates
+  • Provides a modern React dashboard for HR teams to search, view, and manage
+    talent pools and job postings
+  • Includes an AI chatbot assistant for natural-language candidate search
+  • Has a public-facing job portal where candidates can browse and apply for jobs
+  • Supports multi-environment deployment: DEV, UAT, PROD via Docker
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. HIGH-LEVEL ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ┌─────────────────────┐      ┌──────────────────────┐
+  │  Google Drive       │─────▶│  Ingestion Service   │
+  │  (Resume Files)     │      │  (Python)            │
+  └─────────────────────┘      └──────────┬───────────┘
+                                           │ Parse & Store
+                                           ▼
+  ┌─────────────────────┐      ┌──────────────────────┐
+  │  React Frontend     │◀────▶│  FastAPI Backend     │
+  │  (Vite + Tailwind)  │      │  (api_server.py)     │
+  └─────────────────────┘      └──────────┬───────────┘
+                                           │
+                                           ▼
+                                ┌──────────────────────┐
+                                │  PostgreSQL Database  │
+                                │  (Docker Container)   │
+                                └──────────────────────┘
+
+  • Nginx acts as a reverse proxy, routing:
+      Production  → port 8000
+      UAT         → port 8001
+      Dev         → port 8002
+      Domain: kprmtglobalsolutions.duckdns.org (with SSL via Certbot)
+
+  • Docker Compose orchestrates: database + ingestion + api services
+  • Three separate docker-compose overlay files handle each environment
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. FOLDER STRUCTURE OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Resume_Parsing -Latest -Updated_UI/      ← Main project root
+  │
+  ├── Backend/                             ← All Python backend code
+  │   ├── api_server.py                   ← FastAPI application entry point
+  │   ├── parser.py                       ← Core resume parsing engine
+  │   ├── auth.py                         ← JWT + bcrypt authentication
+  │   ├── db_setup.py                     ← DB schema creation script
+  │   ├── education_parser.py             ← Education section extractor
+  │   ├── location_parser.py              ← Location/address extractor
+  │   ├── data_normalization.py           ← Job title & skill normalization
+  │   ├── validation_layer.py             ← Post-extraction NLP validation
+  │   ├── confidence_scorer.py            ← Extraction quality scoring
+  │   ├── llm_extractor.py                ← LLM-powered extraction (optional)
+  │   ├── llm_provider_chain.py           ← Multi-provider LLM fallback chain
+  │   ├── hf_ai_enhancer.py               ← HuggingFace AI enhancement
+  │   ├── hybrid_enhancer.py              ← Hybrid regex + LLM enhancer
+  │   ├── chatbot_integration.py          ← Chatbot ↔ database bridge
+  │   ├── google_drive_sync.py            ← Google Drive OAuth sync
+  │   ├── resume_exporter.py              ← Export candidates to Excel/CSV
+  │   ├── jobs_module/                    ← Full CRUD for job postings
+  │   ├── candidate_comments_module/      ← Candidate comments system
+  │   ├── comment_standalone_module/      ← Standalone comments API
+  │   ├── company_jobs_module/            ← Company-specific job routes
+  │   └── requirements.txt               ← Python dependencies
+  │
+  ├── Frontend/                           ← React frontend (Vite)
+  │   ├── src/
+  │   │   ├── App.jsx                    ← Root router + auth guard
+  │   │   ├── pages/                     ← Page-level components
+  │   │   ├── components/                ← Reusable UI components
+  │   │   ├── contexts/                  ← React Contexts (Auth, Theme, Upload)
+  │   │   ├── chatbot/                   ← Chatbot UI launcher + panel
+  │   │   ├── services/api.js            ← Axios API client
+  │   │   └── config.js                  ← API base URL config
+  │   └── package.json
+  │
+  ├── docker-compose.yml                 ← Base Docker services
+  ├── docker-compose.dev.yml             ← Dev overrides
+  ├── docker-compose.uat.yml             ← UAT overrides
+  ├── docker-compose.prod.yml            ← Prod overrides
+  ├── Dockerfile                         ← Combined image
+  ├── Dockerfile.api                     ← API-only image
+  ├── Dockerfile.ingestion               ← Ingestion-only image
+  ├── nginx/resume-parser.conf           ← Nginx reverse proxy config
+  └── resume_ingestion_service.py        ← Ingestion entry point
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. BACKEND — FILE BY FILE EXPLANATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+─────────────────────────────
+A. api_server.py  (Main FastAPI Server)
+─────────────────────────────
+  • Entry point for the REST API; runs using Uvicorn.
+  • Registers all routers: auth, jobs, comments, candidate_comments,
+    company_jobs, public jobsnow, and job applications.
+  • Key endpoints:
+      GET  /candidates          → paginated + filtered candidate list
+      GET  /candidates/{id}     → single candidate detail
+      POST /candidates/{id}/upload-resume → replace a candidate's resume file
+      POST /parse-resume        → upload & parse a new resume on-demand
+      GET  /job-titles          → autocomplete list of job titles
+      GET  /skills              → autocomplete list of skills
+      GET  /locations           → autocomplete list of locations
+      POST /chatbot/chat        → AI chatbot query
+      GET  /health              → Docker health check
+      GET  /version             → returns deployed git commit hash
+      POST /upload              → upload editor image
+      GET  /export-candidates   → download Excel/CSV of candidate list
+  • CORS: allows localhost dev ports and the production server IP/domain.
+  • APINoCacheMiddleware: adds no-cache headers on all /candidates, /chatbot,
+    and /skills-related API paths to prevent stale data.
+  • Serves built React frontend static files when SERVE_FRONTEND=1.
+  • Concurrency guard: limits simultaneous parser.py subprocesses to 3 using
+    asyncio.Semaphore to prevent resource exhaustion.
+  • Database connection uses psycopg2 context manager (not ORM — raw SQL
+    with parameterized queries).
+  • Search logic supports: name, location, job title, keywords, experience
+    range — all combined dynamically with parameterized WHERE conditions.
+
+─────────────────────────────
+B. parser.py  (Core Resume Parsing Engine)
+─────────────────────────────
+  • The heart of the system — parses PDF/DOCX resumes and stores structured
+    data into PostgreSQL.
+  • Supports formats: PDF (pdfplumber), DOCX (python-docx), DOC (olefile),
+    and scanned-image PDFs via OCR (pytesseract — optional).
+  • Parsing pipeline per file:
+      1. Extract raw text (pdfplumber for PDF, python-docx for DOCX)
+      2. Optional OCR fallback for image-based PDFs (first 1-2 pages)
+      3. Regex extraction of: name, email, phone, address, job title,
+         years of experience, LinkedIn URL, certifications, skills
+      4. Education parsing (delegated to education_parser.py)
+      5. Location parsing (delegated to location_parser.py)
+      6. Confidence scoring (confidence_scorer.py)
+      7. LLM fallback if confidence < threshold (llm_extractor.py or
+         hybrid_enhancer.py via llm_provider_chain.py)
+      8. NLP validation (validation_layer.py using spaCy)
+      9. Data normalization (data_normalization.py)
+     10. SHA-256 fingerprint computed for de-duplication (no re-parse if
+         same file seen before)
+     11. UPSERT into candidate_profile + candidate_skills_profile tables
+  • Logging: production-grade rotating logs (10MB main log, 5MB error log)
+    with gzip compression. Log level is environment-aware (DEBUG in dev,
+    WARNING in prod).
+  • Safe SQL identifiers validated by regex before use (prevents injection).
+
+─────────────────────────────
+C. auth.py  (Authentication & Authorization)
+─────────────────────────────
+  • JWT-based authentication using python-jose (HS256 algorithm).
+  • Passwords hashed with bcrypt.
+  • Token expiry: 8 hours (configurable via JWT_EXPIRE_MINUTES env var).
+  • Roles: "user" and "admin/superuser".
+  • Endpoints (mounted at /api/auth/):
+      POST /login             → returns JWT access token
+      POST /logout            → client-side token removal (stateless)
+      GET  /me                → returns current user info
+      POST /register          → create new user (admin only)
+      PUT  /users/{id}        → update user (admin only)
+      DELETE /users/{id}      → delete user (admin only)
+      POST /change-password   → change own password
+      POST /forgot-password   → sends OTP via email (Gmail SMTP)
+      POST /reset-password    → verifies OTP and resets password
+  • OTP email via Gmail SMTP (configurable SMTP_HOST, SMTP_USER, SMTP_PASSWORD).
+  • FastAPI dependency injection: get_current_user(), get_current_admin()
+    validate JWT and inject user into protected routes.
+
+─────────────────────────────
+D. education_parser.py
+─────────────────────────────
+  • Extracts structured education data from raw resume text.
+  • Returns a list of EducationEntry TypedDicts with:
+      degree_level, degree, specialization, university, raw_line
+  • Uses a multi-pass strategy:
+      Pass 1: spaCy NER (ORG entities) to detect university names
+      Pass 2: regex patterns for degree keywords (Bachelor, Master, PhD,
+              Diploma, B.E, B.Tech, M.Tech, M.Sc, etc.)
+      Pass 3: specialization extraction (Computer Science, IT, etc.)
+  • Handles corrupted PDF text, missing spaces, Unicode normalization.
+  • Gracefully degrades to regex-only if spaCy is unavailable.
+
+─────────────────────────────
+E. location_parser.py
+─────────────────────────────
+  • Extracts city, state, country from resume header/contact section only
+    (never from skills or experience sections to avoid false positives).
+  • Strategy (in order):
+      1. Header regex: looks for "City, State" or "City, Country" patterns
+      2. spaCy GPE (geopolitical entity) NER
+      3. Phone area-code lookup as last resort
+  • Skill-context guard: rejects city names that immediately follow a
+    technology name (e.g., "Xunit, Mississippi" would be ignored).
+  • US state abbreviations expanded to full names.
+  • Returns LocationResult with city, state, country, confidence, and source.
+
+─────────────────────────────
+F. data_normalization.py
+─────────────────────────────
+  • canonicalize_job_title(): normalizes job titles
+      - Deduplicates slash-separated variants ("Sr Developer / Senior Developer"
+        → "Senior Developer")
+      - Protects compound slash terms like "UX/UI"
+      - Normalizes pipe separators to slashes
+  • canonicalize_skill_list(): deduplicates skill lists preserving order
+  • extract_qualification(): extracts degree from text with fallback logic
+
+─────────────────────────────
+G. validation_layer.py  (NLP Validation)
+─────────────────────────────
+  • Post-extraction validation to catch parser errors before DB insert.
+  • validate_name(): uses spaCy NER to confirm extracted first/last names
+    are real person names, not section headers or junk text.
+  • validate_location(): verifies city/state against known US states,
+    Indian cities, and country lists.
+  • validate_degree(): confirms extracted degrees are real degree names.
+  • validate_applied_title(): validates job titles against the resume text.
+  • Design principle: prefers returning NULL over inserting wrong data.
+
+─────────────────────────────
+H. confidence_scorer.py
+─────────────────────────────
+  • Computes an extraction confidence score (0.0 to 1.0) after regex parsing.
+  • Weighted scoring per field:
+      name (0.25), email (0.20), phone (0.15), job_title (0.15),
+      address (0.10), education (0.08), certifications (0.04),
+      skills (0.03), experience_years (0.02) — rough weights
+  • If score < 0.75, the parser triggers an LLM fallback call.
+  • Ensures LLM is only called when truly needed (90% regex, 10% LLM).
+
+─────────────────────────────
+I. llm_extractor.py  (LLM Extraction)
+─────────────────────────────
+  • Optional — activated by LLM_EXTRACT_ENABLED=true env var.
+  • Supports providers: OpenAI, Anthropic, and any OpenAI-compatible API
+    (e.g. Groq, local LLMs).
+  • Sends first ~1500 chars of resume + OCR text to the LLM.
+  • Extraction prompt asks for: job_title, linkedin_url, certifications
+    (with issuer + confidence), education (degree, level, field, confidence).
+  • Returns parsed JSON or None on any error.
+  • Rate limiting: configurable delay between calls (LLM_RATE_DELAY env var)
+    to protect free-tier providers from throttling.
+  • Compact prompt mode (300 tokens) or full verbose mode.
+
+─────────────────────────────
+J. llm_provider_chain.py  (LLM Fallback Chain)
+─────────────────────────────
+  • Multi-provider fallback chain: HuggingFace → Groq → regex/NLP only.
+  • Circuit breaker pattern: skips a failing provider for LLM_CIRCUIT_RESET_MIN
+    minutes after LLM_CIRCUIT_FAILS consecutive failures.
+  • Graceful degradation: always falls back to regex; never crashes production.
+  • Zero-config: works with no API keys (pure regex mode).
+  • Provider priority configurable via LLM_PROVIDERS env var.
+
+─────────────────────────────
+K. hf_ai_enhancer.py  (HuggingFace Integration)
+─────────────────────────────
+  • Uses HuggingFace Inference API (free tier).
+  • Default model: Qwen/Qwen2.5-72B-Instruct.
+  • Functions: extract_skills(), enhance_job_title(), enhance_certifications(),
+    enhance_education(), full_enhancement().
+  • Activated when HF_API_KEY env var is set.
+
+─────────────────────────────
+L. hybrid_enhancer.py  (Best-of-Both Merger)
+─────────────────────────────
+  • Receives all regex-extracted fields and runs per-field quality checks.
+  • Detects garbage extractions (e.g., "resume" or "profile" as a first name).
+  • Only sends weak fields to LLM — a single targeted call, not a full re-parse.
+  • Merges LLM corrections with solid regex results field by field.
+  • Result: most resumes use 0 LLM calls, only ~15-25% use 1 targeted call.
+
+─────────────────────────────
+M. chatbot_integration.py
+─────────────────────────────
+  • Bridges the chatbot module to the PostgreSQL database.
+  • DatabaseSearchHandler responds to natural-language queries like
+    "Find me a Python developer with 5 years experience".
+  • Translates query keywords into SQL ILIKE searches on job titles, skills,
+    names, and locations.
+  • Returns ranked results as structured JSON to the chatbot.
+
+─────────────────────────────
+N. google_drive_sync.py
+─────────────────────────────
+  • OAuth-based Google Drive folder sync.
+  • Supports Shared Drives (includeItemsFromAllDrives=True).
+  • Downloads only new/changed files using MD5 checksum comparison.
+  • Sanitizes filenames (removes special characters, limits length).
+  • Token cached locally (.gdrive_token.json) so only the first run
+    requires browser authentication.
+
+─────────────────────────────
+O. resume_ingestion_service.py  (Ingestion Service Entry Point)
+─────────────────────────────
+  • Orchestrates the full ingestion pipeline:
+      Step 1 → sync_drive_folder() — download new resumes from Google Drive
+      Step 2 → parse_main() — run parser.py on all downloaded files
+      Step 3 → apply_fixes() — apply post-parse manual corrections (names,
+               job titles) keyed by resume_filename
+  • Modes:
+      --once    → run once and exit (for cron/scheduler use)
+      --watch   → continuous polling loop (checks every N minutes)
+
+─────────────────────────────
+P. jobs_module/  (Job Postings CRUD)
+─────────────────────────────
+  • SQLAlchemy ORM-based module for managing job postings.
+  • Job model fields: title, company, status, location, department,
+    open_positions, salary_start, salary_end, currency, employment_type,
+    category, description, requirements, benefits, experience_required,
+    education_required, skills_required, deadline, logo_url, etc.
+  • Job statuses: DRAFT, POSTED, HOLD, CLOSED.
+  • Unique job ID format: JOBID#<base64-encoded date> (e.g., JOBID#MTAvMDQ).
+  • Full CRUD: create, list, archive, restore, duplicate, hold, close, delete.
+  • JobApplication model: stores candidate applications with name, email,
+    phone, education, experience, citizenship, LinkedIn, resume file upload.
+  • Duplicate application prevention (unique constraint on job_id + email).
+  • Export jobs to Excel via openpyxl.
+  • public_routes.py: unauthenticated routes for the public job portal.
+
+─────────────────────────────
+Q. candidate_comments_module/  &  comment_standalone_module/
+─────────────────────────────
+  • candidate_comments_module: allows HR staff to add comments/notes on
+    specific candidates (linked to candidate_id).
+  • comment_standalone_module: general standalone comments API.
+  • Both use SQLAlchemy ORM and expose FastAPI routers.
+
+─────────────────────────────
+R. db_setup.py  (Schema Creation)
+─────────────────────────────
+  • Creates the core PostgreSQL tables:
+      job_titles           → lookup table for autocomplete
+      candidate_profile    → main candidates table (name, email, phone,
+                             address, qualification, visa, work auth,
+                             education_structured JSONB, etc.)
+      candidate_skills_profile → skills table (tech_skills, soft_skills,
+                                  certifications, job_title, years_exp, etc.)
+  • Safe SQL identifier validation prevents injection in table names.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. DATABASE SCHEMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Table: candidate_profile
+  ──────────────────────────────────────────────────────────
+  id                     SERIAL PRIMARY KEY
+  first_name             TEXT
+  last_name              TEXT
+  address                TEXT
+  phone                  TEXT
+  email                  TEXT
+  qualification          TEXT          (flat degree string)
+  education_structured   JSONB         (structured list of education entries)
+  visa_support           BOOLEAN
+  work_authorization_type TEXT
+  profile_picture_url    TEXT
+  linkedin               TEXT
+  resume_filename        TEXT          (original uploaded filename)
+  resume_sha256          TEXT UNIQUE   (for de-duplication)
+  parsed_at              TIMESTAMP
+  summary                TEXT          (professional summary)
+  company                TEXT          (most recent employer)
+
+  Table: candidate_skills_profile
+  ──────────────────────────────────────────────────────────
+  id                     SERIAL PRIMARY KEY
+  candidate_id           INT UNIQUE (FK to candidate_profile)
+  job_title              TEXT
+  tech_skills            TEXT      (comma-separated)
+  soft_skills            TEXT
+  certifications         TEXT
+  years_of_experience    INT
+  parsed_at              TIMESTAMP
+
+  Table: job_titles
+  ──────────────────────────────────────────────────────────
+  id                     SERIAL PRIMARY KEY
+  job_title              TEXT UNIQUE
+  created_at             TIMESTAMP
+
+  Table: jobs  (managed by SQLAlchemy ORM)
+  ──────────────────────────────────────────────────────────
+  id                     UUID PRIMARY KEY (auto-generated)
+  job_title, company, status, location, department,
+  open_positions, salary_start/end, currency,
+  employment_type, category, job_description,
+  skills_required, experience_required, education_required,
+  deadline, logo_url, created_at, updated_at, archived_at
+
+  Table: job_applications  (SQLAlchemy ORM)
+  ──────────────────────────────────────────────────────────
+  id, job_id (FK), candidate_name, email, phone,
+  first_name, last_name, address, education,
+  citizenship, experience, linkedin_url,
+  resume_url, resume_filename, created_at
+
+  Additional tables: auth_users, auth_sessions, candidate_comments,
+                     standalone_comments (created by respective modules)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. FRONTEND — FILE BY FILE EXPLANATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Tech Stack: React 19, Vite 7, Tailwind CSS 3, React Router v7,
+              Axios, Recharts, HeroIcons, Lucide React,
+              react-quill-new, pdfjs-dist, mammoth.
+
+─────────────────────────────
+App.jsx  (Root Component)
+─────────────────────────────
+  • Wrapped with ThemeProvider, AuthProvider, and BrowserRouter.
+  • Session-based authentication gate: if sessionStorage has userLoginAuth=true,
+    show the app; otherwise show the LoginPage.
+  • Route structure:
+      /                          → SearchPeople (candidate search)
+      /jobs                      → Jobs management page (HR internal)
+      /upload                    → Resume upload page
+      /find-jobs                 → Public job portal (candidates view)
+      /jobs/:jobId/applied       → Applied candidates list per job
+      /admin                     → Admin Dashboard (role-guarded)
+        /admin/upload-metrics    → Upload statistics
+        /admin/users             → User management
+        /admin/activity          → Activity log
+        /admin/resumes           → Resume management
+  • AdminGuard component checks localStorage for role === 'superuser' or 'admin'.
+  • ChatLauncher and FloatingUploadIndicator are always-mounted global components.
+
+─────────────────────────────
+pages/SearchPeople.jsx  (Main Candidate Search Page)
+─────────────────────────────
+  • The primary HR tool — search and filter the candidate database.
+  • Features:
+      - Search by name, location, job title, skills/keywords
+      - Experience range filtering (from/to)
+      - Client-side OR filtering for multiple comma-separated names/titles
+      - Unique profiles toggle (deduplication view)
+      - Paginated results (25 per page default)
+      - Click a candidate → opens ProfileModal with full details
+      - Edit candidate → opens EditProfileModal
+      - Multi-select candidates → bulk Excel/CSV export
+      - Bulk resume download (ZIP)
+      - Google Drive sync trigger from the UI
+      - Candidate chat event: clicking a candidate notifies the chatbot
+
+─────────────────────────────
+pages/Jobs.jsx  (Internal HR Job Management)
+─────────────────────────────
+  • Full CRUD interface for job postings.
+  • Create, edit, archive, restore, duplicate, hold, close jobs.
+  • Filtering by status, title, location, date range with collapsible sections.
+  • Export jobs to Excel.
+  • Navigate to AppliedCandidatesPage per job from a job card.
+  • Field mapping layer translates frontend form keys ↔ API JSON keys.
+
+─────────────────────────────
+pages/FindJobs.jsx  (Public Job Portal)
+─────────────────────────────
+  • Candidate-facing page — no login required.
+  • Search jobs by title/keyword and location.
+  • Filter by job type (Full Time, Part Time, Freelance) and experience range.
+  • Salary range filter.
+  • Save jobs locally (localStorage) + Search history panel.
+  • Apply for a job → ApplyJobModal collects details and submits application
+    via POST /api/applications/apply.
+  • Progressive loading (Load More pattern, starts with 10 jobs).
+
+─────────────────────────────
+pages/AdminDashboard.jsx  &  pages/admin/
+─────────────────────────────
+  • AdminLayout with nested routes for admin sub-pages.
+  • DashboardOverview: charts (Recharts) for:
+      - Total users, total resumes, active today, success rate
+      - Login activity (daily/weekly/monthly bar charts)
+      - Upload trends (area chart)
+      - User performance leaderboard (clickable bars → user detail drawer)
+      - Recent activity feed
+  • UploadMetrics: detailed upload statistics over time.
+  • UsersManagement: list + create + deactivate users (admin only).
+  • ActivityLog: chronological log of all system actions.
+  • AdminResumes: admin view for managing parsed resumes.
+
+─────────────────────────────
+pages/Upload.jsx
+─────────────────────────────
+  • Drag-and-drop or click-to-browse resume upload.
+  • Sends files to POST /parse-resume using multipart/form-data.
+  • Shows real-time upload progress via FloatingUploadIndicator.
+  • Supports PDF, DOCX, DOC, XLS files.
+
+─────────────────────────────
+components/ProfileModal.jsx
+─────────────────────────────
+  • Full candidate profile popup showing:
+      - Name, contact info (email, phone), location
+      - LinkedIn URL, visa/work auth status
+      - Education (structured or flat)
+      - Skills (tech + soft)
+      - Experience (years + certifications)
+      - Resume PDF preview (inline via PdfScrollViewer)
+      - Comments timeline (via CommentsTimeline component)
+  • Edit button triggers EditProfileModal.
+
+─────────────────────────────
+components/Chatbot.jsx  &  chatbot/
+─────────────────────────────
+  • Floating chat button (bottom-right corner).
+  • ChatLauncher manages open/minimize/close state.
+  • ChatPanel sends messages to POST /chatbot/chat endpoint.
+  • When a candidate profile is opened in the main UI, chatbot auto-minimizes
+    (via modalEvents pub/sub system) to avoid overlap.
+  • Candidate selection events flow from SearchPeople to chatbot context
+    so the chatbot "knows" which candidate is being viewed.
+
+─────────────────────────────
+contexts/
+─────────────────────────────
+  • AuthContext: stores JWT token and user info in localStorage.
+    Provides login(), logout(), and getAuthHeaders() helpers.
+    Token is auto-attached to all Axios requests via interceptor.
+  • ThemeContext: dark/light mode toggle, persisted in localStorage.
+  • UploadContext: tracks active background upload jobs for the
+    FloatingUploadIndicator.
+
+─────────────────────────────
+services/api.js
+─────────────────────────────
+  • Axios instance with baseURL from VITE_API_BASE_URL env var.
+  • Request interceptor: auto-attaches Authorization: Bearer token.
+  • Response interceptor: converts network errors to user-friendly messages.
+  • Helper functions: fetchCandidates(), fetchCandidateById(),
+    updateCandidate(), bulkDownloadResumes(), and more.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. PARSING PIPELINE — STEP BY STEP LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When a resume file is processed (parser.py), the following steps happen:
+
+  STEP 1 — FILE FINGERPRINT
+      Compute SHA-256 hash of the file bytes.
+      Check candidate_profile table; if resume_sha256 already exists → SKIP.
+
+  STEP 2 — TEXT EXTRACTION
+      PDF:  pdfplumber extracts text page by page.
+      DOCX: python-docx reads paragraphs and table cells.
+      DOC:  olefile reads legacy Word binary format.
+      If extracted text is too short (<100 chars) AND ENABLE_PDF_OCR=true:
+          Use pytesseract OCR on the first 1-2 pages (image-based PDFs).
+
+  STEP 3 — REGEX EXTRACTION
+      • Name: Looks for capitalized word pairs near top of document,
+        cross-referenced against first_names.txt blacklist.
+      • Email: Standard RFC-style email regex.
+      • Phone: phonenumbers library for international number parsing;
+        falls back to 10-digit regex patterns.
+      • LinkedIn URL: Regex for linkedin.com/in/ patterns.
+      • Job Title: Searches for "Applying for:", "Position:", resume headline
+        in the first ~20 lines. Multiple titles normalized via canonicalize_job_title().
+      • Years of Experience: Extracts numeric values near "years of experience"
+        phrases. Validates 0–50 range.
+      • Certifications: Searches for known cert keywords (AWS, Azure, PMP,
+        CISSP, Google Cloud, etc.).
+      • Education: Delegated to education_parser.py.
+      • Location: Delegated to location_parser.py.
+      • Skills: Matches against skills_master.txt list of ~1000+ known skills.
+
+  STEP 4 — CONFIDENCE SCORING (confidence_scorer.py)
+      Each extracted field is scored. Combined score compared to threshold.
+      If score < 0.75 → trigger LLM enhancement.
+
+  STEP 5 — LLM ENHANCEMENT (optional, hybrid_enhancer.py)
+      Only weak fields are sent to LLM (not the entire resume).
+      LLM provider tried in order: HuggingFace → Groq → skip.
+      Circuit breaker prevents repeated failures.
+
+  STEP 6 — NLP VALIDATION (validation_layer.py)
+      spaCy NER validates names, locations, and degree extractions.
+      Prefers returning NULL over wrong data.
+
+  STEP 7 — DATA NORMALIZATION (data_normalization.py)
+      Job titles deduplicated and standardized.
+      Skill lists deduplicated preserving order.
+      US state abbreviations expanded to full names.
+
+  STEP 8 — DATABASE INSERT
+      UPSERT into candidate_profile (ON CONFLICT on resume_sha256).
+      UPSERT into candidate_skills_profile (ON CONFLICT on candidate_id).
+      Job title added to job_titles lookup table if new.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. AUTHENTICATION & AUTHORIZATION FLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. User visits app → sees LoginPage.
+  2. Submits username/password → POST /api/auth/login.
+  3. Backend verifies password with bcrypt → issues JWT (HS256, 8hr expiry).
+  4. Frontend stores token in localStorage (key: rp_token).
+  5. All subsequent Axios requests include Authorization: Bearer <token>.
+  6. Backend validates JWT on protected routes using get_current_user() dependency.
+  7. Admin routes additionally check role via get_current_admin().
+  8. Frontend AdminGuard reads localStorage rp_user.role for route protection.
+  9. Forgot Password: OTP sent via Gmail SMTP (10-minute expiry).
+  10. Logout: client clears localStorage tokens (JWT is stateless, no server revoke).
+
+  Roles:
+    user       → can search, view, upload resumes
+    admin      → can also create/delete users, view admin dashboard
+    superuser  → full access including destructive operations
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. DEPLOYMENT & INFRASTRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Docker Services:
+  ─────────────────
+    database     → postgres:15-alpine
+                     Data volume: postgres_data (persistent)
+                     Health check: pg_isready
+    ingestion    → Python container (Dockerfile.ingestion)
+                     Runs resume_ingestion_service.py
+                     Mounts: resume_cache volume, Drive credentials
+    api          → Python container (Dockerfile.api)
+                     Runs FastAPI (Uvicorn) on port 8000
+                     Mounts: resume_cache volume (to serve PDF files)
+
+  Environments:
+  ─────────────────
+    DEV   → docker-compose.dev.yml   → port 8002 exposed
+    UAT   → docker-compose.uat.yml   → port 8001 exposed
+    PROD  → docker-compose.prod.yml  → port 8000 exposed, restart:always
+
+  Nginx (reverse proxy on host):
+  ─────────────────────────────
+    kprmtglobalsolutions.duckdns.org/       → PROD (port 8000)
+    kprmtglobalsolutions.duckdns.org/uat/   → UAT  (port 8001)
+    kprmtglobalsolutions.duckdns.org/dev/   → DEV  (port 8002)
+    SSL via Let's Encrypt (Certbot auto-renewal)
+
+  Key Environment Variables (in .env.prod/.env.dev/.env.uat):
+  ─────────────────────────────────────────────────────────────
+    DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT
+    CANDIDATES_TABLE, SKILLS_TABLE
+    JWT_SECRET, JWT_EXPIRE_MINUTES
+    GDRIVE_FOLDER_ID, GDRIVE_CREDENTIALS_JSON
+    ENABLE_PDF_OCR (true/false)
+    USE_LLM (true/false)
+    LLM_BASE_URL, LLM_MODEL, OPENAI_API_KEY
+    HF_API_KEY
+    SMTP_HOST, SMTP_USER, SMTP_PASSWORD
+    SERVE_FRONTEND (1 = serve React build from FastAPI)
+    DEPLOY_ENV (dev|uat|prod)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. TECHNOLOGIES USED — COMPLETE LIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  BACKEND (Python)
+  ─────────────────
+    FastAPI             — async REST API framework
+    Uvicorn             — ASGI server for FastAPI
+    pdfplumber          — PDF text extraction
+    python-docx         — DOCX/Word file parsing
+    olefile             — Legacy DOC binary format
+    pytesseract         — OCR for image-based PDFs (optional)
+    psycopg2-binary     — PostgreSQL driver (raw SQL)
+    SQLAlchemy          — ORM for jobs/comments modules
+    python-jose         — JWT creation and decoding
+    bcrypt / passlib    — Password hashing
+    phonenumbers        — International phone number parsing
+    pycountry           — Country name normalization
+    spaCy (en_core_web_sm) — NER for name/location/education validation
+    python-dotenv       — .env file loading
+    pandas + openpyxl   — Excel export
+    huggingface_hub     — HuggingFace API client (optional AI)
+    google-api-python-client + google-auth — Google Drive OAuth sync
+    openai / anthropic  — LLM APIs (optional, via env config)
+    hashlib (stdlib)    — SHA-256 fingerprinting for de-duplication
+    multiprocessing     — Parallel resume processing
+    gzip (stdlib)       — Log compression
+
+  FRONTEND (JavaScript / React)
+  ──────────────────────────────
+    React 19            — UI framework
+    Vite 7              — Build tool and dev server
+    React Router v7     — Client-side routing
+    Tailwind CSS 3      — Utility-first CSS styling
+    Axios               — HTTP client (auto-attaches JWT)
+    Recharts            — Charts (bar, area, pie) for Admin Dashboard
+    HeroIcons           — Icon set (outline + solid)
+    Lucide React        — Additional icon set
+    pdfjs-dist          — In-browser PDF rendering/preview
+    mammoth             — DOCX preview in browser
+    react-quill-new     — Rich text editor (job descriptions)
+    @headlessui/react   — Accessible UI primitives (modals, dropdowns)
+
+  INFRASTRUCTURE
+  ──────────────
+    PostgreSQL 15       — Primary database
+    Docker + Docker Compose — Containerization and orchestration
+    Nginx               — Reverse proxy + SSL termination
+    Let's Encrypt (Certbot) — Free SSL certificates
+    DuckDNS             — Free dynamic DNS for the domain
+    Google Drive        — Resume file storage (source of truth)
+    Gmail SMTP          — OTP email delivery
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. KEY DESIGN PATTERNS & LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. SHA-256 De-duplication
+     Every file is hashed. Re-running the parser on the same file is a no-op.
+     Only truly new or changed resumes are inserted.
+
+  2. Hybrid Regex + LLM Architecture
+     90% accuracy target from pure regex/NLP.
+     LLM called only for the 10% where confidence score is too low.
+     Prevents unnecessary API costs while maintaining quality.
+
+  3. Circuit Breaker for LLM
+     After N consecutive failures, a provider is "opened" (skipped) for
+     30 minutes. Prevents cascading failures when an LLM API is down.
+
+  4. Graceful Degradation Throughout
+     Every optional dependency (spaCy, LLM, phonenumbers, pycountry,
+     pytesseract, Google Drive) is wrapped in try/except.
+     The system always works, just with reduced capability if a dep is missing.
+
+  5. Environment-Aware Logging
+     DEBUG logs in dev, WARNING-only logs in prod. Gzip-compressed rotation.
+     Separate error log file for quick troubleshooting.
+
+  6. Safe SQL Identifiers
+     All table names from environment variables are validated by strict regex
+     [A-Za-z_][A-Za-z0-9_]* before use. Prevents SQL injection.
+
+  7. Parameterized Queries
+     All database queries use %s placeholders (never string formatting).
+     Prevents SQL injection in all search/filter paths.
+
+  8. UPSERT Pattern
+     INSERT ... ON CONFLICT DO UPDATE for both candidate tables.
+     Re-parsing an existing resume updates the record, never duplicates it.
+
+  9. Concurrency Limiting
+     asyncio.Semaphore(3) limits simultaneous parser subprocesses.
+     Prevents system overload when many resumes are uploaded at once.
+
+  10. No-Cache API Responses
+      API responses include Cache-Control: no-cache headers so dashboards
+      always see fresh data, not stale browser-cached responses.
+
+  11. Frontend Token Interceptor
+      Axios request interceptor automatically injects the JWT Bearer token
+      on every API call. No manual header management in components.
+
+  12. React Context Architecture
+      Auth, Theme, and Upload state are managed in separate React Contexts
+      rather than prop-drilling, keeping components clean.
+
+  13. Skills-Context Guard (location_parser)
+      Prevents false positive city detection by checking if a potential city
+      name is immediately preceded by a technology keyword on the same line.
+
+  14. Education Structured JSONB
+      Education is stored both as a flat text string (backward compat) and
+      as structured JSONB (list of degree entries). The API uses structured
+      data when available, falling back to text parsing on the fly.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. UTILITY / MAINTENANCE SCRIPTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Backend scripts (in Backend/):
+    check_db.py            → Quick DB connection and table status check
+    check_schema.py        → Verify all expected columns exist
+    cleanup_dev_resumes.py → Remove old/test resumes from dev environment
+    find_missing.py        → Find resumes in filesystem not in DB
+    bulk_hf_enhance.py     → Batch AI-enhance existing DB records via HuggingFace
+    post_parse_fixes.py    → Apply curated manual corrections (names, titles)
+    migrate_auth.py        → Run auth table migrations
+    migrate_sessions.py    → Run session table migrations
+    seed_admin_user.py     → Create initial admin account
+    reset_admin_password.py→ Reset admin password from CLI
+    log_analyzer.py        → Analyze and summarize parser log files
+    llm_usage_tracker.py   → Track and report LLM API usage/costs
+
+  Root-level scripts (PowerShell/Bash):
+    sync_new_resumes.ps1   → PowerShell: trigger Drive sync + parse
+    download_production_resumes.ps1 → Download production resumes to local
+    find_unparsed.ps1      → Find resume files not yet in DB
+    retry_special_files.ps1→ Retry parsing previously failed files
+    analyze_failed_resumes.py → Analyze which resumes fail to parse and why
+    test_parse_failures.py → Run parser on known-failing files for debugging
+
+  Deployment scripts:
+    deploy_dev.sh / deploy_uat.sh / deploy_prod.sh
+    safe_deploy_to_production.sh  → Zero-downtime deploy with DB backup
+    deploy_to_server.ps1          → Windows PowerShell deploy helper
+    build_frontend.ps1            → Build React frontend for production
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. SUMMARY OF DATA FLOW (END TO END)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  INGESTION PATH (Automated / Scheduled):
+  ─────────────────────────────────────────
+  Google Drive Folder
+    │ (PDF/DOCX files)
+    ▼
+  google_drive_sync.py     ← OAuth, MD5 diff, download only new files
+    │
+    ▼
+  parser.py                ← SHA-256 dedup → text extract → regex parse
+    │                         → confidence score → optional LLM → NLP validate
+    │                         → normalize → UPSERT to DB
+    ▼
+  PostgreSQL               ← candidate_profile + candidate_skills_profile
+    │
+    ▼
+  api_server.py (FastAPI)  ← REST API
+    │
+    ▼
+  React Frontend           ← HR dashboard, search, job management
+
+  MANUAL UPLOAD PATH (UI):
+  ─────────────────────────
+  Browser (HR user)
+    │ drag-drop file
+    ▼
+  Upload.jsx → POST /parse-resume
+    │
+    ▼
+  api_server.py → runs parser.py as subprocess (max 3 concurrent)
+    │
+    ▼
+  Same parser pipeline → DB insert
+    │
+    ▼
+  Candidate appears in SearchPeople.jsx search results
+
+  JOB APPLICATION PATH (Public):
+  ────────────────────────────────
+  Candidate visits /find-jobs (no login required)
+    │
+    ▼
+  Browses public job listings (GET /api/jobs/public)
+    │
+    ▼
+  Clicks Apply → fills ApplyJobModal
+    │
+    ▼
+  POST /api/applications/apply (multipart form + optional resume upload)
+    │
+    ▼
+  JobApplication stored in DB
+    │
+    ▼
+  HR opens Jobs.jsx → clicks "Applied" on job card
+    │
+    ▼
+  AppliedCandidatesPage shows all applications for that job
+
+================================================================================
+END OF EXPLANATION
+================================================================================
