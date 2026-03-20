@@ -318,20 +318,38 @@
       }
 
       const result = await response.json();
+      const isDuplicate = result.action === 'updated';
 
-      // Update rate limit
-      dailyCount++;
-      chrome.storage.local.set({ daily_count: dailyCount, daily_date: today });
-      updateRateLimit(dailyCount);
+      // Only count new candidates toward the daily rate limit
+      if (!isDuplicate) {
+        dailyCount++;
+        chrome.storage.local.set({ daily_count: dailyCount, daily_date: today });
+        updateRateLimit(dailyCount);
+      }
 
-      // Show success
-      successMsgText.textContent = `Added to People Search! (ID: ${result.candidate_id})`;
+      // Show contextual feedback: green for new adds, amber for profile refreshes
+      if (isDuplicate) {
+        successMsg.style.background = '#fffbeb';
+        successMsg.style.borderColor = '#fcd34d';
+        successMsg.style.color = '#92400e';
+        successMsgText.textContent = `Already in database — profile refreshed (ID: ${result.candidate_id})`;
+        setStatus("ready", "Duplicate — existing profile updated");
+      } else {
+        successMsg.style.cssText = ''; // reset to default green
+        successMsgText.textContent = `Added to People Search! (ID: ${result.candidate_id})`;
+        setStatus("ready", "Candidate added successfully!");
+      }
       successMsg.classList.remove("hidden");
-      setStatus("ready", "Candidate added successfully!");
 
-      // Disable add button to prevent duplicates
+      // Disable add button to prevent repeat submissions
       btnAddToList.disabled = true;
-      btnAddToList.innerHTML = `
+      btnAddToList.innerHTML = isDuplicate ? `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        Already Exists` : `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
           <polyline points="22 4 12 14.01 9 11.01"/>
@@ -382,6 +400,7 @@
 
   function hideAll() {
     successMsg.classList.add("hidden");
+    successMsg.style.cssText = ''; // reset any duplicate-warning inline style
     errorMsg.classList.add("hidden");
   }
 
