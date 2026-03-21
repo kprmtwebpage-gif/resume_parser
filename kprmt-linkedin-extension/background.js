@@ -71,7 +71,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // the backend CORS rejects. Routing through the service worker sends
   // the request from the chrome-extension:// origin instead.
   if (request.action === "apiRequest") {
-    const { url, method, headers, body } = request;
+    const { method, headers, body } = request;
+    // Always force HTTPS to avoid 301 redirect that converts POST → GET
+    const url = request.url.replace(/^http:\/\//i, 'https://');
     fetch(url, { method, headers, body })
       .then(async (resp) => {
         const data = await resp.json().catch(() => ({}));

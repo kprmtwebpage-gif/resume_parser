@@ -1980,7 +1980,8 @@
           return;
         }
         if (!resp.ok) {
-          throw new Error(resp.data?.detail || `Failed (${resp.status})`);
+          const detail = resp.data?.detail || resp.data?.message || resp.data?.error;
+          throw new Error(detail || `HTTP ${resp.status} — verify API URL in settings: ${s.api_url}`);
         }
 
         const result = resp.data;
@@ -2019,6 +2020,25 @@
       }
     });
   }
+
+  // Auto-migrate api_url on startup (mirrors the same logic in popup.js)
+  // This runs every time the content script loads so the correct URL is always
+  // in storage even if the user never opened the popup.
+  chrome.storage.local.get(['api_url'], (r) => {
+    let url = (r.api_url || '').trim();
+    let changed = false;
+    // Force https for our domain
+    if (/^http:\/\/kprmtglobalsolutions\.duckdns\.org/i.test(url)) {
+      url = url.replace(/^http:\/\//i, 'https://');
+      changed = true;
+    }
+    // Add /dev if pointing at bare production URL (no /dev, /uat, etc.)
+    if (url === 'https://kprmtglobalsolutions.duckdns.org') {
+      url = 'https://kprmtglobalsolutions.duckdns.org/dev';
+      changed = true;
+    }
+    if (changed) chrome.storage.local.set({ api_url: url });
+  });
 
   // Wait for page to fully load, then inject panel
   if (document.readyState === 'complete') {
