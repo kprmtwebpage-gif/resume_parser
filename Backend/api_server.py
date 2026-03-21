@@ -2752,6 +2752,185 @@ async def admin_upload_metrics(request: Request):
             }
 
 
+# ─── LinkedIn Extension: Add candidate from LinkedIn profile ──────────
+class LinkedInCandidate(BaseModel):
+    first_name: str
+    last_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
+    headline: Optional[str] = None
+    current_company: Optional[str] = None
+    location: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    skills: Optional[List[str]] = None
+    experience: Optional[List[dict]] = None
+    education: Optional[List[dict]] = None
+    years_of_experience: Optional[float] = None
+    about: Optional[str] = None
+
+
+@app.post("/api/linkedin/parse")
+async def linkedin_parse(data: LinkedInCandidate, current_user: dict = Depends(get_current_user)):
+    """Add a candidate extracted from LinkedIn via KPRMT Chrome extension."""
+    if not data.first_name or not data.first_name.strip():
+        raise HTTPException(status_code=400, detail="First name is required")
+
+    import json as _json
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            # ── Duplicate detection: try linkedin_url first, then full name ──
+            existing = None
+            if data.linkedin_url:
+                norm_url = data.linkedin_url.rstrip('/')
+                cursor.execute(
+                    f"SELECT id FROM {CANDIDATES_TABLE} WHERE RTRIM(linkedin, '/') = %s ORDER BY id DESC LIMIT 1",
+                    (norm_url,),
+                )
+                existing = cursor.fetchone()
+
+            if not existing and data.first_name:
+                fn = data.first_name.strip().lower()
+                ln = (data.last_name or "").strip().lower()
+                cursor.execute(
+                    f"""SELECT id FROM {CANDIDATES_TABLE}
+                        WHERE LOWER(TRIM(first_name)) = %s AND LOWER(TRIM(last_name)) = %s
+                        ORDER BY id DESC LIMIT 1""",
+                    (fn, ln),
+                )
+                existing = cursor.fetchone()
+
+            if existing:
+                candidate_id = existing["id"]
+                fn_clean = data.first_name.strip().lower()
+                ln_clean = (data.last_name or "").strip().lower()
+                cursor.execute(
+                    f"""DELETE FROM {SKILLS_TABLE}
+                        WHERE candidate_id IN (
+                            SELECT id FROM {CANDIDATES_TABLE}
+                            WHERE LOWER(TRIM(first_name)) = %s
+                              AND LOWER(TRIM(last_name)) = %s
+                              AND id != %s
+                        )""",
+                    (fn_clean, ln_clean, candidate_id),
+                )
+                cursor.execute(
+                    f"""DELETE FROM {CANDIDATES_TABLE}
+                        WHERE LOWER(TRIM(first_name)) = %s
+                          AND LOWER(TRIM(last_name)) = %s
+                          AND id != %s""",
+                    (fn_clean, ln_clean, candidate_id),
+                )
+                upd_edu_structured = None
+                if data.education:
+                    norm = []
+                    for edu in data.education:
+                        if isinstance(edu, dict):
+                            norm.append({
+                                "university": edu.get("school") or edu.get("university", ""),
+                                "degree": edu.get("degree", ""),
+                                "specialization": edu.get("field") or edu.get("specialization", ""),
+                                "grad_year": edu.get("graduationYear") or edu.get("grad_year", ""),
+                                "dates": edu.get("dates", ""),
+                            })
+                    if norm:
+                        upd_edu_structured = _json.dumps(norm)
+                upd_work_exp = _json.dumps(data.experience) if data.experience else None
+                cursor.execute(
+                    f"""UPDATE {CANDIDATES_TABLE}
+                        SET first_name = %s, last_name = %s,
+                            email = COALESCE(%s, email),
+                            phone = COALESCE(%s, phone),
+                            address = COALESCE(%s, address),
+                            linkedin = %s,
+                            education_structured = COALESCE(%s::jsonb, education_structured),
+                            work_experience_structured = COALESCE(%s::jsonb, work_experience_structured),
+                            parsed_at = NOW(),
+                            resume_parse_status = 'completed'
+                        WHERE id = %s""",
+                    (
+                        data.first_name.strip(),
+                        data.last_name.strip() if data.last_name else "",
+                        data.email.strip() if data.email else None,
+                        data.phone.strip() if data.phone else None,
+                        data.location.strip() if data.location else None,
+                        data.linkedin_url,
+                        upd_edu_structured,
+                        upd_work_exp,
+                        candidate_id,
+                    ),
+                )
+                job_title = data.job_title or data.headline or ""
+                tech_skills = ", ".join(data.skills) if data.skills else None
+                cursor.execute(f"SELECT candidate_id FROM {SKILLS_TABLE} WHERE candidate_id = %s", (candidate_id,))
+                if cursor.fetchone():
+                    cursor.execute(
+                        f"""UPDATE {SKILLS_TABLE}
+                            SET job_title = %s, tech_skills = %s,
+                                years_of_experience = %s, parsed_at = NOW()
+                            WHERE candidate_id = %s""",
+                        (job_title, tech_skills, data.years_of_experience, candidate_id),
+                    )
+                else:
+                    cursor.execute(
+                        f"""INSERT INTO {SKILLS_TABLE}
+                            (candidate_id, job_title, tech_skills, years_of_experience, parsed_at)
+                            VALUES (%s, %s, %s, %s, NOW())""",
+                        (candidate_id, job_title, tech_skills, data.years_of_experience),
+                    )
+                conn.commit()
+                print(f"[LINKEDIN] Updated id={candidate_id} ({data.first_name} {data.last_name}) by {current_user.get('username', '?')}", flush=True)
+                return {"success": True, "candidate_id": candidate_id, "action": "updated", "message": "Candidate updated in People Search"}
+
+            # ── Insert new candidate ──
+            edu_structured = None
+            if data.education:
+                normalized_edu = []
+                for edu in data.education:
+                    if isinstance(edu, dict):
+                        normalized_edu.append({
+                            "university": edu.get("school") or edu.get("university", ""),
+                            "degree": edu.get("degree", ""),
+                            "specialization": edu.get("field") or edu.get("specialization", ""),
+                            "grad_year": edu.get("graduationYear") or edu.get("grad_year", ""),
+                            "dates": edu.get("dates", ""),
+                        })
+                if normalized_edu:
+                    edu_structured = _json.dumps(normalized_edu)
+            work_exp_structured = _json.dumps(data.experience) if data.experience else None
+            cursor.execute(
+                f"""INSERT INTO {CANDIDATES_TABLE}
+                    (first_name, last_name, email, phone, address, linkedin,
+                     education_structured, work_experience_structured, parsed_at, resume_parse_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, NOW(), 'completed')
+                    RETURNING id""",
+                (
+                    data.first_name.strip(),
+                    data.last_name.strip() if data.last_name else "",
+                    data.email.strip() if data.email else None,
+                    data.phone.strip() if data.phone else None,
+                    data.location.strip() if data.location else None,
+                    data.linkedin_url or None,
+                    edu_structured,
+                    work_exp_structured,
+                ),
+            )
+            new_row = cursor.fetchone()
+            candidate_id = new_row["id"]
+            job_title = data.job_title or data.headline or ""
+            tech_skills = ", ".join(data.skills) if data.skills else None
+            cursor.execute(
+                f"""INSERT INTO {SKILLS_TABLE}
+                    (candidate_id, job_title, tech_skills, years_of_experience, parsed_at)
+                    VALUES (%s, %s, %s, %s, NOW())""",
+                (candidate_id, job_title, tech_skills, data.years_of_experience),
+            )
+            conn.commit()
+            print(f"[LINKEDIN] Created id={candidate_id} ({data.first_name} {data.last_name}) by {current_user.get('username', '?')}", flush=True)
+            return {"success": True, "candidate_id": candidate_id, "action": "created", "message": "Candidate added to People Search"}
+
+
 # SPA catch-all: serve index.html for any non-API, non-asset path
 # This supports React-Router client-side routing (page refresh on /jobs, /upload, etc.)
 # MUST be the very last route registered — after all API endpoints.
