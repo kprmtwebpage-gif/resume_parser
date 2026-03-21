@@ -541,6 +541,27 @@ async def _create_indexes():
                     EXCEPTION WHEN duplicate_column THEN NULL;
                     END $$
                 """)
+                # Add education_structured column if missing (needed by LinkedIn extension)
+                cur.execute(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN education_structured JSONB;
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$
+                """)
+                # Add work_experience_structured column if missing (needed by LinkedIn extension)
+                cur.execute(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN work_experience_structured JSONB;
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$
+                """)
+                # Add linkedin column if missing
+                cur.execute(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN linkedin TEXT;
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$
+                """)
             conn.commit()
         print("[OK] Performance indexes and schema verified")
     except Exception as e:
@@ -2777,6 +2798,23 @@ async def linkedin_parse(data: LinkedInCandidate, current_user: dict = Depends(g
         raise HTTPException(status_code=400, detail="First name is required")
 
     import json as _json
+
+    # Ensure required columns exist (idempotent — safe to run on every call)
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                for col_sql in [
+                    f"ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN education_structured JSONB",
+                    f"ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN work_experience_structured JSONB",
+                    f"ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN linkedin TEXT",
+                ]:
+                    cur.execute(f"""
+                        DO $$ BEGIN {col_sql};
+                        EXCEPTION WHEN duplicate_column THEN NULL; END $$
+                    """)
+            conn.commit()
+    except Exception:
+        pass
 
     with get_db() as conn:
         with conn.cursor() as cursor:
