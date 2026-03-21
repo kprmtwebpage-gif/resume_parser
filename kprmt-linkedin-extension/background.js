@@ -65,6 +65,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // ─── Proxy API calls from content script ─────────────────────────
+  // Content scripts run in the web page's origin (linkedin.com), so
+  // cross-origin fetch() sends Origin: https://www.linkedin.com which
+  // the backend CORS rejects. Routing through the service worker sends
+  // the request from the chrome-extension:// origin instead.
+  if (request.action === "apiRequest") {
+    const { url, method, headers, body } = request;
+    fetch(url, { method, headers, body })
+      .then(async (resp) => {
+        const data = await resp.json().catch(() => ({}));
+        sendResponse({ ok: resp.ok, status: resp.status, data });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, status: 0, error: err.message });
+      });
+    return true;
+  }
+
   return true;
 });
 

@@ -465,7 +465,7 @@
       console.log('[KPRMT] Code tags have', codeTagData.experience.length, 'experience entries');
       if (codeTagData.experience.length > best.length) best = codeTagData.experience;
       // Only accept code tags as final answer if they meet the expected count
-      const codeIsComplete = expectedExpCount === 0 ||
+      const codeIsComplete = expectedExpCount > 0 &&
         codeTagData.experience.length >= Math.floor(expectedExpCount * 0.8);
       if (codeIsComplete && codeTagData.experience.length >= domExperiences.length) {
         console.log('[KPRMT] Code tags appear complete, using them');
@@ -1031,7 +1031,7 @@
     let best = [];
 
     function isComplete(arr) {
-      return arr.length >= 3 && (expectedCount === 0 || arr.length >= Math.floor(expectedCount * 0.8));
+      return arr.length >= 3 && expectedCount > 0 && arr.length >= Math.floor(expectedCount * 0.8);
     }
 
     // 1. On-page DOM
@@ -1528,7 +1528,7 @@
       }
       .kp-logo-row { display:flex; align-items:center; gap:9px; }
       .kp-logo-box {
-        width:34px; height:34px; border-radius:9px;
+        width:40px; height:40px; border-radius:9px;
         overflow:hidden; display:flex;
         align-items:center; justify-content:center;
         background:rgba(255,255,255,.18);
@@ -1669,12 +1669,12 @@
     root.id = 'kprmt-root';
     root.innerHTML = `
       <div id="kprmt-fab" title="KPRMT Extractor">
-        <img src="${logoUrl}" style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        <img src="${logoUrl}" style="width:36px;height:36px;object-fit:contain;border-radius:6px;">
       </div>
       <div id="kprmt-panel">
         <div class="kp-hdr">
           <div class="kp-logo-row">
-            <div class="kp-logo-box"><img src="${logoUrl}" style="width:100%;height:100%;object-fit:cover;"></div>
+            <div class="kp-logo-box"><img src="${logoUrl}" style="width:100%;height:100%;object-fit:contain;"></div>
             <div><div class="kp-brand">KPRMT</div><div class="kp-sub">LinkedIn Extractor</div></div>
           </div>
           <button id="kprmt-close" title="Close">✕</button>
@@ -1935,30 +1935,43 @@
         const company = document.getElementById('kp-company').value.trim();
         const yearsRaw = parseFloat(document.getElementById('kp-years').value) || extractedData.years_of_experience || 0;
 
-        const resp = await fetch(`${s.api_url}/api/linkedin/parse`, {
-          method:'POST',
-          headers:{
-            'Content-Type':'application/json',
-            'Authorization':`Bearer ${s.jwt_token}`,
-          },
-          body: JSON.stringify({
-            first_name: extractedData.first_name,
-            last_name:  extractedData.last_name,
-            email:  email || null,
-            phone:  phone || null,
-            job_title:       extractedData.job_title,
-            headline:        extractedData.headline,
-            current_company: company || extractedData.current_company,
-            location:        extractedData.location,
-            linkedin_url:    extractedData.linkedin_url,
-            skills:     extractedData.skills    || [],
-            experience: extractedData.experience|| [],
-            education:  extractedData.education || [],
-            years_of_experience: yearsRaw,
-            about: extractedData.about || '',
-          }),
+        const resp = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({
+            action: 'apiRequest',
+            url: `${s.api_url}/api/linkedin/parse`,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${s.jwt_token}`,
+            },
+            body: JSON.stringify({
+              first_name: extractedData.first_name,
+              last_name:  extractedData.last_name,
+              email:  email || null,
+              phone:  phone || null,
+              job_title:       extractedData.job_title,
+              headline:        extractedData.headline,
+              current_company: company || extractedData.current_company,
+              location:        extractedData.location,
+              linkedin_url:    extractedData.linkedin_url,
+              skills:     extractedData.skills    || [],
+              experience: extractedData.experience|| [],
+              education:  extractedData.education || [],
+              years_of_experience: yearsRaw,
+              about: extractedData.about || '',
+            }),
+          }, (result) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(result);
+            }
+          });
         });
 
+        if (!resp || resp.error) {
+          throw new Error(resp?.error || 'Failed to fetch');
+        }
         if (resp.status === 401) {
           errorEl.textContent = 'Session expired — please logout and login again via the popup.';
           errorEl.style.display = 'block';
@@ -1967,11 +1980,10 @@
           return;
         }
         if (!resp.ok) {
-          const e = await resp.json().catch(()=>({}));
-          throw new Error(e.detail || `Failed (${resp.status})`);
+          throw new Error(resp.data?.detail || `Failed (${resp.status})`);
         }
 
-        const result = await resp.json();
+        const result = resp.data;
         const isDup = result.action === 'updated';
 
         if (!isDup) {
