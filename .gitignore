@@ -128,3 +128,14 @@ nginx/nginx-temp.conf
 *.pem
 *.crt
 *.key
+
+# Large resume archives (exceeds GitHub 100 MB limit)
+*.zip
+Resumes_Production_downloaded/
+Resumes_Development_downloaded/
+failed_resumes_production/
+failed_resumes_production.zip
+Resumes_Production_downloaded.zip
+
+# LinkedIn Chrome Extension (removed - not deployed to servers)
+kprmt-linkedin-extension/
