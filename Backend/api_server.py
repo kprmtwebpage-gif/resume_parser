@@ -1488,7 +1488,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                f"""SELECT c.id, c.first_name, c.last_name, c.email, s.job_title
+                f"""SELECT c.id, c.first_name, c.last_name, c.email, c.resume_parse_status, s.job_title
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                     WHERE c.resume_sha256 = %s
@@ -1497,15 +1497,26 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             )
             sha_existing = cursor.fetchone()
     if sha_existing:
-        full_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or None
-        return {
-            "status": "duplicate",
-            "message": "This exact resume has already been uploaded (content match)",
-            "id": sha_existing["id"],
-            "name": full_name,
-            "email": sha_existing.get("email"),
-            "job_title": sha_existing.get("job_title"),
-        }
+        # If the previous upload failed, delete the failed row so user can re-upload
+        if sha_existing.get("resume_parse_status") == "failed":
+            failed_id = sha_existing["id"]
+            with get_db() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (failed_id,))
+                    cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (failed_id,))
+                conn.commit()
+            print(f"[RE-UPLOAD] Deleted failed row id={failed_id} for file={file.filename}, allowing re-upload", flush=True)
+            # Fall through to normal upload flow below
+        else:
+            full_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or None
+            return {
+                "status": "duplicate",
+                "message": "This exact resume has already been uploaded (content match)",
+                "id": sha_existing["id"],
+                "name": full_name,
+                "email": sha_existing.get("email"),
+                "job_title": sha_existing.get("job_title"),
+            }
 
     dest_path = cache_dir / file.filename
     if dest_path.exists():

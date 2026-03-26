@@ -12,7 +12,6 @@ import { useUpload } from '../contexts/UploadContext'
 export default function Upload() {
   const { uploads, fileInputRef, handleFileSelect, removeUpload, retryUpload } = useUpload()
   const [isDragging, setIsDragging] = useState(false)
-  const [hoveredError, setHoveredError] = useState(null)
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault()
@@ -229,24 +228,15 @@ export default function Upload() {
                           {upload.name}
                         </span>
                         <div className="flex items-center gap-2">
-                          {upload.status === 'failed' && upload.errorMessage && (
-                            <div 
-                              className="relative"
-                              onMouseEnter={() => setHoveredError(upload.id)}
-                              onMouseLeave={() => setHoveredError(null)}
-                            >
-                              <InformationCircleIcon className="h-5 w-5 text-red-500 cursor-help" />
-                              {hoveredError === upload.id && (
-                                <div className="absolute right-0 bottom-full mb-1 z-50 w-64 p-2 bg-neutral-900 text-white text-xs rounded shadow-lg">
-                                  {upload.errorMessage}
-                                  <div className="absolute right-2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-neutral-900" />
-                                </div>
-                              )}
-                            </div>
-                          )}
                           {getStatusIcon(upload)}
                         </div>
                       </div>
+                      {/* Inline failure reason */}
+                      {upload.status === 'failed' && upload.errorMessage && (
+                        <p className="mt-1 text-xs text-red-600 leading-tight break-words">
+                          Reason: {upload.errorMessage}
+                        </p>
+                      )}
                       
                       {/* Progress Bar */}
                       <div className="mt-2">
