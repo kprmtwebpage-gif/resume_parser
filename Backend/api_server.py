@@ -1472,41 +1472,15 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     cache_dir = backend_dir / "resumes_cache"
     cache_dir.mkdir(exist_ok=True)
 
-    # Check if this filename already exists in the database.
-    import re as _re
-    raw_stem = Path(file.filename).stem
-    base_stem = _re.sub(r'_\d{7,13}$', '', raw_stem)
-    escaped_stem = _re.escape(base_stem)
-    regex_pattern = rf'^resumes_cache/{escaped_stem}(_\d{{7,13}})?{_re.escape(suffix)}$'
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                f"""SELECT c.id, c.first_name, c.last_name, c.email, s.job_title
-                    FROM {CANDIDATES_TABLE} c
-                    LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
-                    WHERE c.resume_filename ~ %s
-                    LIMIT 1""",
-                (regex_pattern,)
-            )
-            existing = cursor.fetchone()
+    # NOTE: Filename-based duplicate check removed — same filename (e.g. "Resume.pdf")
+    # can belong to completely different candidates. Only content (SHA-256) is reliable.
 
-    if existing:
-        full_name = " ".join(filter(None, [existing.get("first_name"), existing.get("last_name")])) or None
-        return {
-            "status": "duplicate",
-            "message": "File already exists in database",
-            "id": existing["id"],
-            "name": full_name,
-            "email": existing.get("email"),
-            "job_title": existing.get("job_title"),
-        }
+    contents = await file.read()
 
     dest_path = cache_dir / file.filename
     if dest_path.exists():
         base = Path(file.filename).stem
         dest_path = cache_dir / f"{base}_{int(os.path.getmtime(str(dest_path)))}{suffix}"
-
-    contents = await file.read()
 
     # SHA-256 duplicate check
     import hashlib as _hashlib
@@ -1611,8 +1585,12 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
 
             if returncode != 0:
-                # Extract a concise reason from stderr
+                # Extract a concise reason from stderr (or stdout for parse errors)
+                stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
                 _reason_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.startswith(' ')]
+                if not _reason_lines:
+                    # Some parse errors (e.g. password-protected) go to stdout
+                    _reason_lines = [l.strip() for l in stdout_text.splitlines() if l.strip() and ("error" in l.lower() or "skip" in l.lower() or "password" in l.lower() or "encrypt" in l.lower())]
                 _reason = _reason_lines[0][:300] if _reason_lines else f"Parser exited with code {returncode}"
                 print(f"[PARSER FAILED] file={save_name} rc={returncode}\nSTDERR: {stderr_text[:1000]}", flush=True)
                 with get_db() as conn:
@@ -1769,7 +1747,10 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                         else:
                                             print(f"[PARSE RETRY EXHAUSTED] file={save_name} — marking failed after retry", flush=True)
                                             _retry_stderr = (retry_result.stderr or b"").decode("utf-8", errors="replace") if hasattr(retry_result, 'stderr') and retry_result.stderr else ""
-                                            _skip_lines = [l.strip() for l in _retry_stderr.splitlines() if "Skipped" in l or "error" in l.lower()]
+                                            _retry_stdout = (retry_result.stdout or b"").decode("utf-8", errors="replace") if hasattr(retry_result, 'stdout') and retry_result.stdout else ""
+                                            _skip_lines = [l.strip() for l in _retry_stderr.splitlines() if "skipped" in l.lower() or "error" in l.lower() or "timeout" in l.lower()]
+                                            if not _skip_lines:
+                                                _skip_lines = [l.strip() for l in _retry_stdout.splitlines() if "skipped" in l.lower() or "error" in l.lower() or "timeout" in l.lower()]
                                             _exhausted_reason = _skip_lines[0][:300] if _skip_lines else "Text extraction failed after retry (possible file corruption or unsupported format)"
                                             cur2.execute(
                                                 f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='failed', parse_failure_reason=%s WHERE id=%s",

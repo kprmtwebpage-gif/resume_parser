@@ -474,6 +474,26 @@ def _pdf_ocr_page_text(page) -> str:
         return ""
 
 
+def _is_pdf_password_protected(path: str) -> bool:
+    """Return True if the PDF requires a password to read."""
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+        doc = pdfium.PdfDocument(path)
+        # If we can open it without a password, it's not protected
+        _ = doc.get_page_count()
+        return False
+    except Exception as e:
+        if "password" in str(e).lower() or "encrypted" in str(e).lower():
+            return True
+    # Fallback: check the raw bytes for /Encrypt marker
+    try:
+        with open(path, "rb") as f:
+            header = f.read(4096)
+        return b"/Encrypt" in header
+    except Exception:
+        return False
+
+
 def _extract_via_pypdfium2(path: str) -> str:
     """Fallback PDF text extraction using pypdfium2 (Chrome PDF engine).
     Handles PDFs that pdfplumber/pdfminer cannot parse.
@@ -714,6 +734,17 @@ def extract_pdf_with_timeout(path: str, *, timeout_seconds: float) -> tuple[str,
         # requested. Use Process.join(timeout) for a reliable hard timeout.
         proc.join(timeout=float(timeout_seconds))
         if proc.is_alive():
+            # pdfplumber timed out (often due to OCR on complex PDFs in Docker).
+            # Terminate the hung child and try pypdfium2 which is much faster
+            # and does not trigger OCR.
+            proc.terminate()
+            proc.join(timeout=5)
+            _fb = _extract_via_pypdfium2(path)
+            if _fb.strip():
+                _fb_links = extract_links_from_pdf(path)
+                _fb_pages = _fb.split("\x0c") if "\x0c" in _fb else [_fb]
+                _fb_first = _fb_pages[0].strip() if _fb_pages else _fb[:3000]
+                return _fb, _fb_links, _fb_first
             raise TimeoutError(f"PDF extraction timed out after {timeout_seconds}s")
 
         if not recv_end.poll(0.1):
@@ -8136,6 +8167,10 @@ def main() -> int:
                 if suffix == ".pdf":
                     if not quiet:
                         print(f"Parsing: {safe_file}")
+                    # Detect password-protected PDFs before attempting full extraction
+                    # to give a clear failure reason instead of silent empty-text failure.
+                    if _is_pdf_password_protected(path):
+                        raise ValueError("PDF is password-protected or encrypted — cannot extract text")
                     resume_text, links, first_page_text = extract_pdf_with_timeout(path, timeout_seconds=pdf_timeout_seconds)
                 elif suffix == ".doc":
                     if not quiet:
@@ -8157,6 +8192,9 @@ def main() -> int:
                 )
                 if not quiet:
                     print(f"Skipped (parse error): {safe_file} ({e.__class__.__name__})")
+                # Always emit to stderr so api_server.py can capture the reason
+                # regardless of the QUIET flag (which only suppresses stdout).
+                print(f"Skipped: {safe_file} reason={e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
                 _log.warning("SKIPPED [%s] reason=%s timeout=%s", file, e.__class__.__name__, is_timeout)
                 continue
 
