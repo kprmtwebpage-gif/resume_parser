@@ -47,6 +47,9 @@ export default function Upload() {
     if (upload.status === 'duplicate') {
       return <InformationCircleIcon className="h-5 w-5 text-amber-500 flex-shrink-0" />
     }
+    if (upload.status === 'background') {
+      return <InformationCircleIcon className="h-5 w-5 text-blue-500 flex-shrink-0" />
+    }
     if (upload.status === 'failed') {
       return <ExclamationCircleIcon className="h-5 w-5 text-red-500 flex-shrink-0" />
     }
@@ -71,6 +74,8 @@ export default function Upload() {
         return 'File already exists'
       case 'failed':
         return 'Failed'
+      case 'background':
+        return 'Parsing in background'
       case 'pending':
         return 'Queued'
       default:
@@ -86,6 +91,8 @@ export default function Upload() {
         return 'bg-amber-400'
       case 'failed':
         return 'bg-red-500'
+      case 'background':
+        return 'bg-blue-400'
       case 'pending':
         return 'bg-neutral-400'
       default:
@@ -165,7 +172,8 @@ export default function Upload() {
             const completed = uploads.filter(u => u.status === 'completed').length
             const duplicates = uploads.filter(u => u.status === 'duplicate').length
             const failed = uploads.filter(u => u.status === 'failed').length
-            const remaining = total - completed - duplicates - failed
+            const background = uploads.filter(u => u.status === 'background').length
+            const remaining = total - completed - duplicates - failed - background
             return (
               <div className="mt-6 p-4 rounded-lg bg-blue-50 border border-blue-200">
                 <div className="flex items-center justify-between mb-2">
@@ -179,12 +187,13 @@ export default function Upload() {
                 <div className="h-2 rounded-full bg-blue-200 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-blue-600 transition-all duration-500"
-                    style={{ width: `${((completed + duplicates + failed) / total) * 100}%` }}
+                    style={{ width: `${((completed + duplicates + failed + background) / total) * 100}%` }}
                   />
                 </div>
                 <div className="flex gap-4 mt-2 text-xs text-blue-700">
                   {completed > 0 && <span className="text-green-600">{completed} completed</span>}
                   {duplicates > 0 && <span className="text-amber-600">{duplicates} duplicates</span>}
+                  {background > 0 && <span className="text-blue-600">{background} parsing in background</span>}
                   {failed > 0 && <span className="text-red-600">{failed} failed</span>}
                   {remaining > 0 && <span>{remaining} pending</span>}
                 </div>
@@ -205,6 +214,8 @@ export default function Upload() {
                       ? 'bg-green-50 border-green-200'
                       : upload.status === 'duplicate'
                       ? 'bg-amber-50 border-amber-200'
+                      : upload.status === 'background'
+                      ? 'bg-blue-50 border-blue-200'
                       : upload.status === 'pending'
                       ? 'bg-neutral-50 border-neutral-300'
                       : 'bg-neutral-50 border-neutral-200'
@@ -215,6 +226,7 @@ export default function Upload() {
                       upload.status === 'failed' ? 'text-red-500' 
                       : upload.status === 'completed' ? 'text-green-500'
                       : upload.status === 'duplicate' ? 'text-amber-500'
+                      : upload.status === 'background' ? 'text-blue-500'
                       : 'text-neutral-500'
                     }`} />
                     <div className="flex-1 min-w-0">
@@ -223,6 +235,7 @@ export default function Upload() {
                           upload.status === 'failed' ? 'text-red-800' 
                           : upload.status === 'completed' ? 'text-green-800'
                           : upload.status === 'duplicate' ? 'text-amber-800'
+                          : upload.status === 'background' ? 'text-blue-800'
                           : 'text-neutral-800'
                         }`}>
                           {upload.name}
@@ -237,6 +250,12 @@ export default function Upload() {
                           Reason: {upload.errorMessage}
                         </p>
                       )}
+                      {/* Background-parsing info */}
+                      {upload.status === 'background' && upload.errorMessage && (
+                        <p className="mt-1 text-xs text-blue-600 leading-tight break-words">
+                          {upload.errorMessage}
+                        </p>
+                      )}
                       
                       {/* Progress Bar */}
                       <div className="mt-2">
@@ -244,6 +263,7 @@ export default function Upload() {
                           upload.status === 'failed' ? 'bg-red-200' 
                           : upload.status === 'completed' ? 'bg-green-200'
                           : upload.status === 'duplicate' ? 'bg-amber-200'
+                          : upload.status === 'background' ? 'bg-blue-200'
                           : 'bg-neutral-200'
                         }`}>
                           <div 
@@ -256,6 +276,7 @@ export default function Upload() {
                             upload.status === 'failed' ? 'text-red-600' 
                             : upload.status === 'completed' ? 'text-green-600'
                             : upload.status === 'duplicate' ? 'text-amber-600'
+                            : upload.status === 'background' ? 'text-blue-600'
                             : 'text-neutral-500'
                           }`}>
                             {getStatusText(upload)}

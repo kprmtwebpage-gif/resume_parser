@@ -155,6 +155,28 @@ except Exception:
     pass
 
 
+def _migrate_users_columns():
+    """Idempotent: add last_ip and resumes_uploaded columns to users if missing."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS resumes_uploaded INT DEFAULT 0")
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        _put_conn(conn)
+
+try:
+    _migrate_users_columns()
+except Exception:
+    pass
+
+
 def _migrate_admin_to_superuser():
     """One-time migration: rename role 'admin' to 'superuser'."""
     conn = _get_conn()

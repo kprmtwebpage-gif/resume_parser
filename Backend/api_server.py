@@ -1694,7 +1694,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 env=env,
                 capture_output=True,
                 cwd=str(backend_dir),
-                timeout=180,
+                timeout=600,  # 10 min — allows LLM-powered parsing to complete
             )
 
         try:

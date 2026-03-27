@@ -15,7 +15,7 @@ export function UploadProvider({ children }) {
 
   // ---- poll for background parse completion ----
   const pollParseStatus = useCallback(async (upload, candidateId) => {
-    const maxAttempts = 60 // 60 * 3s = 3 min max
+    const maxAttempts = 120 // 120 * 3s = 6 min max
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(r => setTimeout(r, 3000))
       try {
@@ -63,11 +63,12 @@ export function UploadProvider({ children }) {
         // Polling error — keep trying
       }
     }
-    // Timed out
+    // Polling window elapsed — parsing is still running in the background.
+    // Mark as 'background' so the UI shows a helpful message instead of an error.
     setUploads(prev =>
       prev.map(u =>
         u.id === upload.id
-          ? { ...u, progress: 100, status: 'failed', errorMessage: 'Parsing timed out' }
+          ? { ...u, progress: 100, status: 'background', errorMessage: 'Still parsing — results will appear in search once complete' }
           : u
       )
     )
