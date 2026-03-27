@@ -691,27 +691,33 @@ def enhance_extraction(
                 weak_fields.append("linkedin")
     
     # ── Step 2: Targeted LLM call (only if needed) ────────────────────────
-    
+
+    # Respect USE_LLM env var — skip all LLM calls when disabled
+    _use_llm_enabled = os.getenv("USE_LLM", "false").strip().lower() not in ("false", "0", "no", "")
+
     if weak_fields:
         logger.info("%s weak fields detected: %s", log_prefix, weak_fields)
-        
-        # Check daily limit
-        llm_allowed, llm_status = check_llm_limit()
-        if not llm_allowed:
-            logger.warning("%s LLM limit reached: %s", log_prefix, llm_status)
+
+        if not _use_llm_enabled:
+            logger.debug("%s LLM disabled (USE_LLM=false), skipping LLM enhancement for: %s", log_prefix, weak_fields)
         else:
-            # Rate delay
-            import time
-            try:
-                delay = float(os.getenv("LLM_RATE_DELAY", "2"))
-            except ValueError:
-                delay = 2.0
-            if delay > 0:
-                time.sleep(delay)
-            
-            # Make targeted LLM call
-            llm_result = _call_targeted_llm(resume_text, weak_fields, source_file=source_file)
-            llm_called = True
+            # Check daily limit
+            llm_allowed, llm_status = check_llm_limit()
+            if not llm_allowed:
+                logger.warning("%s LLM limit reached: %s", log_prefix, llm_status)
+            else:
+                # Rate delay (only when LLM is actually being called)
+                import time
+                try:
+                    delay = float(os.getenv("LLM_RATE_DELAY", "2"))
+                except ValueError:
+                    delay = 2.0
+                if delay > 0:
+                    time.sleep(delay)
+
+                # Make targeted LLM call
+                llm_result = _call_targeted_llm(resume_text, weak_fields, source_file=source_file)
+                llm_called = True
             
             if llm_result:
                 logger.info("%s LLM response for %s: %s", log_prefix, weak_fields,

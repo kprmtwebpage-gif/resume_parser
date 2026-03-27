@@ -401,25 +401,28 @@ def _text_has_contact_signals(text: str) -> bool:
 
 
 def _pdf_should_try_ocr_first_page(extracted_text: str) -> bool:
-    """Heuristic: OCR only when the extracted text looks like it's missing contact info
-    or when the extracted text is suspiciously short (likely image-based PDF)."""
+    """Heuristic: OCR only when the extracted text is clearly from an image-based PDF.
+    Tightened threshold — only trigger on truly empty/near-empty first pages."""
 
     t = (extracted_text or "").strip()
+    # Completely empty = almost certainly a scanned/image PDF
     if not t:
         return True
-    # Very short first-page text is a strong sign of a scanned/image PDF.
-    # A real resume's first page has at minimum ~100 chars of name+contact+title.
-    if len(t) < 100:
+    # Very short text (< 50 chars) strongly suggests image-based PDF.
+    # Raised from 100 → 50 to avoid false positives on graphical-header PDFs
+    # that still have some extractable body text.
+    if len(t) < 50:
         return True
-    # If we already got an email or a phone-like run, skip OCR.
+    # If we already got an email or a phone-like run, definitely skip OCR.
     if "@" in t:
         return False
     for m in re.finditer(r"\+?\d[\d\s().+-]{8,}\d", t):
         digits = re.sub(r"\D", "", m.group(0))
         if len(digits) >= 10:
             return False
-    # Otherwise, try OCR. Many PDFs extract the body but drop the header/contact line entirely.
-    return True
+    # Default: do NOT trigger OCR — trust pdfplumber extraction.
+    # Previously this defaulted to True (too aggressive for normal PDFs).
+    return False
 
 
 def _pdf_ocr_page_text(page) -> str:
