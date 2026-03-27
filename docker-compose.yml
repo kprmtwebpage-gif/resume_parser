@@ -53,6 +53,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
       LLM_MODEL: ${LLM_MODEL:-llama-3.1-8b-instant}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PARSE_MODE: ${PARSE_MODE:-nlp}
     volumes:
       - resume_cache:/app/Backend/resumes_cache
       - ./Backend/drive_service_account.json:/app/Backend/drive_service_account.json:ro
@@ -83,6 +84,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
       LLM_MODEL: ${LLM_MODEL:-llama-3.1-8b-instant}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PARSE_MODE: ${PARSE_MODE:-nlp}
       # Increase timeout to accommodate OCR on complex PDFs in Docker
       PDF_TIMEOUT_SECONDS: ${PDF_TIMEOUT_SECONDS:-120}
     volumes:
