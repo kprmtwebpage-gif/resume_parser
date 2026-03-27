@@ -109,6 +109,7 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const actionsButtonRef = useRef(null)
 
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
+  const isParseFailedOrStuck = row.parse_status === 'failed' || row.parse_status === 'processing'
   const location = row.location || row.address || '—'
   const linkedinUrl = row.linkedin || row.linkedin_url
   const hasResume = row.resume_filename
@@ -274,6 +275,11 @@ Availability: ${row.availability || 'N/A'}`
                 >
                   {fullName}
                 </button>
+                {isParseFailedOrStuck && (
+                  <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded bg-red-100 text-red-700 border border-red-200">
+                    Parse Failed
+                  </span>
+                )}
               </div>
               <div 
                 className="truncate text-xs transition-colors duration-300" 

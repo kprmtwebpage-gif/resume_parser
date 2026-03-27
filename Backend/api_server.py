@@ -548,6 +548,8 @@ class Candidate(BaseModel):
     certifications: Optional[str] = None
     tech_skills: Optional[str] = None
     professional_experience: Optional[str] = None
+    # Parse status — lets the UI flag candidates whose resume failed to parse
+    parse_status: Optional[str] = None
 
 
 import subprocess as _subprocess
@@ -626,6 +628,24 @@ async def _create_indexes():
         print("[OK] Performance indexes and schema verified")
     except Exception as e:
         print(f"[WARN] Could not create indexes: {e}")
+
+    # Reset any candidates stuck in 'processing' state — these are rows where the
+    # ingestion service was killed mid-parse and the status was never updated.
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    UPDATE {CANDIDATES_TABLE}
+                    SET resume_parse_status = 'failed',
+                        parse_failure_reason = 'Reset from stuck processing state on server startup'
+                    WHERE resume_parse_status = 'processing'
+                """)
+                stuck = cur.rowcount
+            conn.commit()
+        if stuck:
+            print(f"[OK] Reset {stuck} stuck 'processing' record(s) to 'failed'")
+    except Exception as e:
+        print(f"[WARN] Could not reset stuck processing records: {e}")
 
     # Ensure the download-quota table exists (the module-level call at import
     # time was a no-op because get_db() wasn't defined yet).
@@ -710,14 +730,15 @@ async def get_candidates(
             where_conditions = []
             search_params = []
 
-            # Exclude resumes still being parsed or that failed parsing
-            where_conditions.append("(c.resume_parse_status IS NULL OR c.resume_parse_status = 'completed')")
+            # NOTE: We intentionally include ALL parse statuses (completed, failed, processing)
+            # so every candidate with a DB record is visible in the UI.  Failed-parse candidates
+            # are shown with a visual badge; they may still have a name/email extracted.
+            # Only the email-dedup filter below is retained (keeps newest record per email).
 
             # Exclude duplicate profiles — show only newest record per email
             where_conditions.append(f"""(c.email IS NULL OR c.email = '' OR NOT EXISTS (
                 SELECT 1 FROM {CANDIDATES_TABLE} newer
                 WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
-                AND (newer.resume_parse_status IS NULL OR newer.resume_parse_status = 'completed')
             ))""")
             
             # Name search - supports comma-separated names with OR logic
@@ -825,7 +846,8 @@ async def get_candidates(
                            c.education_structured,
                            c.linkedin, c.visa_support, 
                            c.work_authorization_type as work_authorization, s.certifications, 
-                           s.tech_skills, s.years_of_experience as professional_experience
+                           s.tech_skills, s.years_of_experience as professional_experience,
+                           c.resume_parse_status
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                     WHERE {where_clause}
@@ -842,7 +864,8 @@ async def get_candidates(
                            s.job_title, c.qualification, c.education_structured,
                            c.linkedin, c.visa_support, 
                            c.work_authorization_type as work_authorization, s.certifications, 
-                           s.tech_skills, s.years_of_experience as professional_experience
+                           s.tech_skills, s.years_of_experience as professional_experience,
+                           c.resume_parse_status
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                     ORDER BY c.id 
@@ -855,13 +878,11 @@ async def get_candidates(
             cursor.execute(data_sql, data_params)
             rows = cursor.fetchall()
 
-            # Get grand total (only fully parsed, deduplicated by email) for UI display
+            # Get grand total — ALL candidates deduplicated by email (includes failed/processing)
             cursor.execute(f"""SELECT COUNT(*) as total FROM {CANDIDATES_TABLE} c
-                WHERE (c.resume_parse_status IS NULL OR c.resume_parse_status = 'completed')
-                AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                WHERE (c.email IS NULL OR c.email = '' OR NOT EXISTS (
                     SELECT 1 FROM {CANDIDATES_TABLE} newer
                     WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
-                    AND (newer.resume_parse_status IS NULL OR newer.resume_parse_status = 'completed')
                 ))""")
             grand_total = cursor.fetchone()["total"]
             
@@ -894,6 +915,7 @@ async def get_candidates(
                         years_of_experience=float(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
                         certifications=_split_csv(row.get("certifications")),
                     ),
+                    parse_status=row.get("resume_parse_status"),
                 )
                 for row in rows
             ]
