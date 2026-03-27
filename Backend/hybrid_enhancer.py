@@ -57,6 +57,16 @@ _BAD_FIRST_NAMES = {
     "senior", "junior", "lead", "principal", "staff",
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
+    # ── Phase-14: marketing / business section-heading tokens ──
+    "promotional", "channels", "marketing", "campaign", "campaigns",
+    "brand", "branding", "digital", "media", "social", "advertising",
+    "analytics", "insights", "metrics", "roi", "revenue", "sales",
+    "growth", "acquisition", "retention", "funnel", "conversion",
+    "engagement", "content", "seo", "sem", "ppc", "crm", "erp",
+    "overview", "highlights", "introduction", "vision", "mission",
+    "scope", "approach", "methodology", "deliverable", "deliverables",
+    "outcome", "outcomes", "impact", "contribution", "contributions",
+    "accomplishment", "accomplishments", "recommendation", "background",
 }
 
 # Characters that indicate garbled text (OCR artifacts)

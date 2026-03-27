@@ -2242,6 +2242,59 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "bazaar",
         "needed",
         "package",
+        # ── Phase-14: marketing / business / section-heading tokens ──
+        # These terms appear as document section titles, not person names.
+        "promotional",
+        "channels",
+        "marketing",
+        "campaign",
+        "campaigns",
+        "brand",
+        "branding",
+        "digital",
+        "media",
+        "social",
+        "advertising",
+        "analytics",
+        "insights",
+        "metrics",
+        "kpi",
+        "roi",
+        "revenue",
+        "sales",
+        "growth",
+        "acquisition",
+        "retention",
+        "funnel",
+        "conversion",
+        "engagement",
+        "content",
+        "seo",
+        "sem",
+        "ppc",
+        "crm",
+        "erp",
+        # Business/operational section headings
+        "overview",
+        "highlights",
+        "introduction",
+        "vision",
+        "mission",
+        "scope",
+        "approach",
+        "methodology",
+        "deliverable",
+        "deliverables",
+        "outcome",
+        "outcomes",
+        "impact",
+        "contribution",
+        "contributions",
+        "accomplishment",
+        "accomplishments",
+        "recommendation",
+        "recommendations",
+        "background",
     }
     section_words = {
         "professional summary",
@@ -2498,6 +2551,33 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "accenture",
         "deloitte",
         "novoc",
+        # ── Phase-14: marketing / business section-heading tokens ──
+        "promotional",
+        "channels",
+        "marketing",
+        "campaign",
+        "brand",
+        "branding",
+        "digital",
+        "media",
+        "social",
+        "advertising",
+        "analytics",
+        "insights",
+        "metrics",
+        "roi",
+        "revenue",
+        "sales",
+        "growth",
+        "acquisition",
+        "retention",
+        "funnel",
+        "conversion",
+        "engagement",
+        "content",
+        "seo",
+        "sem",
+        "ppc",
     }
 
     # Scan up to 50 lines: the first-page / header-block can be quite tall
@@ -8060,6 +8140,67 @@ def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = 
     return extract_job_title(text, first_name=first_name, last_name=last_name)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-resume detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _is_likely_resume(text: str) -> tuple[bool, str]:
+    """Conservative non-resume detector.
+
+    Returns (is_resume, rejection_reason).  Only rejects documents that are
+    clearly NOT resumes — invoices, contracts, medical records, books, etc.
+    When in doubt it returns (True, ""), so genuine resumes with unusual
+    formatting are never blocked.
+
+    Scoring:
+      Score >= 4  → accepted as a resume
+      Score < 4   → rejected with reason
+    """
+    if not text or len(text.strip()) < 80:
+        # Too little text to decide — accept and let the parser handle it.
+        return True, ""
+
+    t = text[:5000].lower()
+    score = 0
+
+    # Strong resume indicators (each found once counts once).
+    _resume_signals = [
+        (r'\b(experience|work history|employment history|work experience)\b', 4),
+        (r'\b(education|academic|university|college|degree|b\.?tech|m\.?tech|m\.?b\.?a)\b', 3),
+        (r'\b(skill|skills|expertise|proficienc)\b', 2),
+        (r'[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}', 3),          # email
+        (r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}', 2), # phone
+        (r'\b(resume|cv|curriculum vitae)\b', 4),
+        (r'\b(objective|professional summary|career summary|profile)\b', 2),
+        (r'\b(project|projects|certification|certifications|achievement)\b', 1),
+        (r'\b(linkedin|github|portfolio)\b', 2),
+        (r'\b(years?\s+of\s+experience|worked\s+(?:at|for|with)|responsible\s+for)\b', 2),
+    ]
+
+    # Strong non-resume indicators — a single match subtracts heavily.
+    _non_resume_signals = [
+        (r'\b(invoice|invoices|invoice\s+number|inv\s*#|bill\s+to|amount\s+due|total\s+amount|subtotal|tax\s+amount)\b', -8),
+        (r'\b(purchase\s+order|p\.?o\.?\s+number|vendor|buyer|ship\s+to|payment\s+terms|net\s+\d+\s+days)\b', -7),
+        (r'\b(contract|agreement|whereas|hereinafter|party\s+of\s+the|witnesseth|in\s+witness\s+whereof)\b', -6),
+        (r'\b(table\s+of\s+contents|chapter\s+\d|bibliography|references\s+cited|et\s+al\.)\b', -5),
+        (r'\b(patient\s+name|diagnosis|prescription|medication|dosage|medical\s+record)\b', -6),
+        (r'\b(dear\s+sir|dear\s+madam|to\s+whom\s+it\s+may\s+concern|yours\s+sincerely|yours\s+faithfully)\b', -4),
+        (r'\b(quantity|unit\s+price|line\s+item|item\s+description|product\s+code|sku)\b', -5),
+    ]
+
+    for pattern, weight in _resume_signals:
+        if re.search(pattern, t):
+            score += weight
+
+    for pattern, weight in _non_resume_signals:
+        if re.search(pattern, t):
+            score += weight  # weight is negative
+
+    if score < 4:
+        return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
+    return True, ""
+
+
 def main() -> int:
     conn = psycopg2.connect(
         dbname=os.getenv("DB_NAME"),
@@ -8118,9 +8259,9 @@ def main() -> int:
 
     # Seconds; set to 0 to disable. Helps avoid hangs on malformed PDFs.
     try:
-        pdf_timeout_seconds = float(os.getenv("PDF_TIMEOUT_SECONDS", "45"))
+        pdf_timeout_seconds = float(os.getenv("PDF_TIMEOUT_SECONDS", "120"))
     except ValueError:
-        pdf_timeout_seconds = 45.0
+        pdf_timeout_seconds = 120.0
 
     # Optional: allow processing only a subset of files (used by retry loops).
     # NOTE: Do NOT split on commas — filenames can legitimately contain commas.
@@ -8205,6 +8346,24 @@ def main() -> int:
             # Fix common OCR artifacts (ligature drops, bracket substitutions,
             # CID placeholders) so all extractors see corrected text.
             resume_text = ocr_cleanup(resume_text)
+
+            # ── Non-resume guard ─────────────────────────────────────────────
+            # Reject files that are clearly not resumes (invoices, contracts,
+            # books, medical records, etc.) before expensive extraction.
+            _is_resume_doc, _not_resume_reason = _is_likely_resume(resume_text)
+            if not _is_resume_doc:
+                report["skipped"].append({"file": file, "reason": _not_resume_reason})
+                if not quiet:
+                    print(f"Skipped (not a resume): {safe_file}")
+                print(
+                    f"Skipped: {safe_file} reason=NotAResume: {_not_resume_reason}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                _log.warning("NOT-A-RESUME [%s]", file)
+                continue
+            # ── end non-resume guard ─────────────────────────────────────────
+
             extraction_text = resume_text + ("\n" + "\n".join(links) if links else "")
             resume_text_norm = resume_text.lower()
 
@@ -8542,6 +8701,53 @@ def main() -> int:
                 "lucent",
                 "sprint",
                 "comcast",
+                # ── Phase-14: marketing / business section-heading tokens ──
+                "promotional",
+                "channels",
+                "marketing",
+                "campaign",
+                "campaigns",
+                "brand",
+                "branding",
+                "digital",
+                "media",
+                "social",
+                "advertising",
+                "analytics",
+                "insights",
+                "metrics",
+                "roi",
+                "revenue",
+                "sales",
+                "growth",
+                "acquisition",
+                "retention",
+                "funnel",
+                "conversion",
+                "engagement",
+                "content",
+                "seo",
+                "sem",
+                "ppc",
+                "overview",
+                "highlights",
+                "introduction",
+                "vision",
+                "mission",
+                "scope",
+                "approach",
+                "deliverable",
+                "deliverables",
+                "outcome",
+                "outcomes",
+                "impact",
+                "contribution",
+                "contributions",
+                "accomplishment",
+                "accomplishments",
+                "recommendation",
+                "recommendations",
+                "background",
             }
             us_state_names = {v.casefold() for v in US_STATE_ABBR_TO_FULL.values()}
             # US state abbreviation codes (2-letter) that should not be last names.
@@ -8871,7 +9077,7 @@ def main() -> int:
 
                     # Education: enrich structured entries when rule-based returned none
                     _llm_edu = _llm.get("education") or []
-                    if _llm_edu and not education_entries:
+                    if _llm_edu and (not education_entries or all(not e.get("degree") for e in education_entries)):
                         education_entries = [
                             {
                                 "degree":            e.get("normalized_degree") or e.get("degree") or "",
@@ -8889,6 +9095,34 @@ def main() -> int:
                         ) if education_entries else _edu_structured
                         _log.info("LLM_ENRICH [%s] education: %d entries",
                                   file, len(education_entries))
+
+                    # Location: use LLM location when regex found nothing or only an
+                    # unreliable area-code-based guess (specific city but possibly wrong country)
+                    _llm_loc = (_llm.get("location") or "").strip()
+                    _null_loc_values = {"null", "none", "n/a", "unknown", "not found", "not available", ""}
+                    if _llm_loc and _llm_loc.lower() not in _null_loc_values and len(_llm_loc) >= 5:
+                        if not address:
+                            # Regex found nothing — fill from LLM
+                            _log.info("LLM_ENRICH [%s] location (fill): %s", file, _llm_loc)
+                            address = _llm_loc
+                        elif address.count(",") < 1:
+                            # Regex found a bare token — upgrade to LLM's richer result
+                            _log.info("LLM_ENRICH [%s] location (upgrade): %s -> %s", file, address, _llm_loc)
+                            address = _llm_loc
+                        else:
+                            # Both exist — prefer LLM when it implies a different country
+                            # (catches the phone-area-code "Austin, Texas, United States" bug for
+                            # resumes where the actual location is in a different country)
+                            _addr_lower = address.lower()
+                            _llm_lower  = _llm_loc.lower()
+                            _us_markers = {"united states", "usa", ", tx", ", ca", ", ny", ", fl",
+                                           "texas", "california", "new york", "florida"}
+                            _addr_is_us = any(m in _addr_lower for m in _us_markers)
+                            _llm_is_us  = any(m in _llm_lower for m in _us_markers)
+                            if _addr_is_us and not _llm_is_us:
+                                # Current address looks US-derived but LLM says different country
+                                _log.info("LLM_ENRICH [%s] location (country-fix): %s -> %s", file, address, _llm_loc)
+                                address = _llm_loc
             
             # Record usage statistics
             record_llm_call(

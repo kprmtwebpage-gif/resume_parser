@@ -247,15 +247,17 @@ Extract from the resume below and return ONLY valid JSON with these fields:
   "job_title": string or null,
   "job_title_confidence": number or null,
   "linkedin_url": string or null,
+  "location": string or null,
   "certifications": [{{"name": string, "issuer": string, "normalized_name": string, "confidence": number}}],
-  "education": [{{"degree": string, "normalized_degree": string, "field_of_study": string or null, "level": string, "confidence": number}}]
+  "education": [{{"degree": string, "normalized_degree": string, "field_of_study": string or null, "university": string or null, "level": string, "confidence": number}}]
 }}
 
 Rules:
 - job_title: normalize (Sr->Senior, no company prefix). Confidence: 0.95 explicit, 0.90 headline, 0.85 experience, 0.70 inferred.
 - linkedin_url: full https://www.linkedin.com/in/username format, null if absent.
+- location: candidate's current city/location as "City, State/Province, Country". Use full names (Texas not TX, India not IN). Examples: "Hyderabad, Telangana, India", "Austin, Texas, United States". Null if not present.
 - certifications: professional certs only (AWS, PMP, CFA, etc.), empty array if none.
-- education: normalize degree names (B.Tech->Bachelor's Degree). Levels: High School, Associate, Bachelor, Master, Doctoral, Other.
+- education: normalize degree names (B.Tech->Bachelor of Technology). Include university/institution name. Levels: High School, Associate, Bachelor, Master, Doctoral, Other.
 - Only extract what is explicitly present. No hallucination.
 
 Resume Text:

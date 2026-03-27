@@ -74,7 +74,7 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
 # Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
-_parse_semaphore = asyncio.Semaphore(2)
+_parse_semaphore = asyncio.Semaphore(4)
 
 # ── Resume Download Quota Tracking ────────────────────────────────────────────
 DAILY_DOWNLOAD_LIMIT = 10

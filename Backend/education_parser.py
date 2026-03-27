@@ -372,12 +372,15 @@ _UNI_TRAILER_STRIP_RE = re.compile(
 _EDU_HEADING_RE = re.compile(
     r"(?i)^\s*(?:"
     r"education(?:al)?(?:\s+(?:background|details?|history|summary|info(?:rmation)?|"
-    r"qualifications?|section|overview))?"
-    r"|academics?(?:\s+(?:background|qualifications?|history))?"
-    r"|academic\s+(?:background|qualifications?|history|details?)"
-    r"|educational\s+(?:qualifications?|background|details?|history)"
+    r"qualifications?|section|overview|profile))?"
+    r"|academics?(?:\s+(?:background|qualifications?|history|profile|details?))?"
+    r"|academic\s+(?:background|qualifications?|history|details?|profile|info(?:rmation)?)"
+    r"|educational\s+(?:qualifications?|background|details?|history|profile)"
     r"|degrees?\s+(?:earned|obtained|awarded)?"
     r"|qualifications?"
+    r"|scholastic\s+(?:details?|background|record|profile)"
+    r"|professional\s+education"
+    r"|education\s*[&+]\s*certifications?"
     r")\s*[:\-–]?\s*$"
 )
 
