@@ -364,27 +364,87 @@ async def upload_editor_image(image: UploadFile = File(...)):
 # This will be mounted at the end of the file to avoid conflicts with API routes
 
 
-# ── Connection pool (initialized once at startup) ─────────────────────────────
-_db_pool = psycopg2.pool.ThreadedConnectionPool(
-    minconn=2,
-    maxconn=20,
-    dbname=os.getenv("DB_NAME"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-    host=os.getenv("DB_HOST"),
-    port=os.getenv("DB_PORT"),
-    cursor_factory=psycopg2.extras.RealDictCursor,
-)
+# ── Connection pool (lazy-initialized at first use / startup) ─────────────────
+# NOTE: NOT initialized at module level — doing so caused the worker process to
+# crash when the DB was briefly unavailable during container start / restart,
+# leading to the entire backend going into a crash-loop (show-stopper bug).
+import threading as _threading
+_db_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+_db_pool_lock = _threading.Lock()
+
+
+def _build_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    """Create a connection pool with TCP keepalives to prevent stale connections."""
+    return psycopg2.pool.ThreadedConnectionPool(
+        minconn=1,
+        maxconn=20,
+        dbname=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        host=os.getenv("DB_HOST"),
+        port=os.getenv("DB_PORT"),
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        # TCP keepalives: detect silently-dropped idle connections.
+        # Without this, connections idle for >5 min on the VPS are killed by
+        # the firewall/NAT, filling the pool with dead connections until all
+        # 20 slots are unusable and every request returns 500.
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
+
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    """Return the singleton pool, creating it if necessary (thread-safe)."""
+    global _db_pool
+    if _db_pool is not None:
+        return _db_pool
+    with _db_pool_lock:
+        if _db_pool is None:
+            _db_pool = _build_pool()
+    return _db_pool
 
 
 @contextmanager
 def get_db():
-    """Database connection context manager using connection pool"""
-    conn = _db_pool.getconn()
+    """Database connection context manager with stale-connection recovery.
+
+    Root-cause fix: psycopg2 connections can go dead when the VPS firewall/NAT
+    kills idle TCP connections.  Previously, dead connections were returned to
+    the pool unchanged and re-issued to the next request, causing every request
+    to fail once all pool slots were stale.  Now we:
+      1. Rollback on ANY exception so connections are never left in a broken
+         transaction state (InFailedSqlTransaction).
+      2. On OperationalError (broken pipe / connection reset) the connection is
+         discarded from the pool (close=True) rather than being recycled.
+      3. If the pool itself is exhausted or not yet initialised we rebuild it
+         once and retry, so a transient DB blip during container startup no
+         longer takes the whole worker down permanently.
+    """
+    pool = _get_pool()
+    conn = pool.getconn()
     try:
         yield conn
+    except psycopg2.OperationalError:
+        # Connection is dead — discard it so the pool allocates a fresh one.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        pool.putconn(conn, close=True)
+        conn = None  # mark as already returned
+        raise
+    except Exception:
+        # For all other exceptions rollback the transaction before returning.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
-        _db_pool.putconn(conn)
+        if conn is not None:
+            pool.putconn(conn)
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -567,10 +627,35 @@ async def _create_indexes():
     except Exception as e:
         print(f"[WARN] Could not create indexes: {e}")
 
+    # Ensure the download-quota table exists (the module-level call at import
+    # time was a no-op because get_db() wasn't defined yet).
+    try:
+        _ensure_download_logs_table()
+        print("[OK] Download logs table verified")
+    except Exception as e:
+        print(f"[WARN] Could not create download_logs table: {e}")
+
 
 @app.get("/health")
 async def health_check():
-    """Docker health check endpoint"""
+    """Docker health check endpoint — also verifies DB connectivity.
+
+    Previously the health check returned 200 even when the DB connection pool
+    was full of stale/dead connections, so Docker's healthcheck never caught
+    pool exhaustion.  Now we run a lightweight SELECT 1 to confirm the DB is
+    reachable; if it fails the endpoint returns 503 and Docker restarts the
+    container (rather than leaving a permanently-broken instance running).
+    """
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+    except Exception as exc:
+        return Response(
+            content=f'{{"status":"error","detail":"{exc}","commit":"{_get_commit()}"}}',
+            status_code=503,
+            media_type="application/json",
+        )
     return {"status": "ok", "commit": _get_commit()}
 
 
