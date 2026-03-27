@@ -54,6 +54,9 @@ services:
       LLM_MODEL: ${LLM_MODEL:-llama-3.1-8b-instant}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PARSE_MODE: ${PARSE_MODE:-nlp}
+      LLM_EXTRACT_ENABLED: ${LLM_EXTRACT_ENABLED:-false}
+      LLM_PROVIDERS: ${LLM_PROVIDERS:-groq}
+      LLM_RATE_DELAY: ${LLM_RATE_DELAY:-10}
     volumes:
       - resume_cache:/app/Backend/resumes_cache
       - ./Backend/drive_service_account.json:/app/Backend/drive_service_account.json:ro
@@ -85,6 +88,9 @@ services:
       LLM_MODEL: ${LLM_MODEL:-llama-3.1-8b-instant}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PARSE_MODE: ${PARSE_MODE:-nlp}
+      LLM_EXTRACT_ENABLED: ${LLM_EXTRACT_ENABLED:-false}
+      LLM_PROVIDERS: ${LLM_PROVIDERS:-groq}
+      LLM_RATE_DELAY: ${LLM_RATE_DELAY:-10}
       # Increase timeout to accommodate OCR on complex PDFs in Docker
       PDF_TIMEOUT_SECONDS: ${PDF_TIMEOUT_SECONDS:-120}
     volumes:
