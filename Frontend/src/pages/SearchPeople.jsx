@@ -152,7 +152,7 @@ export default function SearchPeople() {
         keywords: filters.keywords || undefined,
         experienceFrom: filters.experienceFrom ?? undefined,
         experienceTo: filters.experienceTo ?? undefined,
-        limit: 1000,
+        limit: 10000,
         offset: 0 
       })
       const nextRows = Array.isArray(data) ? data : Array.isArray(data?.candidates) ? data.candidates : []

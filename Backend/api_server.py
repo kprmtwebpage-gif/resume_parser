@@ -687,7 +687,7 @@ async def get_candidates(
     experienceYears: Optional[float] = Query(None, description="Minimum years of experience (joint with jobTitle, legacy)"),
     experienceFrom: Optional[float] = Query(None, description="Minimum years of experience (joint with jobTitle)"),
     experienceTo: Optional[float] = Query(None, description="Maximum years of experience (joint with jobTitle)"),
-    limit: int = Query(10, ge=1, le=1000, description="Number of results per page"),
+    limit: int = Query(10, ge=1, le=10000, description="Number of results per page"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
     """
@@ -701,7 +701,7 @@ async def get_candidates(
     - **experienceFrom**: Minimum years of experience (used jointly with jobTitle)
     - **experienceTo**: Maximum years of experience (used jointly with jobTitle)
     - **experienceYears**: Legacy minimum years of experience param (joint with jobTitle)
-    - **limit**: Number of results per page (1-1000)
+    - **limit**: Number of results per page (1-10000)
     - **offset**: Offset for pagination
     """
     with get_db() as conn:
