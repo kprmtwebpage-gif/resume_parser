@@ -135,6 +135,8 @@ Resumes_Production_downloaded/
 Resumes_Development_downloaded/
 failed_resumes_production/
 failed_resumes_production.zip
+failed_resumes_local/
+failed_resumes_by_user/
 Resumes_Production_downloaded.zip
 
 # LinkedIn Chrome Extension (removed - not deployed to servers)
