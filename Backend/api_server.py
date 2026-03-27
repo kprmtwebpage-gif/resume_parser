@@ -550,6 +550,7 @@ class Candidate(BaseModel):
     professional_experience: Optional[str] = None
     # Parse status — lets the UI flag candidates whose resume failed to parse
     parse_status: Optional[str] = None
+    parse_failure_reason: Optional[str] = None
 
 
 import subprocess as _subprocess
@@ -847,7 +848,7 @@ async def get_candidates(
                            c.linkedin, c.visa_support, 
                            c.work_authorization_type as work_authorization, s.certifications, 
                            s.tech_skills, s.years_of_experience as professional_experience,
-                           c.resume_parse_status
+                           c.resume_parse_status, c.parse_failure_reason
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                     WHERE {where_clause}
@@ -865,7 +866,7 @@ async def get_candidates(
                            c.linkedin, c.visa_support, 
                            c.work_authorization_type as work_authorization, s.certifications, 
                            s.tech_skills, s.years_of_experience as professional_experience,
-                           c.resume_parse_status
+                           c.resume_parse_status, c.parse_failure_reason
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                     ORDER BY c.id 
@@ -916,6 +917,7 @@ async def get_candidates(
                         certifications=_split_csv(row.get("certifications")),
                     ),
                     parse_status=row.get("resume_parse_status"),
+                    parse_failure_reason=row.get("parse_failure_reason"),
                 )
                 for row in rows
             ]
@@ -1605,7 +1607,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             sha_existing = cursor.fetchone()
     if sha_existing:
         # If the previous upload failed, delete the failed row so user can re-upload
-        if sha_existing.get("resume_parse_status") == "failed":
+        if sha_existing.get("resume_parse_status") in ("failed", "processing"):
             failed_id = sha_existing["id"]
             with get_db() as conn:
                 with conn.cursor() as cursor:
@@ -2711,6 +2713,7 @@ async def admin_get_users(request: Request):
                     COUNT(cp.id) AS resumes_uploaded
                 FROM users u
                 LEFT JOIN candidate_profile cp ON cp.uploaded_by = u.id
+                    AND (cp.resume_parse_status IS NULL OR cp.resume_parse_status = 'completed')
                 GROUP BY u.id
                 ORDER BY u.created_at
             """)

@@ -276,7 +276,10 @@ Availability: ${row.availability || 'N/A'}`
                   {fullName}
                 </button>
                 {isParseFailedOrStuck && (
-                  <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded bg-red-100 text-red-700 border border-red-200">
+                  <span
+                    className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded bg-red-100 text-red-700 border border-red-200 cursor-help"
+                    title={row.parse_failure_reason || 'Resume could not be parsed'}
+                  >
                     Parse Failed
                   </span>
                 )}
