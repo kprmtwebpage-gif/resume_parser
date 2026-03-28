@@ -158,6 +158,8 @@ export function UploadProvider({ children }) {
 
       } else if (result.status === 'processing') {
         // Backend accepted file — parsing in background. Poll for result.
+        // Fire-and-forget: worker moves to next file immediately; polling
+        // updates this card's status in the background.
         setUploads(prev =>
           prev.map(u =>
             u.id === upload.id
@@ -165,7 +167,7 @@ export function UploadProvider({ children }) {
               : u
           )
         )
-        await pollParseStatus(upload, result.id)
+        pollParseStatus(upload, result.id)
 
       } else if (result.status === 'duplicate') {
         setUploads(prev =>
