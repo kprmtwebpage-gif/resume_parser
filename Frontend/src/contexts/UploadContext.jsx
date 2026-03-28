@@ -126,7 +126,7 @@ export function UploadProvider({ children }) {
               : u
           )
         )
-        pollParseStatus(upload, result.id)
+        await pollParseStatus(upload, result.id)
 
       } else if (result.status === 'duplicate') {
         setUploads(prev =>
