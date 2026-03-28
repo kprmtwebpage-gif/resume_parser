@@ -630,23 +630,19 @@ async def _create_indexes():
     except Exception as e:
         print(f"[WARN] Could not create indexes: {e}")
 
-    # Reset any candidates stuck in 'processing' state — these are rows where the
+    # Delete any candidates stuck in 'processing' state — these are rows where the
     # ingestion service was killed mid-parse and the status was never updated.
+    # Since failed parses are not stored, these orphan rows are also removed.
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"""
-                    UPDATE {CANDIDATES_TABLE}
-                    SET resume_parse_status = 'failed',
-                        parse_failure_reason = 'Reset from stuck processing state on server startup'
-                    WHERE resume_parse_status = 'processing'
-                """)
+                cur.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'processing'")
                 stuck = cur.rowcount
             conn.commit()
         if stuck:
-            print(f"[OK] Reset {stuck} stuck 'processing' record(s) to 'failed'")
+            print(f"[OK] Deleted {stuck} stuck 'processing' placeholder(s) on startup")
     except Exception as e:
-        print(f"[WARN] Could not reset stuck processing records: {e}")
+        print(f"[WARN] Could not clean up stuck processing records: {e}")
 
     # Ensure the download-quota table exists (the module-level call at import
     # time was a no-op because get_db() wasn't defined yet).
@@ -731,10 +727,9 @@ async def get_candidates(
             where_conditions = []
             search_params = []
 
-            # NOTE: We intentionally include ALL parse statuses (completed, failed, processing)
-            # so every candidate with a DB record is visible in the UI.  Failed-parse candidates
-            # are shown with a visual badge; they may still have a name/email extracted.
-            # Only the email-dedup filter below is retained (keeps newest record per email).
+            # Only show successfully parsed candidates — failed/processing rows are not stored
+            # but guard here as a safety net in case any slip through.
+            where_conditions.append("c.resume_parse_status = 'completed'")
 
             # Exclude duplicate profiles — show only newest record per email
             where_conditions.append(f"""(c.email IS NULL OR c.email = '' OR NOT EXISTS (
@@ -858,7 +853,7 @@ async def get_candidates(
                 count_params = search_params
                 data_params = search_params + [limit, offset]
             else:
-                count_sql = f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE}"
+                count_sql = f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'"
                 data_sql = f"""
                     SELECT c.id, c.first_name, c.last_name, c.email, c.phone, c.address,
                            c.resume_filename, c.profile_picture_url,
@@ -869,6 +864,7 @@ async def get_candidates(
                            c.resume_parse_status, c.parse_failure_reason
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
+                    WHERE c.resume_parse_status = 'completed'
                     ORDER BY c.id 
                     LIMIT %s OFFSET %s
                 """
@@ -1066,16 +1062,16 @@ async def get_stats():
     """Get database statistics"""
     with get_db() as conn:
         with conn.cursor() as cursor:
-            # Total candidates
-            cursor.execute(f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE}")
+            # Total successfully parsed candidates
+            cursor.execute(f"SELECT COUNT(*) as total FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'")
             total = cursor.fetchone()["total"]
             
             # Candidates with email
-            cursor.execute(f"SELECT COUNT(*) as count FROM {CANDIDATES_TABLE} WHERE email IS NOT NULL AND email != ''")
+            cursor.execute(f"SELECT COUNT(*) as count FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed' AND email IS NOT NULL AND email != ''")
             with_email = cursor.fetchone()["count"]
             
             # Candidates with phone
-            cursor.execute(f"SELECT COUNT(*) as count FROM {CANDIDATES_TABLE} WHERE phone IS NOT NULL AND phone != ''")
+            cursor.execute(f"SELECT COUNT(*) as count FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed' AND phone IS NOT NULL AND phone != ''")
             with_phone = cursor.fetchone()["count"]
             
             # Top job titles
@@ -1709,16 +1705,13 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
                 _reason_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.startswith(' ')]
                 if not _reason_lines:
-                    # Some parse errors (e.g. password-protected) go to stdout
                     _reason_lines = [l.strip() for l in stdout_text.splitlines() if l.strip() and ("error" in l.lower() or "skip" in l.lower() or "password" in l.lower() or "encrypt" in l.lower())]
                 _reason = _reason_lines[0][:300] if _reason_lines else f"Parser exited with code {returncode}"
-                print(f"[PARSER FAILED] file={save_name} rc={returncode}\nSTDERR: {stderr_text[:1000]}", flush=True)
+                print(f"[PARSER FAILED] file={save_name} rc={returncode} reason={_reason}\nSTDERR: {stderr_text[:500]}", flush=True)
+                # Delete the placeholder — failed parses are not stored in DB so user can re-upload
                 with get_db() as conn:
                     with conn.cursor() as cursor:
-                        cursor.execute(
-                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = %s WHERE id = %s",
-                            (_reason, placeholder_id),
-                        )
+                        cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
                     conn.commit()
                 return
 
@@ -1865,16 +1858,11 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                                 (placeholder_id,),
                                             )
                                         else:
-                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — marking failed after retry", flush=True)
-                                            _retry_stderr = (retry_result.stderr or b"").decode("utf-8", errors="replace") if hasattr(retry_result, 'stderr') and retry_result.stderr else ""
-                                            _retry_stdout = (retry_result.stdout or b"").decode("utf-8", errors="replace") if hasattr(retry_result, 'stdout') and retry_result.stdout else ""
-                                            _skip_lines = [l.strip() for l in _retry_stderr.splitlines() if "skipped" in l.lower() or "error" in l.lower() or "timeout" in l.lower()]
-                                            if not _skip_lines:
-                                                _skip_lines = [l.strip() for l in _retry_stdout.splitlines() if "skipped" in l.lower() or "error" in l.lower() or "timeout" in l.lower()]
-                                            _exhausted_reason = _skip_lines[0][:300] if _skip_lines else "Text extraction failed after retry (possible file corruption or unsupported format)"
+                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — deleting placeholder after retry", flush=True)
+                                            # Delete the placeholder — failed parses are not stored so user can re-upload
                                             cur2.execute(
-                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='failed', parse_failure_reason=%s WHERE id=%s",
-                                                (_exhausted_reason, placeholder_id),
+                                                f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
+                                                (placeholder_id,),
                                             )
                                 conn2.commit()
                             # Skip the outer conn.commit() — already committed above
@@ -2751,15 +2739,16 @@ async def admin_upload_metrics(request: Request):
             user_map = {r["id"]: r["username"] for r in users_rows}
             user_ids = list(user_map.keys())
 
-            # Grand total of all resumes in DB (consistent with dashboard-stats)
-            cursor.execute(f"SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE}")
+            # Grand total of successfully parsed resumes in DB
+            cursor.execute(f"SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'")
             total_resumes = cursor.fetchone()["total"]
 
-            # Get daily upload counts per user for last 90 days
+            # Get daily upload counts per user for last 90 days (completed only)
             cursor.execute("""
                 SELECT DATE(parsed_at) as day, uploaded_by, COUNT(*) as cnt
                 FROM candidate_profile
                 WHERE parsed_at IS NOT NULL AND uploaded_by IS NOT NULL
+                  AND resume_parse_status = 'completed'
                   AND parsed_at >= CURRENT_DATE - INTERVAL '90 days'
                 GROUP BY DATE(parsed_at), uploaded_by
                 ORDER BY day
