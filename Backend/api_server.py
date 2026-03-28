@@ -2799,11 +2799,14 @@ async def admin_upload_metrics(request: Request):
             user_map = {r["id"]: r["username"] for r in users_rows}
             user_ids = list(user_map.keys())
 
-            # Grand total of successfully parsed resumes in DB.
-            # Shows total uploads (not deduped) — matches upload activity tracking.
-            # People Search shows fewer (213) because it hides older duplicate emails,
-            # but the admin count intentionally reflects all successful work done.
-            cursor.execute(f"SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'")
+            # Grand total of unique successfully parsed resumes in DB.
+            # Deduped by email (same as People Search) — same person uploaded twice counts once.
+            cursor.execute(f"""SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE} c
+                WHERE c.resume_parse_status = 'completed'
+                  AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                    SELECT 1 FROM {CANDIDATES_TABLE} newer
+                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
+                ))""")
             total_resumes = cursor.fetchone()["total"]
 
             # Get daily upload counts per user for last 90 days (completed only)
