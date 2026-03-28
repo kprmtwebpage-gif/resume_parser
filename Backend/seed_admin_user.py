@@ -4,7 +4,7 @@ import bcrypt
 
 DB_CONFIG = dict(
     host='localhost', port=5432,
-    dbname='postgres', user='postgres', password='admin'
+    dbname='resume_db', user='postgres', password='admin'
 )
 
 password = 'admin123'
