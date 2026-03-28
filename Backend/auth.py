@@ -96,7 +96,7 @@ class ChangePassword(BaseModel):
 # â”€â”€ Connection pool (shared across all auth operations) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _auth_pool = psycopg2.pool.ThreadedConnectionPool(
     minconn=2,
-    maxconn=10,
+    maxconn=20,
     **DB_CONFIG,
     cursor_factory=psycopg2.extras.RealDictCursor,
 )

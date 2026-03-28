@@ -95,10 +95,10 @@ export function UploadProvider({ children }) {
           )
         )
       } catch (err) {
+        const httpStatus = err?.response?.status
         // 404 means the placeholder was deleted (parse failed or not-a-resume)
         // Stop polling and surface it as a failure so the user can re-upload
-        const status = err?.response?.status
-        if (status === 404) {
+        if (httpStatus === 404) {
           setUploads(prev =>
             prev.map(u =>
               u.id === upload.id
@@ -108,7 +108,9 @@ export function UploadProvider({ children }) {
           )
           return
         }
-        // Other network errors — keep trying
+        // 500 errors (e.g. pool exhaustion under heavy load) — keep retrying,
+        // the server will recover once connections free up.
+        // Other network errors — also keep trying
       }
     }
     // Polling window elapsed — parsing is still running in the background.

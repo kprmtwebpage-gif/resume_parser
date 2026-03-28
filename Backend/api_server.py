@@ -74,7 +74,10 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
 # Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
-_parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "12")))
+# Keep concurrency low to avoid exhausting the DB connection pool during bulk uploads.
+# Each parser subprocess opens its own psycopg2 connection, plus the background task
+# and status-polling endpoints also need pool connections.
+_parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "5")))
 _parse_waiting = 0   # tasks queued, waiting for a semaphore slot
 _parse_active  = 0   # tasks currently holding the semaphore (actively parsing)
 
@@ -378,8 +381,8 @@ _db_pool_lock = _threading.Lock()
 def _build_pool() -> psycopg2.pool.ThreadedConnectionPool:
     """Create a connection pool with TCP keepalives to prevent stale connections."""
     return psycopg2.pool.ThreadedConnectionPool(
-        minconn=1,
-        maxconn=20,
+        minconn=2,
+        maxconn=50,
         dbname=os.getenv("DB_NAME"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
@@ -423,9 +426,23 @@ def get_db():
       3. If the pool itself is exhausted or not yet initialised we rebuild it
          once and retry, so a transient DB blip during container startup no
          longer takes the whole worker down permanently.
+      4. Retry with backoff when the pool is temporarily exhausted (bulk uploads).
     """
+    import time as _time
     pool = _get_pool()
-    conn = pool.getconn()
+    conn = None
+    # Retry up to 5 times with increasing backoff when pool is exhausted
+    for _attempt in range(5):
+        try:
+            conn = pool.getconn()
+            break
+        except psycopg2.pool.PoolError:
+            if _attempt < 4:
+                _time.sleep(0.3 * (2 ** _attempt))  # 0.3s, 0.6s, 1.2s, 2.4s
+            else:
+                raise
+    if conn is None:
+        raise psycopg2.pool.PoolError("connection pool exhausted after retries")
     try:
         yield conn
     except psycopg2.OperationalError:
@@ -2049,10 +2066,11 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                                 (placeholder_id,),
                                             )
                                         else:
-                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — deleting placeholder after retry", flush=True)
-                                            # Delete the placeholder — failed parses are not stored so user can re-upload
+                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — marking as failed (will allow re-upload)", flush=True)
+                                            # Mark as failed instead of deleting — the SHA256 re-upload
+                                            # logic will delete failed rows automatically on next upload.
                                             cur2.execute(
-                                                f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
+                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = 'Parsing timed out — please re-upload' WHERE id = %s",
                                                 (placeholder_id,),
                                             )
                                 conn2.commit()
@@ -3072,85 +3090,6 @@ async def admin_upload_metrics(request: Request):
                 "userSummaries": user_summaries,
                 "total_resumes": total_resumes,
             }
-
-
-@app.get("/api/admin/upload-log")
-async def admin_upload_log(
-    request: Request,
-    user_id: Optional[int] = None,
-    status: Optional[str] = None,
-    search: Optional[str] = None,
-    limit: int = 500,
-):
-    """
-    Admin upload log — returns individual resume rows showing who uploaded what and when.
-
-    Query params:
-        user_id  — filter to a specific uploader (optional)
-        status   — filter by resume_parse_status: 'completed' | 'failed' | 'not_a_resume' (optional)
-        search   — filter by candidate name or filename substring (optional)
-        limit    — max rows to return (default 500)
-    """
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            where_clauses = []
-            params: list = []
-
-            if user_id is not None:
-                where_clauses.append("c.uploaded_by = %s")
-                params.append(user_id)
-
-            if status:
-                where_clauses.append("c.resume_parse_status = %s")
-                params.append(status)
-
-            if search and search.strip():
-                q = f"%{search.strip().lower()}%"
-                where_clauses.append(
-                    "(LOWER(c.first_name) LIKE %s OR LOWER(c.last_name) LIKE %s OR LOWER(c.resume_filename) LIKE %s)"
-                )
-                params.extend([q, q, q])
-
-            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-
-            params.append(limit)
-
-            cursor.execute(f"""
-                SELECT
-                    c.id,
-                    c.first_name,
-                    c.last_name,
-                    c.resume_filename,
-                    c.parsed_at,
-                    c.resume_parse_status,
-                    u.id          AS uploader_id,
-                    u.username    AS uploader_username,
-                    u.email       AS uploader_email,
-                    s.job_title
-                FROM candidate_profile c
-                LEFT JOIN users u ON u.id = c.uploaded_by
-                LEFT JOIN candidate_skills_profile s ON s.candidate_id = c.id
-                {where_sql}
-                ORDER BY c.parsed_at DESC NULLS LAST
-                LIMIT %s
-            """, params)
-            rows = cursor.fetchall()
-
-    return [
-        {
-            "id":                 r["id"],
-            "first_name":         r["first_name"] or "",
-            "last_name":          r["last_name"] or "",
-            "resume_filename":    r["resume_filename"] or "",
-            "parsed_at":          r["parsed_at"].isoformat() if r["parsed_at"] else None,
-            "status":             r["resume_parse_status"] or "unknown",
-            "uploader_id":        r["uploader_id"],
-            "uploader_username":  r["uploader_username"] or "—",
-            "uploader_email":     r["uploader_email"] or "",
-            "job_title":          r["job_title"] or "",
-        }
-        for r in rows
-    ]
 
 
 # ─── LinkedIn Extension: Add candidate from LinkedIn profile ──────────
