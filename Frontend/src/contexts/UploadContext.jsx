@@ -210,8 +210,8 @@ export function UploadProvider({ children }) {
 
       setUploads((prev) => [...prev, ...newUploads])
 
-      // max 4 concurrent uploads
-      const runWithConcurrency = async (items, concurrency = 4) => {
+      // 1 at a time — each file fully uploads + parses (turns green) before the next starts
+      const runWithConcurrency = async (items, concurrency = 1) => {
         const queue = [...items]
         const workers = Array.from(
           { length: Math.min(concurrency, items.length) },
@@ -225,7 +225,7 @@ export function UploadProvider({ children }) {
         await Promise.all(workers)
       }
 
-      runWithConcurrency(newUploads, 4)
+      runWithConcurrency(newUploads, 1)
     },
     [uploadFileToBackend]
   )
