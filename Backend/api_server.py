@@ -2812,13 +2812,17 @@ async def admin_upload_metrics(request: Request):
             # Get daily upload counts per user for last 90 days (completed only)
             # Counts every successful upload — dedup is intentionally NOT applied here
             # because metrics track user activity (how many resumes were processed),
-            # not unique visible profiles (that's what People Search is for).
+            # Deduped by email — same person uploaded twice counts once (on the day of the newer upload).
             cursor.execute(f"""
                 SELECT DATE(c.parsed_at) as day, c.uploaded_by, COUNT(*) as cnt
                 FROM {CANDIDATES_TABLE} c
                 WHERE c.parsed_at IS NOT NULL AND c.uploaded_by IS NOT NULL
                   AND c.resume_parse_status = 'completed'
                   AND c.parsed_at >= CURRENT_DATE - INTERVAL '90 days'
+                  AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                    SELECT 1 FROM {CANDIDATES_TABLE} newer
+                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
+                  ))
                 GROUP BY DATE(c.parsed_at), c.uploaded_by
                 ORDER BY day
             """)
