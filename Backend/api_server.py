@@ -1084,6 +1084,23 @@ async def get_candidate(candidate_id: int):
             )
 
 
+@app.delete("/candidates/{candidate_id}")
+async def delete_candidate(
+    candidate_id: int,
+    _: dict = Depends(get_current_admin),
+):
+    """Delete a candidate and their associated skills. Superuser/admin only."""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(f"SELECT id FROM {CANDIDATES_TABLE} WHERE id = %s", (candidate_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Candidate not found")
+            cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (candidate_id,))
+            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (candidate_id,))
+        conn.commit()
+    return {"success": True, "deleted_id": candidate_id}
+
+
 @app.get("/stats")
 async def get_stats():
     """Get database statistics"""

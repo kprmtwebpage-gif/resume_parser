@@ -97,9 +97,9 @@ function ActionsDropdown({ anchorRef, isOpen, onClose, children, colors }) {
   )
 }
 
-export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit }) {
+export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit, onDelete }) {
   const { colors, isDark } = useTheme()
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
   const [isGenerated, setIsGenerated] = useState(false)
   const [isDownloaded, setIsDownloaded] = useState(false)
@@ -216,6 +216,19 @@ Availability: ${row.availability || 'N/A'}`
     // Close modal
     setIsEmailModalOpen(false)
   }, [row])
+
+  const handleDeleteClick = useCallback(async (e) => {
+    e.stopPropagation()
+    setIsDropdownOpen(false)
+    const fullLabel = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
+    if (!window.confirm(`Permanently delete "${fullLabel}"? This cannot be undone.`)) return
+    try {
+      await api.delete(`/candidates/${row.id}`)
+      if (onDelete) onDelete(row.id)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to delete candidate.')
+    }
+  }, [row.id, row.first_name, row.last_name, onDelete])
 
   const handleEditClick = useCallback((e) => {
     e.stopPropagation()
@@ -457,6 +470,18 @@ Availability: ${row.availability || 'N/A'}`
                 >
                   Comment
                 </button>
+                {user?.role === 'superuser' && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteClick}
+                    className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                    style={{ color: '#ef4444' }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? '#3b0f0f' : '#fef2f2'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    Delete
+                  </button>
+                )}
           </ActionsDropdown>
         </div>
       </div>
