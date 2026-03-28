@@ -662,7 +662,7 @@ async def _create_indexes():
             env=_warmup_env,
             stdout=_warmup_sp.DEVNULL,
             stderr=_warmup_sp.DEVNULL,
-            cwd=str(Path(__file__).parent),
+            cwd=str(_UploadPath(__file__).parent),
         )
         # Don't wait — fire and forget; just importing & loading spaCy warms the cache
         asyncio.get_event_loop().run_in_executor(None, _warmup_proc.wait)
