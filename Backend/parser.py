@@ -8224,23 +8224,21 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
     score = 0
 
     # Resume indicators (each found once counts once).
-    # NOTE: generic words like "company"/"organization" intentionally excluded —
-    # they appear equally in company brochures and are not resume-specific.
     _resume_signals = [
-        (r'\b(work history|employment history|work experience)\b', 3),   # section headings on resumes
+        (r'\b(experience|work history|employment history|work experience)\b', 2),  # "Experience" section heading is very common
         (r'\b(education|academic|university|college|degree|b\.?tech|m\.?tech|m\.?b\.?a|bachelor|master|diploma)\b', 2),
-        (r'\b(skills|expertise|proficienc|technologies|tech stack)\b', 2),
+        (r'\b(skill|skills|expertise|proficienc|technologies|tech stack)\b', 2),
         (r'[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}', 2),          # email
         (r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}', 1), # phone (intl)
         (r'\b(resume|cv|curriculum vitae|biodata)\b', 3),
-        (r'\b(objective|professional summary|career summary|career objective)\b', 3), # personal summary headings
-        (r'\b(certification|certifications|achievement|accomplishment)\b', 1),
+        (r'\b(objective|professional summary|career summary|career objective|summary)\b', 2),
+        (r'\b(project|projects|certification|certifications|achievement|accomplishment)\b', 1),
         (r'\b(linkedin|github|portfolio|stackoverflow)\b', 2),
         (r'\b(years?\s+of\s+experience|worked\s+(?:at|for|with)|responsible\s+for|designation)\b', 2),
-        (r'\b(internship|trainee|freelanc)\b', 2),                   # clearly personal career terms
-        (r'\b(employer|pvt\.?\s*ltd|pvt|ltd|inc\b|llc|corp)\b', 1), # employer context (not generic "company")
+        (r'\b(intern|internship|trainee|freelanc|consultant|engineer|developer|manager|analyst|architect)\b', 1),
+        (r'\b(employer|company|pvt\.?\s*ltd|pvt|ltd|inc\b|llc|corp|organisation|organization)\b', 1),
         (r'\b(reference|hobbies|interests|languages\s+known|personal\s+details|date\s+of\s+birth|dob|nationality|passport)\b', 1),
-        (r'\b(i\s+am\s+a|i\s+have\s+(?:\d+|worked|experience)|my\s+(?:skills|experience|career|background))\b', 2), # first-person personal voice
+        (r'\b(i\s+am\s+a|i\s+have\s+(?:\d+|worked|experience)|my\s+(?:skills|experience|career|background))\b', 2),
     ]
 
     # Strong non-resume indicators — set has_non_resume_signal and subtract
