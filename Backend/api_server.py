@@ -1715,10 +1715,42 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     import sys
     from pathlib import Path
 
+    MAX_CONCURRENT_UPLOADS = 50  # per-user limit to prevent pool exhaustion
+
     allowed = {".pdf", ".doc", ".docx"}
     suffix = Path(file.filename).suffix.lower()
     if suffix not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}. Use PDF, DOC, or DOCX.")
+
+    # Enforce per-user concurrent upload limit
+    auth_header = request.headers.get("Authorization", "")
+    _uploader_id = None
+    if AUTH_AVAILABLE and auth_header.startswith("Bearer "):
+        try:
+            from auth import decode_token, get_user_by_username
+            payload = decode_token(auth_header[7:])
+            uname = payload.get("sub")
+            if uname:
+                u = get_user_by_username(uname)
+                if u:
+                    _uploader_id = u.get("id")
+        except Exception:
+            pass
+
+    if _uploader_id:
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT COUNT(*) as cnt FROM {CANDIDATES_TABLE} WHERE uploaded_by = %s AND resume_parse_status = 'processing'",
+                    (_uploader_id,),
+                )
+                row = cursor.fetchone()
+                processing_count = row["cnt"] if row else 0
+        if processing_count >= MAX_CONCURRENT_UPLOADS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"You already have {processing_count} resumes being processed. Please wait for them to finish before uploading more (limit: {MAX_CONCURRENT_UPLOADS})."
+            )
 
     backend_dir = Path(__file__).resolve().parent
     cache_dir = backend_dir / "resumes_cache"
@@ -1818,9 +1850,6 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 raise
 
     placeholder_id = placeholder_row["id"]
-
-    # Extract auth info before background task
-    auth_header = request.headers.get("Authorization", "")
 
     # Parse in background — returns immediately to frontend
     async def _background_parse():
