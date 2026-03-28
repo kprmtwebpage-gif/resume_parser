@@ -2986,7 +2986,6 @@ async def admin_get_users(request: Request):
 @app.get("/api/admin/upload-log")
 async def admin_upload_log(request: Request):
     """Return every uploaded resume with candidate name, file, uploader, date, and status."""
-    require_admin(request)
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute("""
