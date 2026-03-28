@@ -56,6 +56,9 @@ export function UploadProvider({ children }) {
                 : u
             )
           )
+          setTimeout(() => {
+            setUploads(prev => prev.filter(u => u.id !== upload.id))
+          }, 5000)
           return
         } else if (status.status === 'failed') {
           setUploads(prev =>
@@ -65,6 +68,9 @@ export function UploadProvider({ children }) {
                 : u
             )
           )
+          setTimeout(() => {
+            setUploads(prev => prev.filter(u => u.id !== upload.id))
+          }, 5000)
           return
         }
 
@@ -106,6 +112,9 @@ export function UploadProvider({ children }) {
                 : u
             )
           )
+          setTimeout(() => {
+            setUploads(prev => prev.filter(u => u.id !== upload.id))
+          }, 5000)
           return
         }
         // 500 errors (e.g. pool exhaustion under heavy load) — keep retrying,
@@ -122,6 +131,9 @@ export function UploadProvider({ children }) {
           : u
       )
     )
+    setTimeout(() => {
+      setUploads(prev => prev.filter(u => u.id !== upload.id))
+    }, 5000)
   }, [])
 
   // ---- upload a single file to the backend ----
@@ -207,6 +219,9 @@ export function UploadProvider({ children }) {
               : u
           )
         )
+        setTimeout(() => {
+          setUploads(prev => prev.filter(u => u.id !== upload.id))
+        }, 5000)
       }
     } catch (error) {
       const errorMsg =
@@ -221,6 +236,9 @@ export function UploadProvider({ children }) {
             : u
         )
       )
+      setTimeout(() => {
+        setUploads(prev => prev.filter(u => u.id !== upload.id))
+      }, 5000)
     }
   }, [pollParseStatus])
 
