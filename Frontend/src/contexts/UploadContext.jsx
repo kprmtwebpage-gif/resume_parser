@@ -15,8 +15,15 @@ export function UploadProvider({ children }) {
 
   // ---- poll for background parse completion ----
   const pollParseStatus = useCallback(async (upload, candidateId) => {
-    const maxAttempts = 600 // 600 * 2s = 20 min max — enough for large batches
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Phase 1: wait in queue — no timeout, just keep polling every 2s until
+    // the file leaves the queue (queue_ahead drops to 0 or status changes)
+    // Phase 2: once parsing has started, allow max 90 attempts (3 min) to complete
+    const MAX_PARSE_ATTEMPTS = 90 // 90 * 2s = 3 min — NLP parse is <30s, huge buffer
+    let parseAttempts = 0
+    let parsingStarted = false
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
       await new Promise(r => setTimeout(r, 2000))
       try {
         const status = await checkUploadStatus(candidateId)
@@ -60,11 +67,30 @@ export function UploadProvider({ children }) {
           )
           return
         }
-        // Still processing — update progress animation
+
+        const queueAhead = status.queue_ahead ?? 0
+
+        if (queueAhead === 0) {
+          // File has left the queue — parsing is now active
+          parsingStarted = true
+        }
+
+        if (parsingStarted) {
+          parseAttempts++
+          if (parseAttempts >= MAX_PARSE_ATTEMPTS) {
+            // Parsing took too long after actually starting — mark background
+            break
+          }
+        }
+
+        // Update progress indicator
+        const progressVal = parsingStarted
+          ? Math.min(60 + parseAttempts, 95)
+          : Math.min(30 + Math.floor(parseAttempts / 2), 49)
         setUploads(prev =>
           prev.map(u =>
             u.id === upload.id
-              ? { ...u, progress: Math.min(50 + attempt, 95), queueAhead: status.queue_ahead ?? 0 }
+              ? { ...u, progress: progressVal, queueAhead }
               : u
           )
         )
@@ -210,8 +236,9 @@ export function UploadProvider({ children }) {
 
       setUploads((prev) => [...prev, ...newUploads])
 
-      // 1 at a time — each file fully uploads + parses (turns green) before the next starts
-      const runWithConcurrency = async (items, concurrency = 1) => {
+      // 3 concurrent uploads — fast but each file's timeout only counts from
+      // when it actually starts parsing, not from when it enters the queue
+      const runWithConcurrency = async (items, concurrency = 3) => {
         const queue = [...items]
         const workers = Array.from(
           { length: Math.min(concurrency, items.length) },
@@ -225,7 +252,7 @@ export function UploadProvider({ children }) {
         await Promise.all(workers)
       }
 
-      runWithConcurrency(newUploads, 1)
+      runWithConcurrency(newUploads, 3)
     },
     [uploadFileToBackend]
   )
