@@ -41,6 +41,15 @@ export function UploadProvider({ children }) {
             setUploads(prev => prev.filter(u => u.id !== upload.id))
           }, 5000)
           return
+        } else if (status.status === 'not_a_resume') {
+          setUploads(prev =>
+            prev.map(u =>
+              u.id === upload.id
+                ? { ...u, progress: 100, status: 'not_a_resume', errorMessage: status.message || 'This file does not appear to be a resume' }
+                : u
+            )
+          )
+          return
         } else if (status.status === 'failed') {
           setUploads(prev =>
             prev.map(u =>

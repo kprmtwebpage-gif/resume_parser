@@ -638,11 +638,11 @@ async def _create_indexes():
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'processing'")
+                cur.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE resume_parse_status IN ('processing', 'not_a_resume')")
                 stuck = cur.rowcount
             conn.commit()
         if stuck:
-            print(f"[OK] Deleted {stuck} stuck 'processing' placeholder(s) on startup")
+            print(f"[OK] Deleted {stuck} stuck/non-resume placeholder(s) on startup")
     except Exception as e:
         print(f"[WARN] Could not clean up stuck processing records: {e}")
 
@@ -1790,6 +1790,17 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                 (placeholder_id,),
                             )
                         else:
+                            # Check first: did the parser reject this as not a resume?
+                            _nar_lines = [l for l in stderr_text.splitlines() if "NotAResume:" in l]
+                            if _nar_lines:
+                                _nar_reason = _nar_lines[0].split("NotAResume:", 1)[-1].strip()[:300]
+                                print(f"[NOT-A-RESUME] file={save_name} reason={_nar_reason}", flush=True)
+                                cursor.execute(
+                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'not_a_resume', parse_failure_reason = %s WHERE id = %s",
+                                    (_nar_reason, placeholder_id),
+                                )
+                                conn.commit()
+                                return
                             # Parser returned rc=0 but didn't populate placeholder.
                             # Likely a transient text extraction failure (resource contention).
                             # Retry once with semaphore + delay so other parsers finish first.
@@ -2021,6 +2032,9 @@ async def get_upload_status(candidate_id: int):
             "email": row.get("email"),
             "job_title": row.get("job_title"),
         })
+    elif status == "not_a_resume":
+        failure_reason = row.get("parse_failure_reason")
+        result["message"] = failure_reason or "This file does not appear to be a resume"
     elif status == "failed":
         failure_reason = row.get("parse_failure_reason")
         result["message"] = failure_reason or "Resume parsing failed"

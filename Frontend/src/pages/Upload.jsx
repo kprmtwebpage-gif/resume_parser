@@ -47,6 +47,9 @@ export default function Upload() {
     if (upload.status === 'duplicate') {
       return <InformationCircleIcon className="h-5 w-5 text-amber-500 flex-shrink-0" />
     }
+    if (upload.status === 'not_a_resume') {
+      return <ExclamationCircleIcon className="h-5 w-5 text-amber-500 flex-shrink-0" />
+    }
     if (upload.status === 'background') {
       return <InformationCircleIcon className="h-5 w-5 text-blue-500 flex-shrink-0" />
     }
@@ -71,7 +74,9 @@ export default function Upload() {
       case 'completed':
         return 'Completed'
       case 'duplicate':
-        return 'File already exists'
+        return 'Already in database'
+      case 'not_a_resume':
+        return 'Not a resume'
       case 'failed':
         return 'Failed'
       case 'background':
@@ -92,6 +97,8 @@ export default function Upload() {
         return 'bg-green-500'
       case 'duplicate':
         return 'bg-amber-400'
+      case 'not_a_resume':
+        return 'bg-amber-500'
       case 'failed':
         return 'bg-red-500'
       case 'background':
@@ -176,7 +183,8 @@ export default function Upload() {
             const duplicates = uploads.filter(u => u.status === 'duplicate').length
             const failed = uploads.filter(u => u.status === 'failed').length
             const background = uploads.filter(u => u.status === 'background').length
-            const remaining = total - completed - duplicates - failed - background
+            const notResume = uploads.filter(u => u.status === 'not_a_resume').length
+            const remaining = total - completed - duplicates - failed - background - notResume
             return (
               <div className="mt-6 p-4 rounded-lg bg-blue-50 border border-blue-200">
                 <div className="flex items-center justify-between mb-2">
@@ -190,13 +198,14 @@ export default function Upload() {
                 <div className="h-2 rounded-full bg-blue-200 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-blue-600 transition-all duration-500"
-                    style={{ width: `${((completed + duplicates + failed + background) / total) * 100}%` }}
+                    style={{ width: `${((completed + duplicates + failed + background + notResume) / total) * 100}%` }}
                   />
                 </div>
                 <div className="flex gap-4 mt-2 text-xs text-blue-700">
                   {completed > 0 && <span className="text-green-600">{completed} completed</span>}
                   {duplicates > 0 && <span className="text-amber-600">{duplicates} duplicates</span>}
                   {background > 0 && <span className="text-blue-600">{background} parsing in background</span>}
+                  {notResume > 0 && <span className="text-amber-700">{notResume} not a resume</span>}
                   {failed > 0 && <span className="text-red-600">{failed} failed</span>}
                   {remaining > 0 && <span>{remaining} pending</span>}
                 </div>
@@ -216,8 +225,8 @@ export default function Upload() {
                       : upload.status === 'completed'
                       ? 'bg-green-50 border-green-200'
                       : upload.status === 'duplicate'
-                      ? 'bg-amber-50 border-amber-200'
-                      : upload.status === 'background'
+                      ? 'bg-amber-50 border-amber-200'                      : upload.status === 'not_a_resume'
+                      ? 'bg-amber-50 border-amber-300'                      : upload.status === 'background'
                       ? 'bg-blue-50 border-blue-200'
                       : upload.status === 'pending'
                       ? 'bg-neutral-50 border-neutral-300'
@@ -229,6 +238,7 @@ export default function Upload() {
                       upload.status === 'failed' ? 'text-red-500' 
                       : upload.status === 'completed' ? 'text-green-500'
                       : upload.status === 'duplicate' ? 'text-amber-500'
+                      : upload.status === 'not_a_resume' ? 'text-amber-600'
                       : upload.status === 'background' ? 'text-blue-500'
                       : 'text-neutral-500'
                     }`} />
@@ -237,7 +247,7 @@ export default function Upload() {
                         <span className={`text-sm font-medium truncate ${
                           upload.status === 'failed' ? 'text-red-800' 
                           : upload.status === 'completed' ? 'text-green-800'
-                          : upload.status === 'duplicate' ? 'text-amber-800'
+                          : upload.status === 'duplicate' ? 'text-amber-800'                          : upload.status === 'not_a_resume' ? 'text-amber-700'                          : upload.status === 'not_a_resume' ? 'text-amber-900'
                           : upload.status === 'background' ? 'text-blue-800'
                           : 'text-neutral-800'
                         }`}>
@@ -247,6 +257,12 @@ export default function Upload() {
                           {getStatusIcon(upload)}
                         </div>
                       </div>
+                      {/* Not-a-resume info */}
+                      {upload.status === 'not_a_resume' && (
+                        <p className="mt-1 text-xs text-amber-700 leading-tight break-words">
+                          {upload.errorMessage || 'This file does not appear to be a resume. Please upload a valid CV or resume.'}
+                        </p>
+                      )}
                       {/* Inline failure reason */}
                       {upload.status === 'failed' && upload.errorMessage && (
                         <p className="mt-1 text-xs text-red-600 leading-tight break-words">
@@ -266,6 +282,7 @@ export default function Upload() {
                           upload.status === 'failed' ? 'bg-red-200' 
                           : upload.status === 'completed' ? 'bg-green-200'
                           : upload.status === 'duplicate' ? 'bg-amber-200'
+                          : upload.status === 'not_a_resume' ? 'bg-amber-200'
                           : upload.status === 'background' ? 'bg-blue-200'
                           : 'bg-neutral-200'
                         }`}>
