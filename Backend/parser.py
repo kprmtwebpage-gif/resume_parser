@@ -8272,6 +8272,13 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         (r'\b(our\s+company|our\s+organization|our\s+organisation|our\s+business|our\s+firm)\b', -5),
         (r'\b(contact\s+us|get\s+in\s+touch|reach\s+us|visit\s+us|follow\s+us)\b', -3),
         (r'\b(translation\s+services|travel\s+(agency|packages|tours)|event\s+(management|planning|organiz))\b', -5),
+        # Court / legal filings and exhibits
+        (r'\b(plaintiff|defendant|docket\s+no\.?|case\s+no\.?\s*\d|court\s+of|judgment|affidavit|deposition|subpoena)\b', -5),
+        (r'\b(exhibit\s+[a-z0-9]|filing\s+no|court\s+filing|legal\s+exhibit|sworn\s+statement)\b', -5),
+        # HR opportunity / requisition templates (not resumes)
+        (r'\b(opportunity\s+id|oppt\.?\s*id|req(?:uisition)?\s*(?:id|no|#)|opening\s+id|position\s+id|job\s+id\b)\b', -6),
+        # Call centre / agent operational documents
+        (r'\b(outbound\s+calls?|inbound\s+calls?|call\s+center\s+(?:agent|script|guide)|contact\s+center\s+agent)\b', -4),
     ]
 
     has_non_resume_signal = False
@@ -8284,12 +8291,17 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
             score += weight  # weight is negative
             has_non_resume_signal = True
 
-    # Reject rule 1: zero or negative score — no resume signals at all.
-    if score <= 0:
-        return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
+# Reject rule 1: net-negative score (non-resume signals outweigh resume signals).
+        # Score == 0 with no non-resume flags gets benefit of the doubt (sparse/non-English PDF).
+        if score < 0:
+            if filename:
+                print(f"[FILTER REJECT] file={filename!r} score={score} non_resume_signal={has_non_resume_signal}", flush=True)
+            return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
 
-    # Reject rule 2: weak resume score AND an explicit non-resume document type detected.
-    if score < 3 and has_non_resume_signal:
+        # Reject rule 2: zero/weak score AND an explicit non-resume document type detected.
+        if score < 3 and has_non_resume_signal:
+            if filename:
+                print(f"[FILTER REJECT] file={filename!r} score={score} non_resume_signal={has_non_resume_signal}", flush=True)
         return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
 
     return True, ""
@@ -9336,6 +9348,7 @@ def main() -> int:
             # --- end DEBUG ---
 
             _existing_id = None
+            _stale_match_id = None  # tracks the old row when UPDATE fails (sha256 conflict)
             # 1) Email match — strongest identity signal
             if email and email.strip():
                 cursor.execute(
@@ -9345,6 +9358,7 @@ def main() -> int:
                 _row = cursor.fetchone()
                 if _row:
                     _existing_id = _row[0] if isinstance(_row, (tuple, list)) else _row.get("id", _row[0])
+                    _stale_match_id = _existing_id
 
             # 2) Name match — fallback when email is missing or different
             if _existing_id is None and _safe_fn and _safe_ln and len(_safe_ln) > 1:
@@ -9358,6 +9372,7 @@ def main() -> int:
                 _row = cursor.fetchone()
                 if _row:
                     _existing_id = _row[0] if isinstance(_row, (tuple, list)) else _row.get("id", _row[0])
+                    _stale_match_id = _existing_id
 
             if _existing_id is not None:
                 # Update the existing candidate row instead of inserting a duplicate.
@@ -9387,13 +9402,23 @@ def main() -> int:
                     )
                     cursor.execute("RELEASE SAVEPOINT sp_update_existing")
                     candidate_id = _existing_id
+                    _stale_match_id = None  # UPDATE succeeded — no old row to delete
                 except psycopg2.errors.UniqueViolation:
                     # SHA256 already claimed by placeholder row — fall through
                     # to the ON CONFLICT INSERT which will update the placeholder.
                     cursor.execute("ROLLBACK TO SAVEPOINT sp_update_existing")
                     _existing_id = None
+                    # _stale_match_id stays set — we must delete the old row before INSERT
+                    # so the email unique constraint doesn't fire on the placeholder update.
 
             if _existing_id is None:
+                if _stale_match_id is not None:
+                    # The old email/name-matched row couldn't be updated (sha256 conflict
+                    # with placeholder). Delete it so the INSERT can set email on the
+                    # placeholder without hitting the unique email index.
+                    cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (_stale_match_id,))
+                    cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (_stale_match_id,))
+                    _stale_match_id = None
                 cursor.execute(
                     f"""
                     INSERT INTO {CANDIDATES_TABLE}
