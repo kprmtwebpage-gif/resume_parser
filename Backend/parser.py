@@ -8210,10 +8210,25 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
       Score < 2 AND at least one strong non-resume signal → rejected
       Otherwise → accepted (benefit of the doubt)
     """
-    # Filename fast-path: if the file is explicitly named as a resume/CV, trust it.
+    # Web uploads always come from a human intentionally uploading their resume.
+    if os.getenv("IS_WEB_UPLOAD") == "1":
+        return True, ""
+
+    # Filename fast-path: use broad Unicode normalization (handles em/en dashes,
+    # accented chars, any non-ASCII punctuation) so that filenames like
+    # "A Resume – John Doe.pdf" or "2026 STEPHANIE COOPER RESUME - Cigna.pdf"
+    # are always trusted regardless of content.
     if filename:
-        fname = re.sub(r'[_\-\s]+', ' ', Path(filename).stem).lower()
-        if re.search(r'\b(resume|cv|curriculum.?vitae|biodata)\b', fname):
+        # Strip ALL non-alphanumeric characters → plain word tokens
+        fname = re.sub(r'[^a-z0-9]+', ' ', Path(filename).stem.lower()).strip()
+        if re.search(r'\b(resume|cv|curriculum vitae|biodata)\b', fname):
+            return True, ""
+        # Also trust files whose names contain job-title indicators (developer,
+        # engineer, manager, analyst, etc.) — these are almost always CVs.
+        if re.search(
+            r'\b(developer|engineer|manager|analyst|architect|consultant|specialist|designer|fullstack|full stack|devops|qa|tester|programmer)\b',
+            fname,
+        ):
             return True, ""
 
     if not text or len(text.strip()) < 80:

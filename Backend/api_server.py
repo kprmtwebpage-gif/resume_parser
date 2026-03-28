@@ -1746,6 +1746,8 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         env["RESUME_PROCESS_ONLY"] = save_name
         env["QUIET"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
+        # Web-uploaded files are always resumes — skip the non-resume content filter
+        env["IS_WEB_UPLOAD"] = "1"
 
         def _run_parser():
             return _sp.run(
