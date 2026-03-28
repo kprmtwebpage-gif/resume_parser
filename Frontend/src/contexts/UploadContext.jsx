@@ -15,7 +15,7 @@ export function UploadProvider({ children }) {
 
   // ---- poll for background parse completion ----
   const pollParseStatus = useCallback(async (upload, candidateId) => {
-    const maxAttempts = 240 // 240 * 2s = 8 min max
+    const maxAttempts = 600 // 600 * 2s = 20 min max — enough for large batches
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(r => setTimeout(r, 2000))
       try {
@@ -210,8 +210,8 @@ export function UploadProvider({ children }) {
 
       setUploads((prev) => [...prev, ...newUploads])
 
-      // max 2 concurrent uploads
-      const runWithConcurrency = async (items, concurrency = 2) => {
+      // max 4 concurrent uploads
+      const runWithConcurrency = async (items, concurrency = 4) => {
         const queue = [...items]
         const workers = Array.from(
           { length: Math.min(concurrency, items.length) },
@@ -225,7 +225,7 @@ export function UploadProvider({ children }) {
         await Promise.all(workers)
       }
 
-      runWithConcurrency(newUploads, 2)
+      runWithConcurrency(newUploads, 4)
     },
     [uploadFileToBackend]
   )
