@@ -53,6 +53,9 @@ except ImportError as e:
     CHATBOT_AVAILABLE = False
     create_resume_chatbot = None
 
+# Load environment variables BEFORE importing modules that read env vars at import time
+load_dotenv()
+
 # Import auth module
 try:
     from auth import router as auth_router, get_current_user, get_current_admin, decode_token, get_user_by_username
@@ -63,9 +66,6 @@ except ImportError as e:
     auth_router = None
     decode_token = None
     get_user_by_username = None
-
-# Load environment variables
-load_dotenv()
 
 # Get database configuration from environment
 CANDIDATES_TABLE = os.getenv("NEW_CANDIDATES_TABLE", "candidate_profile")
