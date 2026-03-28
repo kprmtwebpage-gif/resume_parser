@@ -901,9 +901,10 @@ async def get_candidates(
             cursor.execute(data_sql, data_params)
             rows = cursor.fetchall()
 
-            # Get grand total — ALL candidates deduplicated by email (includes failed/processing)
+            # Get grand total — completed candidates only, deduplicated by email
             cursor.execute(f"""SELECT COUNT(*) as total FROM {CANDIDATES_TABLE} c
-                WHERE (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                WHERE c.resume_parse_status = 'completed'
+                  AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
                     SELECT 1 FROM {CANDIDATES_TABLE} newer
                     WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
                 ))""")
@@ -1821,11 +1822,10 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             _nar_lines = [l for l in stderr_text.splitlines() if "NotAResume:" in l]
                             if _nar_lines:
                                 _nar_reason = _nar_lines[0].split("NotAResume:", 1)[-1].strip()[:300]
-                                print(f"[NOT-A-RESUME] file={save_name} reason={_nar_reason}", flush=True)
-                                cursor.execute(
-                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'not_a_resume', parse_failure_reason = %s WHERE id = %s",
-                                    (_nar_reason, placeholder_id),
-                                )
+                                print(f"[NOT-A-RESUME] file={save_name} reason={_nar_reason} — deleting placeholder", flush=True)
+                                # Delete the placeholder so not-a-resume files are never stored in DB
+                                cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
+                                cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
                                 conn.commit()
                                 return
                             # Parser returned rc=0 but didn't populate placeholder.

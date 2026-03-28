@@ -8155,41 +8155,46 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
     formatting are never blocked.
 
     Scoring:
-      Score >= 4  → accepted as a resume
-      Score < 4   → rejected with reason
+      Score >= 2  → accepted as a resume
+      Score < 2 AND at least one strong non-resume signal → rejected
+      Otherwise → accepted (benefit of the doubt)
     """
     if not text or len(text.strip()) < 80:
         # Too little text to decide — accept and let the parser handle it.
         return True, ""
 
-    t = text[:5000].lower()
+    t = text[:6000].lower()
     score = 0
 
-    # Strong resume indicators (each found once counts once).
+    # Resume indicators (each found once counts once).
     _resume_signals = [
-        (r'\b(experience|work history|employment history|work experience)\b', 4),
-        (r'\b(education|academic|university|college|degree|b\.?tech|m\.?tech|m\.?b\.?a)\b', 3),
-        (r'\b(skill|skills|expertise|proficienc)\b', 2),
-        (r'[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}', 3),          # email
-        (r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}', 2), # phone
-        (r'\b(resume|cv|curriculum vitae)\b', 4),
-        (r'\b(objective|professional summary|career summary|profile)\b', 2),
-        (r'\b(project|projects|certification|certifications|achievement)\b', 1),
-        (r'\b(linkedin|github|portfolio)\b', 2),
-        (r'\b(years?\s+of\s+experience|worked\s+(?:at|for|with)|responsible\s+for)\b', 2),
+        (r'\b(experience|work history|employment history|work experience)\b', 3),
+        (r'\b(education|academic|university|college|degree|b\.?tech|m\.?tech|m\.?b\.?a|bachelor|master|diploma)\b', 2),
+        (r'\b(skill|skills|expertise|proficienc|technologies|tech stack)\b', 2),
+        (r'[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}', 2),          # email
+        (r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}', 1), # phone (intl)
+        (r'\b(resume|cv|curriculum vitae|biodata)\b', 3),
+        (r'\b(objective|professional summary|career summary|summary|profile)\b', 2),
+        (r'\b(project|projects|certification|certifications|achievement|accomplishment)\b', 1),
+        (r'\b(linkedin|github|portfolio|stackoverflow)\b', 2),
+        (r'\b(years?\s+of\s+experience|worked\s+(?:at|for|with)|responsible\s+for|role|designation)\b', 2),
+        (r'\b(intern|internship|trainee|freelanc|consultant|engineer|developer|manager|analyst|architect)\b', 1),
+        (r'\b(company|employer|organization|organisation|pvt|ltd|inc|llc|corp)\b', 1),
+        (r'\b(reference|hobbies|interests|languages\s+known|personal\s+details|date\s+of\s+birth|dob|nationality|passport)\b', 1),
     ]
 
-    # Strong non-resume indicators — a single match subtracts heavily.
+    # Strong non-resume indicators — only trigger rejection when the document
+    # is clearly a different type of document with near-zero resume signals.
     _non_resume_signals = [
-        (r'\b(invoice|invoices|invoice\s+number|inv\s*#|bill\s+to|amount\s+due|total\s+amount|subtotal|tax\s+amount)\b', -8),
-        (r'\b(purchase\s+order|p\.?o\.?\s+number|vendor|buyer|ship\s+to|payment\s+terms|net\s+\d+\s+days)\b', -7),
-        (r'\b(contract|agreement|whereas|hereinafter|party\s+of\s+the|witnesseth|in\s+witness\s+whereof)\b', -6),
-        (r'\b(table\s+of\s+contents|chapter\s+\d|bibliography|references\s+cited|et\s+al\.)\b', -5),
-        (r'\b(patient\s+name|diagnosis|prescription|medication|dosage|medical\s+record)\b', -6),
-        (r'\b(dear\s+sir|dear\s+madam|to\s+whom\s+it\s+may\s+concern|yours\s+sincerely|yours\s+faithfully)\b', -4),
-        (r'\b(quantity|unit\s+price|line\s+item|item\s+description|product\s+code|sku)\b', -5),
+        (r'\b(invoice|invoices|invoice\s+number|inv\s*#|bill\s+to|amount\s+due|total\s+amount|subtotal|tax\s+amount)\b', -6),
+        (r'\b(purchase\s+order|p\.?o\.?\s+number|ship\s+to|payment\s+terms|net\s+\d+\s+days)\b', -5),
+        (r'\b(whereas|hereinafter|party\s+of\s+the|witnesseth|in\s+witness\s+whereof)\b', -5),
+        (r'\b(table\s+of\s+contents|chapter\s+\d|bibliography|references\s+cited)\b', -4),
+        (r'\b(patient\s+name|diagnosis|prescription|medication|dosage|medical\s+record)\b', -5),
+        (r'\b(quantity|unit\s+price|line\s+item|item\s+description|product\s+code|sku)\b', -4),
     ]
 
+    has_non_resume_signal = False
     for pattern, weight in _resume_signals:
         if re.search(pattern, t):
             score += weight
@@ -8197,8 +8202,11 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
     for pattern, weight in _non_resume_signals:
         if re.search(pattern, t):
             score += weight  # weight is negative
+            has_non_resume_signal = True
 
-    if score < 4:
+    # Only reject if score is very low AND there's a clear non-resume signal.
+    # This prevents false positives on genuine resumes with unusual formatting.
+    if score < 2 and has_non_resume_signal:
         return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
     return True, ""
 
