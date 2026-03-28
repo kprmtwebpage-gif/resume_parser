@@ -2810,14 +2810,19 @@ async def admin_upload_metrics(request: Request):
                   ))""")
             total_resumes = cursor.fetchone()["total"]
 
-            # Get daily upload counts per user for last 90 days (completed only)
-            cursor.execute("""
-                SELECT DATE(parsed_at) as day, uploaded_by, COUNT(*) as cnt
-                FROM candidate_profile
-                WHERE parsed_at IS NOT NULL AND uploaded_by IS NOT NULL
-                  AND resume_parse_status = 'completed'
-                  AND parsed_at >= CURRENT_DATE - INTERVAL '90 days'
-                GROUP BY DATE(parsed_at), uploaded_by
+            # Get daily upload counts per user for last 90 days (completed + deduped by email)
+            # Uses same NOT EXISTS dedup as /candidates so numbers match People Search.
+            cursor.execute(f"""
+                SELECT DATE(c.parsed_at) as day, c.uploaded_by, COUNT(*) as cnt
+                FROM {CANDIDATES_TABLE} c
+                WHERE c.parsed_at IS NOT NULL AND c.uploaded_by IS NOT NULL
+                  AND c.resume_parse_status = 'completed'
+                  AND c.parsed_at >= CURRENT_DATE - INTERVAL '90 days'
+                  AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                    SELECT 1 FROM {CANDIDATES_TABLE} newer
+                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
+                  ))
+                GROUP BY DATE(c.parsed_at), c.uploaded_by
                 ORDER BY day
             """)
             daily_rows = cursor.fetchall()
