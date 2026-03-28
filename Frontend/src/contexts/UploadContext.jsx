@@ -24,7 +24,7 @@ export function UploadProvider({ children }) {
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      await new Promise(r => setTimeout(r, 2000))
+      await new Promise(r => setTimeout(r, 1000))
       try {
         const status = await checkUploadStatus(candidateId)
         if (status.status === 'completed') {

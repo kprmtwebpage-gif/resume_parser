@@ -2055,33 +2055,50 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                             (rpid,),
                                         )
                                         rpdata = cur2.fetchone()
-                                        cur2.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
+                                        # Check placeholder still exists before migrating skills
+                                        # (a concurrent dedup may have already deleted it)
                                         cur2.execute(
-                                            f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
-                                            (placeholder_id, rpid),
+                                            f"SELECT id FROM {CANDIDATES_TABLE} WHERE id = %s",
+                                            (placeholder_id,),
                                         )
-                                        cur2.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (rpid,))
-                                        if rpdata:
+                                        placeholder_still_exists = cur2.fetchone() is not None
+                                        if placeholder_still_exists:
+                                            cur2.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
                                             cur2.execute(
-                                                f"""UPDATE {CANDIDATES_TABLE}
-                                                    SET first_name=%s, last_name=%s, address=%s,
-                                                        phone=%s, email=%s, qualification=%s,
-                                                        visa_support=%s, work_authorization_type=%s,
-                                                        linkedin=%s, profile_picture_url=%s,
-                                                        parsed_at=%s, resume_parse_status='completed'
-                                                    WHERE id=%s""",
-                                                (rpdata["first_name"], rpdata["last_name"],
-                                                 rpdata["address"], rpdata["phone"],
-                                                 rpdata["email"], rpdata["qualification"],
-                                                 rpdata["visa_support"], rpdata["work_authorization_type"],
-                                                 rpdata["linkedin"], rpdata["profile_picture_url"],
-                                                 rpdata["parsed_at"], placeholder_id),
+                                                f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
+                                                (placeholder_id, rpid),
                                             )
+                                            cur2.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (rpid,))
+                                            if rpdata:
+                                                cur2.execute(
+                                                    f"""UPDATE {CANDIDATES_TABLE}
+                                                        SET first_name=%s, last_name=%s, address=%s,
+                                                            phone=%s, email=%s, qualification=%s,
+                                                            visa_support=%s, work_authorization_type=%s,
+                                                            linkedin=%s, profile_picture_url=%s,
+                                                            parsed_at=%s, resume_parse_status='completed'
+                                                        WHERE id=%s""",
+                                                    (rpdata["first_name"], rpdata["last_name"],
+                                                     rpdata["address"], rpdata["phone"],
+                                                     rpdata["email"], rpdata["qualification"],
+                                                     rpdata["visa_support"], rpdata["work_authorization_type"],
+                                                     rpdata["linkedin"], rpdata["profile_picture_url"],
+                                                     rpdata["parsed_at"], placeholder_id),
+                                                )
+                                            else:
+                                                cur2.execute(
+                                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='completed' WHERE id=%s",
+                                                    (placeholder_id,),
+                                                )
                                         else:
-                                            cur2.execute(
-                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='completed' WHERE id=%s",
-                                                (placeholder_id,),
-                                            )
+                                            # Placeholder was deleted by concurrent dedup — use rpid directly
+                                            print(f"[RETRY MERGE] placeholder_id={placeholder_id} gone, using rpid={rpid} as final", flush=True)
+                                            if rpdata:
+                                                cur2.execute(
+                                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status='completed' WHERE id=%s",
+                                                    (rpid,),
+                                                )
+                                            final_candidate_id = rpid
                                     else:
                                         cur2.execute(
                                             f"SELECT parsed_at FROM {CANDIDATES_TABLE} WHERE id = %s",
