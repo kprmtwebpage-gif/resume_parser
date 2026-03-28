@@ -1,0 +1,521 @@
+/* ============================================================
+   Word-like TipTap Editor — Complete Stylesheet
+   ============================================================ */
+
+/* ── A4 Page Container ──────────────────────────────────── */
+.word-editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #e8e8e8;
+  overflow: hidden;
+}
+
+.word-editor-page-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 30px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.word-editor-page {
+  width: 794px;
+  min-height: 1123px;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  padding: 72px 72px 72px 72px;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.word-editor-page .tiptap {
+  outline: none;
+  min-height: 900px;
+  font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+.word-editor-page .tiptap:focus {
+  outline: none;
+}
+
+/* ── Paragraph & Headings ─────────────────────────────── */
+.word-editor-page .tiptap p {
+  margin: 0 0 4px 0;
+}
+
+.word-editor-page .tiptap h1 {
+  font-size: 20pt;
+  font-weight: 700;
+  margin: 12px 0 6px;
+  color: #1a1a1a;
+}
+
+.word-editor-page .tiptap h2 {
+  font-size: 16pt;
+  font-weight: 700;
+  margin: 10px 0 4px;
+  color: #1a1a1a;
+}
+
+.word-editor-page .tiptap h3 {
+  font-size: 13pt;
+  font-weight: 700;
+  margin: 8px 0 4px;
+  color: #1a1a1a;
+}
+
+/* ── Table Styles ─────────────────────────────────────── */
+.word-editor-page .tiptap table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  margin: 8px 0;
+}
+
+.word-editor-page .tiptap td,
+.word-editor-page .tiptap th {
+  border: 1px solid #414141;
+  padding: 6px 8px;
+  position: relative;
+  vertical-align: top;
+  min-width: 40px;
+  font-size: 11pt;
+}
+
+.word-editor-page .tiptap th {
+  font-weight: 700;
+  background-color: #f0f0f0;
+}
+
+/* ── Table Selection ──────────────────────────────────── */
+.word-editor-page .tiptap .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(55, 119, 255, 0.15);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ── Table column resize handle ───────────────────────── */
+.word-editor-page .tiptap .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background-color: #3b82f6;
+  z-index: 10;
+}
+
+.word-editor-page .tiptap .tableWrapper {
+  overflow-x: auto;
+}
+
+.word-editor-page .tiptap.resize-cursor {
+  cursor: col-resize;
+}
+
+/* ── Placeholder ──────────────────────────────────────── */
+.word-editor-page .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #adb5bd;
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+}
+
+/* ── Template Variables ───────────────────────────────── */
+.word-editor-page .tiptap .template-variable {
+  background: #dbeafe;
+  color: #1d4ed8;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 10pt;
+}
+
+/* ── Toolbar ──────────────────────────────────────────── */
+.word-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: #f3f3f3;
+  border-bottom: 1px solid #d1d1d1;
+  min-height: 40px;
+  user-select: none;
+}
+
+.word-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 4px;
+}
+
+.word-toolbar-group + .word-toolbar-group {
+  border-left: 1px solid #ccc;
+}
+
+.word-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: all 0.1s;
+  position: relative;
+}
+
+.word-toolbar-btn:hover {
+  background: #e0e0e0;
+  border-color: #c0c0c0;
+}
+
+.word-toolbar-btn.active {
+  background: #cfe2ff;
+  border-color: #9ec5fe;
+  color: #0d6efd;
+}
+
+.word-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.word-toolbar-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.word-toolbar-select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  background: #fff;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+  outline: none;
+}
+
+.word-toolbar-select:hover {
+  border-color: #999;
+}
+
+/* ── Color Picker Button ─────────────────────────────── */
+.word-toolbar-color-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.word-toolbar-color-swatch {
+  width: 14px;
+  height: 3px;
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 1px;
+}
+
+.word-toolbar-color-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: repeat(8, 22px);
+  gap: 3px;
+}
+
+.word-toolbar-color-cell {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.word-toolbar-color-cell:hover {
+  transform: scale(1.2);
+  border-color: #666;
+  z-index: 1;
+}
+
+/* ── Table Grid Picker ────────────────────────────────── */
+.table-grid-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  z-index: 100;
+  user-select: none;
+}
+
+.table-grid-picker-label {
+  font-size: 12px;
+  color: #333;
+  margin-bottom: 6px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.table-grid-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 20px);
+  gap: 2px;
+}
+
+.table-grid-picker-cell {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.08s;
+}
+
+.table-grid-picker-cell.highlighted {
+  background: #3b82f6;
+  border-color: #2563eb;
+}
+
+/* ── Context Menu ─────────────────────────────────────── */
+.word-context-menu {
+  position: fixed;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 4px 0;
+  z-index: 9999;
+  min-width: 200px;
+  font-size: 13px;
+  animation: ctxFadeIn 0.12s ease;
+}
+
+@keyframes ctxFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.word-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  color: #374151;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.word-context-menu-item:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.word-context-menu-item.disabled {
+  color: #aaa;
+  cursor: default;
+}
+
+.word-context-menu-item.disabled:hover {
+  background: transparent;
+  color: #aaa;
+}
+
+.word-context-menu-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 0;
+}
+
+.word-context-menu-icon {
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* ── Variable Chip Bar ────────────────────────────────── */
+.variable-chip-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+  background: #fafafa;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.variable-chip {
+  padding: 3px 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  font-size: 11px;
+  font-family: monospace;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.variable-chip:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+/* ── Status bar ───────────────────────────────────────── */
+.word-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: #f3f3f3;
+  border-top: 1px solid #d1d1d1;
+  font-size: 11px;
+  color: #666;
+  min-height: 24px;
+}
+
+/* ── Full-screen modal ────────────────────────────────── */
+.word-editor-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  animation: modalBgIn 0.2s ease;
+}
+
+@keyframes modalBgIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.word-editor-modal {
+  width: 95vw;
+  height: 92vh;
+  background: #f0f0f0;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: modalIn 0.25s ease;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.word-editor-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid #d1d1d1;
+}
+
+.word-editor-modal-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.word-editor-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.word-editor-modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: #9ca3af;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.word-editor-modal-close:hover {
+  color: #374151;
+  background: #f3f4f6;
+}
+
+/* ── Preview modal ────────────────────────────────────── */
+.word-preview-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 30px 0;
+  display: flex;
+  justify-content: center;
+  background: #e8e8e8;
+}
+
+.word-preview-page {
+  width: 794px;
+  min-height: 1123px;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  padding: 72px;
+  box-sizing: border-box;
+  font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+.word-preview-page table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.word-preview-page td,
+.word-preview-page th {
+  border: 1px solid #414141;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.word-preview-page th {
+  font-weight: 700;
+  background-color: #f0f0f0;
+}

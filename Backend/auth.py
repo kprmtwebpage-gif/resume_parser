@@ -27,6 +27,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 import bcrypt
 import psycopg2
 import psycopg2.extras

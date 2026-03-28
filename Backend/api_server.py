@@ -67,6 +67,9 @@ except ImportError as e:
     decode_token = None
     get_user_by_username = None
 
+# Load environment variables
+load_dotenv()
+
 # Get database configuration from environment
 CANDIDATES_TABLE = os.getenv("NEW_CANDIDATES_TABLE", "candidate_profile")
 SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
@@ -237,6 +240,28 @@ try:
     app.include_router(company_jobs_router)
 except Exception as e:
     print(f"[WARN] Company jobs module not available: {e}")
+
+# ── Customer module router ────────────────────────────────────
+try:
+    from customer_module.routes import router as customer_router      # noqa: E402
+    from customer_module.database import init_db as init_customer_db
+    app.include_router(customer_router)
+    init_customer_db()
+    print("[OK] Customer module loaded")
+except Exception as e:
+    print(f"[WARN] Customer module not available: {e}")
+
+# ── Email module router ───────────────────────────────────────
+try:
+    from email_module.routes import router as email_router            # noqa: E402
+    from email_module.template_routes import router as template_router  # noqa: E402
+    from email_module.database import init_db as init_email_db
+    app.include_router(email_router)
+    app.include_router(template_router)
+    init_email_db()
+    print("[OK] Email module loaded")
+except Exception as e:
+    print(f"[WARN] Email module not available: {e}")
 
 # ── Job Applications API ───────────────────────────────────────
 from fastapi import Form as FastAPIForm
@@ -598,15 +623,7 @@ async def _create_indexes():
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_first_name ON {CANDIDATES_TABLE}(LOWER(first_name))")
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_last_name ON {CANDIDATES_TABLE}(LOWER(last_name))")
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_email ON {CANDIDATES_TABLE}(LOWER(email))")
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_resume_sha256 ON {CANDIDATES_TABLE}(resume_sha256)")
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_parsed_at ON {CANDIDATES_TABLE}(parsed_at DESC)")
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SKILLS_TABLE}_job_title_lower ON {SKILLS_TABLE}(LOWER(job_title))")
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_parse_status ON {CANDIDATES_TABLE}(resume_parse_status)")
-                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SKILLS_TABLE}_candidate_id ON {SKILLS_TABLE}(candidate_id)")
-                # Add resume_parse_status column if missing
+                # Add missing columns FIRST before creating indexes that depend on them
                 cur.execute(f"""
                     DO $$ BEGIN
                         ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN resume_parse_status TEXT DEFAULT 'completed';
@@ -641,6 +658,15 @@ async def _create_indexes():
                     EXCEPTION WHEN duplicate_column THEN NULL;
                     END $$
                 """)
+                # Now create indexes (resume_parse_status column guaranteed to exist)
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_first_name ON {CANDIDATES_TABLE}(LOWER(first_name))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_last_name ON {CANDIDATES_TABLE}(LOWER(last_name))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_email ON {CANDIDATES_TABLE}(LOWER(email))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_resume_sha256 ON {CANDIDATES_TABLE}(resume_sha256)")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_parsed_at ON {CANDIDATES_TABLE}(parsed_at DESC)")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SKILLS_TABLE}_job_title_lower ON {SKILLS_TABLE}(LOWER(job_title))")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_parse_status ON {CANDIDATES_TABLE}(resume_parse_status)")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SKILLS_TABLE}_candidate_id ON {SKILLS_TABLE}(candidate_id)")
             conn.commit()
         print("[OK] Performance indexes and schema verified")
     except Exception as e:

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { UploadProvider } from './contexts/UploadContext'
@@ -22,6 +22,11 @@ import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
 import LoginPage from './login/LoginPage.jsx'
+import CustomerList from './pages/customer/CustomerList.jsx'
+import CustomerCreate from './pages/customer/CustomerCreate.jsx'
+import CustomerDetail from './pages/customer/CustomerDetail.jsx'
+import SendMail from './pages/SendMail.jsx'
+import TemplatesPage from './pages/TemplatesPage.jsx'
 
 function AdminGuard({ children }) {
   try {
@@ -30,6 +35,12 @@ function AdminGuard({ children }) {
     if (user?.role === 'superuser' || user?.role === 'admin') return children
   } catch {}
   return <Navigate to="/" replace />
+}
+
+function SearchPageChatbot() {
+  const location = useLocation()
+  if (location.pathname !== '/') return null
+  return <ChatLauncher />
 }
 
 function AppContent() {
@@ -102,6 +113,14 @@ function AppContent() {
         <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
         <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
         <Route path="/jobs/:jobId/applied" element={<DashboardLayout><AppliedCandidatesPage /></DashboardLayout>} />
+        {/* Customer routes */}
+        <Route path="/customer" element={<DashboardLayout><CustomerList /></DashboardLayout>} />
+        <Route path="/customer/new" element={<DashboardLayout><CustomerCreate /></DashboardLayout>} />
+        <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
+        {/* Send Mail page */}
+        <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
+        {/* Templates page (part of Customer module) */}
+        <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
         {/* Admin routes — protected by role check */}
         <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
           <Route index element={<DashboardOverview />} />
@@ -114,7 +133,7 @@ function AppContent() {
         {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      <ChatLauncher />
+      <SearchPageChatbot />
     </UploadProvider>
   )
 }
