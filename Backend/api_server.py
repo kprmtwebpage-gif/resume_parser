@@ -1774,6 +1774,9 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             (parser_id,),
                         )
                         parsed_data = cursor.fetchone()
+                        # Delete placeholder's skills row first (if any) to avoid PK conflict,
+                        # then re-point parser's skills row to placeholder_id.
+                        cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
                         cursor.execute(
                             f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
                             (placeholder_id, parser_id),
@@ -1870,6 +1873,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                             (rpid,),
                                         )
                                         rpdata = cur2.fetchone()
+                                        cur2.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
                                         cur2.execute(
                                             f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
                                             (placeholder_id, rpid),
@@ -2796,7 +2800,14 @@ async def admin_upload_metrics(request: Request):
             user_ids = list(user_map.keys())
 
             # Grand total of successfully parsed resumes in DB
-            cursor.execute(f"SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'")
+            # Apply the same email-dedup logic as the /candidates endpoint
+            # so admin count matches what the homepage shows.
+            cursor.execute(f"""SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE} c
+                WHERE c.resume_parse_status = 'completed'
+                  AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                    SELECT 1 FROM {CANDIDATES_TABLE} newer
+                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
+                  ))""")
             total_resumes = cursor.fetchone()["total"]
 
             # Get daily upload counts per user for last 90 days (completed only)
