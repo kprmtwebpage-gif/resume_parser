@@ -258,7 +258,7 @@ export function UploadProvider({ children }) {
 
       setUploads((prev) => [...prev, ...newUploads])
 
-      // 8 concurrent uploads — feeds the 12-slot server parse queue
+      // 8 concurrent uploads — matches the 8-slot server parse queue (1 per CPU core)
       const runWithConcurrency = async (items, concurrency = 8) => {
         console.log(`[Upload DEBUG] Starting upload of ${items.length} files with ${Math.min(concurrency, items.length)} workers`)
         items.forEach((u, i) => console.log(`[Upload DEBUG] Queued [${i+1}/${items.length}]: ${u.file.name} (${u.file.size} bytes)`))
