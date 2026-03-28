@@ -152,7 +152,7 @@ export default function SearchPeople() {
         keywords: filters.keywords || undefined,
         experienceFrom: filters.experienceFrom ?? undefined,
         experienceTo: filters.experienceTo ?? undefined,
-        limit: 1000,
+        limit: 10000,
         offset: 0 
       })
       const nextRows = Array.isArray(data) ? data : Array.isArray(data?.candidates) ? data.candidates : []
@@ -432,6 +432,11 @@ export default function SearchPeople() {
     }
   }
 
+  // Remove a deleted candidate from the local list without a full reload
+  const handleDelete = useCallback((deletedId) => {
+    setAllRows(prev => prev.filter(r => r.id !== deletedId))
+  }, [])
+
   // Listen for candidate selection from chatbot
   useEffect(() => {
     const unsubscribe = onCandidateSelected((event) => {
@@ -591,6 +596,7 @@ export default function SearchPeople() {
             onOpen={openProfile}
             onDownload={markAsDownloaded}
             onEdit={openEditProfile}
+            onDelete={handleDelete}
           />
 
           <div 

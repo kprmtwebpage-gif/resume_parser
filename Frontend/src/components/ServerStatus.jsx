@@ -71,10 +71,10 @@ export default function ServerStatus() {
           <div className="rounded-lg bg-neutral-50 p-3 font-mono text-xs border border-neutral-200">
             <div className="mb-1 font-semibold text-neutral-700">Status:</div>
             <div className="text-neutral-600">
-              Frontend: <span className="text-green-600">✓ Running</span> (http://localhost:5175)
+              Frontend: <span className="text-green-600">✓ Running</span> ({window.location.origin})
             </div>
             <div className="text-neutral-600">
-              Backend: <span className="text-red-600">✗ {backendStatus === 'checking' ? 'Checking...' : 'Offline'}</span> (http://localhost:8000)
+              Backend: <span className="text-red-600">✗ {backendStatus === 'checking' ? 'Checking...' : 'Offline'}</span> (API server)
             </div>
           </div>
 
@@ -95,7 +95,7 @@ export default function ServerStatus() {
             Retry Connection
           </button>
           <a 
-            href="http://localhost:8000/docs" 
+            href={`${window.location.origin}/docs`}
             target="_blank" 
             rel="noreferrer"
             className="btn-secondary"

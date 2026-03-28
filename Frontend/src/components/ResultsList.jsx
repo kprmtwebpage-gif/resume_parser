@@ -1,7 +1,7 @@
 import { useTheme } from '../contexts/ThemeContext'
 import ProfileCard from './ProfileCard.jsx'
 
-export default function ResultsList({ rows, downloadedIds, onOpen, onDownload, onEdit, selectedIds, onToggleSelect, onToggleSelectAll }) {
+export default function ResultsList({ rows, downloadedIds, onOpen, onDownload, onEdit, onDelete, selectedIds, onToggleSelect, onToggleSelectAll }) {
   const { colors, isDark } = useTheme()
   
   const allSelected = rows.length > 0 && rows.every(r => selectedIds.has(r.id))
@@ -46,6 +46,7 @@ export default function ResultsList({ rows, downloadedIds, onOpen, onDownload, o
             onOpen={(tab) => onOpen(row.id, tab)}
             onDownload={() => onDownload(row.id)}
             onEdit={() => onEdit(row.id)}
+            onDelete={onDelete}
           />
         ))}
 

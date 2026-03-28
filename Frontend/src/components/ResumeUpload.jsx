@@ -5,7 +5,7 @@ import {
   XMarkIcon, 
   CheckCircleIcon, 
   ExclamationCircleIcon,
-  InformationCircleIcon 
+  InformationCircleIcon,
 } from '@heroicons/react/24/outline'
 import { uploadResume, fetchStats } from '../services/api'
 
@@ -13,7 +13,6 @@ export default function ResumeUpload({ onUploadSuccess }) {
   const [uploads, setUploads] = useState([])
   const [isDragging, setIsDragging] = useState(false)
   const [resumeCount, setResumeCount] = useState(null)
-  const [hoveredError, setHoveredError] = useState(null)
   const fileInputRef = useRef(null)
 
   // Fetch resume count on mount and after successful uploads
@@ -325,25 +324,15 @@ export default function ResumeUpload({ onUploadSuccess }) {
                       {upload.name}
                     </span>
                     <div className="flex items-center gap-1">
-                      {/* Error info icon with tooltip */}
-                      {upload.status === 'failed' && upload.errorMessage && (
-                        <div 
-                          className="relative"
-                          onMouseEnter={() => setHoveredError(upload.id)}
-                          onMouseLeave={() => setHoveredError(null)}
-                        >
-                          <InformationCircleIcon className="h-4 w-4 text-red-500 cursor-help" />
-                          {hoveredError === upload.id && (
-                            <div className="absolute right-0 bottom-full mb-1 z-50 w-48 p-2 bg-neutral-900 text-white text-xs rounded shadow-lg">
-                              {upload.errorMessage}
-                              <div className="absolute right-2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-neutral-900" />
-                            </div>
-                          )}
-                        </div>
-                      )}
                       {getStatusIcon(upload)}
                     </div>
                   </div>
+                  {/* Inline failure reason */}
+                  {upload.status === 'failed' && upload.errorMessage && (
+                    <p className="mt-1 text-[11px] text-red-600 leading-tight break-words">
+                      Reason: {upload.errorMessage}
+                    </p>
+                  )}
                   
                   {/* Progress Bar */}
                   <div className="mt-1.5">

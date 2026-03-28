@@ -99,7 +99,7 @@ class ChangePassword(BaseModel):
 # â”€â”€ Connection pool (shared across all auth operations) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _auth_pool = psycopg2.pool.ThreadedConnectionPool(
     minconn=2,
-    maxconn=10,
+    maxconn=20,
     **DB_CONFIG,
     cursor_factory=psycopg2.extras.RealDictCursor,
 )
@@ -154,6 +154,28 @@ def _ensure_login_sessions_table():
 # Ensure table exists at import time
 try:
     _ensure_login_sessions_table()
+except Exception:
+    pass
+
+
+def _migrate_users_columns():
+    """Idempotent: add last_ip and resumes_uploaded columns to users if missing."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS resumes_uploaded INT DEFAULT 0")
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        _put_conn(conn)
+
+try:
+    _migrate_users_columns()
 except Exception:
     pass
 
@@ -861,9 +883,9 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
             cur.execute("SELECT COUNT(*) AS total_users FROM users")
             total_users = cur.fetchone()["total_users"]
 
-            # Total resumes uploaded (from candidate_profile table)
+            # Total successfully parsed resumes
             try:
-                cur.execute(f"SELECT COUNT(*) AS total_resumes FROM {CANDIDATES_TABLE}")
+                cur.execute(f"SELECT COUNT(*) AS total_resumes FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'")
                 total_resumes = cur.fetchone()["total_resumes"]
             except Exception:
                 conn.rollback()
@@ -880,13 +902,14 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
             # Average resumes per user
             avg_resumes = round(total_resumes / total_users, 1) if total_users > 0 else 0
 
-            # Parse success rate (resumes with at least a name parsed)
+            # Parse success rate (among completed resumes, how many have a name)
             try:
                 cur.execute(f"""
                     SELECT 
                         COUNT(*) AS total,
                         COUNT(*) FILTER (WHERE first_name IS NOT NULL AND first_name != '') AS parsed
                     FROM {CANDIDATES_TABLE}
+                    WHERE resume_parse_status = 'completed'
                 """)
                 row = cur.fetchone()
                 success_rate = round((row["parsed"] / row["total"] * 100), 1) if row["total"] > 0 else 0
@@ -911,12 +934,14 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
             try:
                 cur.execute(f"""
                     SELECT COUNT(*) AS cnt FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= date_trunc('week', CURRENT_DATE)
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= date_trunc('week', CURRENT_DATE)
                 """)
                 resumes_this_week = cur.fetchone()["cnt"]
                 cur.execute(f"""
                     SELECT COUNT(*) AS cnt FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
                       AND parsed_at < date_trunc('week', CURRENT_DATE)
                 """)
                 resumes_last_week = cur.fetchone()["cnt"]
@@ -964,12 +989,13 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 for r in cur.fetchall()
             ]
 
-            # Resume upload trend (daily for last 90 days)
+            # Resume upload trend (daily for last 90 days — completed only)
             try:
                 cur.execute(f"""
                     SELECT DATE(parsed_at) AS date, COUNT(*) AS uploads
                     FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= NOW() - INTERVAL '90 days'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= NOW() - INTERVAL '90 days'
                     GROUP BY DATE(parsed_at)
                     ORDER BY date ASC
                 """)
@@ -986,7 +1012,8 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 cur.execute(f"""
                     SELECT date_trunc('week', parsed_at)::date AS week, COUNT(*) AS uploads
                     FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= NOW() - INTERVAL '12 weeks'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= NOW() - INTERVAL '12 weeks'
                     GROUP BY date_trunc('week', parsed_at)
                     ORDER BY week ASC
                 """)
@@ -1003,7 +1030,8 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 cur.execute(f"""
                     SELECT date_trunc('month', parsed_at)::date AS month, COUNT(*) AS uploads
                     FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= NOW() - INTERVAL '12 months'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= NOW() - INTERVAL '12 months'
                     GROUP BY date_trunc('month', parsed_at)
                     ORDER BY month ASC
                 """)

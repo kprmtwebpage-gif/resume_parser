@@ -12,7 +12,6 @@ import { useUpload } from '../contexts/UploadContext'
 export default function Upload() {
   const { uploads, fileInputRef, handleFileSelect, removeUpload, retryUpload } = useUpload()
   const [isDragging, setIsDragging] = useState(false)
-  const [hoveredError, setHoveredError] = useState(null)
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault()
@@ -48,6 +47,12 @@ export default function Upload() {
     if (upload.status === 'duplicate') {
       return <InformationCircleIcon className="h-5 w-5 text-amber-500 flex-shrink-0" />
     }
+    if (upload.status === 'not_a_resume') {
+      return <ExclamationCircleIcon className="h-5 w-5 text-amber-500 flex-shrink-0" />
+    }
+    if (upload.status === 'background') {
+      return <InformationCircleIcon className="h-5 w-5 text-blue-500 flex-shrink-0" />
+    }
     if (upload.status === 'failed') {
       return <ExclamationCircleIcon className="h-5 w-5 text-red-500 flex-shrink-0" />
     }
@@ -69,12 +74,19 @@ export default function Upload() {
       case 'completed':
         return 'Completed'
       case 'duplicate':
-        return 'File already exists'
+        return 'Already in database'
+      case 'not_a_resume':
+        return 'Not a Resume'
       case 'failed':
         return 'Failed'
+      case 'background':
+        return 'Parsing in background'
       case 'pending':
         return 'Queued'
       default:
+        if (upload.queueAhead > 0) {
+          return `Parsing — ${upload.queueAhead} file${upload.queueAhead === 1 ? '' : 's'} ahead`
+        }
         return 'Uploading...'
     }
   }
@@ -85,8 +97,12 @@ export default function Upload() {
         return 'bg-green-500'
       case 'duplicate':
         return 'bg-amber-400'
+      case 'not_a_resume':
+        return 'bg-amber-500'
       case 'failed':
         return 'bg-red-500'
+      case 'background':
+        return 'bg-blue-400'
       case 'pending':
         return 'bg-neutral-400'
       default:
@@ -166,7 +182,9 @@ export default function Upload() {
             const completed = uploads.filter(u => u.status === 'completed').length
             const duplicates = uploads.filter(u => u.status === 'duplicate').length
             const failed = uploads.filter(u => u.status === 'failed').length
-            const remaining = total - completed - duplicates - failed
+            const background = uploads.filter(u => u.status === 'background').length
+            const notResume = uploads.filter(u => u.status === 'not_a_resume').length
+            const remaining = total - completed - duplicates - failed - background - notResume
             return (
               <div className="mt-6 p-4 rounded-lg bg-blue-50 border border-blue-200">
                 <div className="flex items-center justify-between mb-2">
@@ -180,12 +198,14 @@ export default function Upload() {
                 <div className="h-2 rounded-full bg-blue-200 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-blue-600 transition-all duration-500"
-                    style={{ width: `${((completed + duplicates + failed) / total) * 100}%` }}
+                    style={{ width: `${((completed + duplicates + failed + background + notResume) / total) * 100}%` }}
                   />
                 </div>
                 <div className="flex gap-4 mt-2 text-xs text-blue-700">
                   {completed > 0 && <span className="text-green-600">{completed} completed</span>}
                   {duplicates > 0 && <span className="text-amber-600">{duplicates} duplicates</span>}
+                  {background > 0 && <span className="text-blue-600">{background} parsing in background</span>}
+                  {notResume > 0 && <span className="text-amber-700">{notResume} not a resume</span>}
                   {failed > 0 && <span className="text-red-600">{failed} failed</span>}
                   {remaining > 0 && <span>{remaining} pending</span>}
                 </div>
@@ -205,7 +225,9 @@ export default function Upload() {
                       : upload.status === 'completed'
                       ? 'bg-green-50 border-green-200'
                       : upload.status === 'duplicate'
-                      ? 'bg-amber-50 border-amber-200'
+                      ? 'bg-amber-50 border-amber-200'                      : upload.status === 'not_a_resume'
+                      ? 'bg-amber-50 border-amber-300'                      : upload.status === 'background'
+                      ? 'bg-blue-50 border-blue-200'
                       : upload.status === 'pending'
                       ? 'bg-neutral-50 border-neutral-300'
                       : 'bg-neutral-50 border-neutral-200'
@@ -216,6 +238,8 @@ export default function Upload() {
                       upload.status === 'failed' ? 'text-red-500' 
                       : upload.status === 'completed' ? 'text-green-500'
                       : upload.status === 'duplicate' ? 'text-amber-500'
+                      : upload.status === 'not_a_resume' ? 'text-amber-600'
+                      : upload.status === 'background' ? 'text-blue-500'
                       : 'text-neutral-500'
                     }`} />
                     <div className="flex-1 min-w-0">
@@ -223,30 +247,34 @@ export default function Upload() {
                         <span className={`text-sm font-medium truncate ${
                           upload.status === 'failed' ? 'text-red-800' 
                           : upload.status === 'completed' ? 'text-green-800'
-                          : upload.status === 'duplicate' ? 'text-amber-800'
+                          : upload.status === 'duplicate' ? 'text-amber-800'                          : upload.status === 'not_a_resume' ? 'text-amber-700'                          : upload.status === 'not_a_resume' ? 'text-amber-900'
+                          : upload.status === 'background' ? 'text-blue-800'
                           : 'text-neutral-800'
                         }`}>
                           {upload.name}
                         </span>
                         <div className="flex items-center gap-2">
-                          {upload.status === 'failed' && upload.errorMessage && (
-                            <div 
-                              className="relative"
-                              onMouseEnter={() => setHoveredError(upload.id)}
-                              onMouseLeave={() => setHoveredError(null)}
-                            >
-                              <InformationCircleIcon className="h-5 w-5 text-red-500 cursor-help" />
-                              {hoveredError === upload.id && (
-                                <div className="absolute right-0 bottom-full mb-1 z-50 w-64 p-2 bg-neutral-900 text-white text-xs rounded shadow-lg">
-                                  {upload.errorMessage}
-                                  <div className="absolute right-2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-neutral-900" />
-                                </div>
-                              )}
-                            </div>
-                          )}
                           {getStatusIcon(upload)}
                         </div>
                       </div>
+                      {/* Not-a-resume info */}
+                      {upload.status === 'not_a_resume' && (
+                        <p className="mt-1 text-xs text-amber-700 leading-tight break-words">
+                          {upload.errorMessage || 'Corrupt Format / Not a Resume. Please check and upload.'}
+                        </p>
+                      )}
+                      {/* Inline failure reason */}
+                      {upload.status === 'failed' && upload.errorMessage && (
+                        <p className="mt-1 text-xs text-red-600 leading-tight break-words">
+                          Reason: {upload.errorMessage}
+                        </p>
+                      )}
+                      {/* Background-parsing info */}
+                      {upload.status === 'background' && upload.errorMessage && (
+                        <p className="mt-1 text-xs text-blue-600 leading-tight break-words">
+                          {upload.errorMessage}
+                        </p>
+                      )}
                       
                       {/* Progress Bar */}
                       <div className="mt-2">
@@ -254,6 +282,8 @@ export default function Upload() {
                           upload.status === 'failed' ? 'bg-red-200' 
                           : upload.status === 'completed' ? 'bg-green-200'
                           : upload.status === 'duplicate' ? 'bg-amber-200'
+                          : upload.status === 'not_a_resume' ? 'bg-amber-200'
+                          : upload.status === 'background' ? 'bg-blue-200'
                           : 'bg-neutral-200'
                         }`}>
                           <div 
@@ -266,6 +296,7 @@ export default function Upload() {
                             upload.status === 'failed' ? 'text-red-600' 
                             : upload.status === 'completed' ? 'text-green-600'
                             : upload.status === 'duplicate' ? 'text-amber-600'
+                            : upload.status === 'background' ? 'text-blue-600'
                             : 'text-neutral-500'
                           }`}>
                             {getStatusText(upload)}

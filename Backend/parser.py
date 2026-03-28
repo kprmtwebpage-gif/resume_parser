@@ -5,6 +5,7 @@ import logging.handlers
 import os
 import re
 import shutil
+import sys
 import time
 import unicodedata
 import warnings
@@ -408,8 +409,8 @@ def _pdf_should_try_ocr_first_page(extracted_text: str) -> bool:
     if not t:
         return True
     # Very short first-page text is a strong sign of a scanned/image PDF.
-    # A real resume's first page has at minimum ~100 chars of name+contact+title.
-    if len(t) < 100:
+    # Raised threshold to 200 chars — reduces false OCR triggers on formatted PDFs.
+    if len(t) < 200:
         return True
     # If we already got an email or a phone-like run, skip OCR.
     if "@" in t:
@@ -418,8 +419,9 @@ def _pdf_should_try_ocr_first_page(extracted_text: str) -> bool:
         digits = re.sub(r"\D", "", m.group(0))
         if len(digits) >= 10:
             return False
-    # Otherwise, try OCR. Many PDFs extract the body but drop the header/contact line entirely.
-    return True
+    # Do NOT default to OCR — if text is present but lacks contact info,
+    # it's more likely a text-based PDF with a graphical header. Skip OCR.
+    return False
 
 
 def _pdf_ocr_page_text(page) -> str:
@@ -472,6 +474,26 @@ def _pdf_ocr_page_text(page) -> str:
         return txt.strip()
     except Exception:
         return ""
+
+
+def _is_pdf_password_protected(path: str) -> bool:
+    """Return True if the PDF requires a password to read."""
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+        doc = pdfium.PdfDocument(path)
+        # If we can open it without a password, it's not protected
+        _ = doc.get_page_count()
+        return False
+    except Exception as e:
+        if "password" in str(e).lower() or "encrypted" in str(e).lower():
+            return True
+    # Fallback: check the raw bytes for /Encrypt marker
+    try:
+        with open(path, "rb") as f:
+            header = f.read(4096)
+        return b"/Encrypt" in header
+    except Exception:
+        return False
 
 
 def _extract_via_pypdfium2(path: str) -> str:
@@ -714,6 +736,17 @@ def extract_pdf_with_timeout(path: str, *, timeout_seconds: float) -> tuple[str,
         # requested. Use Process.join(timeout) for a reliable hard timeout.
         proc.join(timeout=float(timeout_seconds))
         if proc.is_alive():
+            # pdfplumber timed out (often due to OCR on complex PDFs in Docker).
+            # Terminate the hung child and try pypdfium2 which is much faster
+            # and does not trigger OCR.
+            proc.terminate()
+            proc.join(timeout=5)
+            _fb = _extract_via_pypdfium2(path)
+            if _fb.strip():
+                _fb_links = extract_links_from_pdf(path)
+                _fb_pages = _fb.split("\x0c") if "\x0c" in _fb else [_fb]
+                _fb_first = _fb_pages[0].strip() if _fb_pages else _fb[:3000]
+                return _fb, _fb_links, _fb_first
             raise TimeoutError(f"PDF extraction timed out after {timeout_seconds}s")
 
         if not recv_end.poll(0.1):
@@ -2211,6 +2244,89 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "bazaar",
         "needed",
         "package",
+        # ── Phase-14: marketing / business / section-heading tokens ──
+        # These terms appear as document section titles, not person names.
+        "promotional",
+        "channels",
+        "marketing",
+        "campaign",
+        "campaigns",
+        "brand",
+        "branding",
+        "digital",
+        "media",
+        "social",
+        "advertising",
+        "analytics",
+        "insights",
+        "metrics",
+        "kpi",
+        "roi",
+        "revenue",
+        "sales",
+        "growth",
+        "acquisition",
+        "retention",
+        "funnel",
+        "conversion",
+        "engagement",
+        "content",
+        "seo",
+        "sem",
+        "ppc",
+        "crm",
+        "erp",
+        # Business/operational section headings
+        "overview",
+        "highlights",
+        "introduction",
+        "vision",
+        "mission",
+        "scope",
+        "approach",
+        "methodology",
+        "deliverable",
+        "deliverables",
+        "outcome",
+        "outcomes",
+        "impact",
+        "contribution",
+        "contributions",
+        "accomplishment",
+        "accomplishments",
+        "recommendation",
+        "recommendations",
+        "background",
+        # ── Statistical / analytical / research terms that appear as section headings ──
+        "statistical",
+        "analysis",
+        "analytical",
+        "quantitative",
+        "qualitative",
+        "regression",
+        "modeling",
+        "modelling",
+        "forecasting",
+        "visualization",
+        "visualisation",
+        "reporting",
+        "dashboard",
+        "research",
+        "study",
+        "findings",
+        "results",
+        "industry",
+        "domain",
+        "functional",
+        "technical",
+        "expertise",
+        "competencies",
+        "competency",
+        "areas",
+        "proficiency",
+        "proficiencies",
+        "specialization",
+        "specialisation",
     }
     section_words = {
         "professional summary",
@@ -2249,6 +2365,24 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "tools and technologies",
         "technical summary",
         "core skills",
+        # Statistical / analytical / research section headings
+        "statistical analysis",
+        "data analysis",
+        "data analytics",
+        "quantitative analysis",
+        "qualitative analysis",
+        "business analysis",
+        "financial analysis",
+        "areas of expertise",
+        "areas of interest",
+        "key competencies",
+        "core competencies",
+        "technical expertise",
+        "domain expertise",
+        "functional expertise",
+        "research interests",
+        "specialization",
+        "specialisation",
     }
 
     _raw_lines = non_empty_lines(text)
@@ -2467,6 +2601,33 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         "accenture",
         "deloitte",
         "novoc",
+        # ── Phase-14: marketing / business section-heading tokens ──
+        "promotional",
+        "channels",
+        "marketing",
+        "campaign",
+        "brand",
+        "branding",
+        "digital",
+        "media",
+        "social",
+        "advertising",
+        "analytics",
+        "insights",
+        "metrics",
+        "roi",
+        "revenue",
+        "sales",
+        "growth",
+        "acquisition",
+        "retention",
+        "funnel",
+        "conversion",
+        "engagement",
+        "content",
+        "seo",
+        "sem",
+        "ppc",
     }
 
     # Scan up to 50 lines: the first-page / header-block can be quite tall
@@ -8029,6 +8190,139 @@ def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = 
     return extract_job_title(text, first_name=first_name, last_name=last_name)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-resume detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
+    """Conservative non-resume detector.
+
+    Returns (is_resume, rejection_reason).  Only rejects documents that are
+    clearly NOT resumes — invoices, contracts, medical records, books, etc.
+    When in doubt it returns (True, ""), so genuine resumes with unusual
+    formatting are never blocked.
+
+    If the filename explicitly contains 'resume' or 'cv' the file is always
+    accepted regardless of content scoring.
+
+    Scoring:
+      Score >= 2  → accepted as a resume
+      Score < 2 AND at least one strong non-resume signal → rejected
+      Otherwise → accepted (benefit of the doubt)
+    """
+    # Web uploads always come from a human intentionally uploading their resume.
+    if os.getenv("IS_WEB_UPLOAD") == "1":
+        return True, ""
+
+    # Filename fast-path: use broad Unicode normalization (handles em/en dashes,
+    # accented chars, any non-ASCII punctuation) so that filenames like
+    # "A Resume – John Doe.pdf" or "2026 STEPHANIE COOPER RESUME - Cigna.pdf"
+    # are always trusted regardless of content.
+    if filename:
+        # Strip ALL non-alphanumeric characters → plain word tokens
+        fname = re.sub(r'[^a-z0-9]+', ' ', Path(filename).stem.lower()).strip()
+        if re.search(r'\b(resume|cv|curriculum vitae|biodata)\b', fname):
+            return True, ""
+        # Also trust files whose names contain job-title indicators (developer,
+        # engineer, manager, analyst, etc.) — these are almost always CVs.
+        if re.search(
+            r'\b(developer|engineer|manager|analyst|architect|consultant|specialist|designer|fullstack|full stack|devops|qa|tester|programmer)\b',
+            fname,
+        ):
+            return True, ""
+
+    if not text or len(text.strip()) < 80:
+        # Too little text to decide — accept and let the parser handle it.
+        return True, ""
+
+    t = text[:6000].lower()
+    score = 0
+
+    # Resume indicators (each found once counts once).
+    _resume_signals = [
+        (r'\b(experience|work history|employment history|work experience)\b', 2),  # "Experience" section heading is very common
+        (r'\b(education|academic|university|college|degree|b\.?tech|m\.?tech|m\.?b\.?a|bachelor|master|diploma)\b', 2),
+        (r'\b(skill|skills|expertise|proficienc|technologies|tech stack)\b', 2),
+        (r'[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}', 2),          # email
+        (r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}', 1), # phone (intl)
+        (r'\b(resume|cv|curriculum vitae|biodata)\b', 3),
+        (r'\b(objective|professional summary|career summary|career objective|summary)\b', 2),
+        (r'\b(project|projects|certification|certifications|achievement|accomplishment)\b', 1),
+        (r'\b(linkedin|github|portfolio|stackoverflow)\b', 2),
+        (r'\b(years?\s+of\s+experience|worked\s+(?:at|for|with)|responsible\s+for|designation)\b', 2),
+        (r'\b(intern|internship|trainee|freelanc|consultant|engineer|developer|manager|analyst|architect)\b', 1),
+        (r'\b(employer|company|pvt\.?\s*ltd|pvt|ltd|inc\b|llc|corp|organisation|organization)\b', 1),
+        (r'\b(reference|hobbies|interests|languages\s+known|personal\s+details|date\s+of\s+birth|dob|nationality|passport)\b', 1),
+        (r'\b(i\s+am\s+a|i\s+have\s+(?:\d+|worked|experience)|my\s+(?:skills|experience|career|background))\b', 2),
+    ]
+
+    # Strong non-resume indicators — set has_non_resume_signal and subtract
+    # from score when the document is clearly NOT a resume.
+    _non_resume_signals = [
+        # Invoices / billing
+        (r'\b(invoice|invoices|invoice\s+number|inv\s*#|bill\s+to|amount\s+due|total\s+amount|subtotal|tax\s+amount)\b', -6),
+        # Purchase orders
+        (r'\b(purchase\s+order|p\.?o\.?\s+number|ship\s+to|payment\s+terms|net\s+\d+\s+days)\b', -5),
+        # Legal contracts
+        (r'\b(whereas|hereinafter|party\s+of\s+the|witnesseth|in\s+witness\s+whereof)\b', -5),
+        # Books / academic papers
+        (r'\b(table\s+of\s+contents|chapter\s+\d|bibliography|references\s+cited)\b', -4),
+        # Medical records
+        (r'\b(patient\s+name|diagnosis|prescription|medication|dosage|medical\s+record)\b', -5),
+        # Item/product lists
+        (r'\b(quantity|unit\s+price|line\s+item|item\s+description|product\s+code|sku)\b', -4),
+        # Job postings / JDs (employer advertising a role, not a person's resume)
+        (r'\b(we\s+are\s+(hiring|looking\s+for|seeking)|job\s+(posting|advertisement|ad)\b|apply\s+now|apply\s+here|how\s+to\s+apply)\b', -5),
+        (r'\b(equal\s+opportunity\s+employer|eoe|benefits\s+package|compensation\s+package|salary\s+range|we\s+offer)\b', -5),
+        (r'\b(about\s+the\s+(role|position|team)|job\s+requirements|ideal\s+candidate|must\s+have\s+experience)\b', -4),
+        # Certificates / awards
+        (r'\b(certificate\s+of\s+(completion|achievement|participation)|this\s+is\s+to\s+certify|has\s+successfully\s+completed|awarded\s+to)\b', -5),
+        # Cover letters — weight reduced: combined resume+cover-letter PDFs are common and genuine.
+        (r'\b(dear\s+(sir|madam|hiring\s+manager)|to\s+whom\s+it\s+may\s+concern)\b', -1),
+        # Company / organisation profiles and brochures — reduced weights because
+        # genuine resumes frequently include company descriptions in experience sections.
+        (r'\b(about\s+us|our\s+services|our\s+team|our\s+clients|our\s+expertise|our\s+mission|our\s+vision|our\s+values)\b', -2),
+        (r'\b(we\s+(provide|offer|specialize|specialise|deliver|develop|support|help)\b)', -2),
+        (r'\b(company\s+profile|organisation\s+profile|organizational\s+profile|business\s+profile|company\s+overview)\b', -6),
+        (r'\b(established\s+in|founded\s+in|since\s+\d{4}|incorporated\s+in)\b', -2),
+        (r'\b(our\s+company|our\s+organization|our\s+organisation|our\s+business|our\s+firm)\b', -2),
+        (r'\b(contact\s+us|get\s+in\s+touch|reach\s+us|visit\s+us|follow\s+us)\b', -1),
+        (r'\b(translation\s+services|travel\s+(agency|packages|tours)|event\s+(management|planning|organiz))\b', -5),
+        # Court / legal filings and exhibits
+        (r'\b(plaintiff|defendant|docket\s+no\.?|case\s+no\.?\s*\d|court\s+of|judgment|affidavit|deposition|subpoena)\b', -5),
+        (r'\b(exhibit\s+[a-z0-9]|filing\s+no|court\s+filing|legal\s+exhibit|sworn\s+statement)\b', -5),
+        # HR opportunity / agent operational docs — only very specific phrases unlikely in real resumes
+        (r'\b(opportunity\s+id|oppt\.?\s*id|requisition\s+(?:id|no|#))\b', -5),
+    ]
+
+    has_non_resume_signal = False
+    non_resume_hit_count = 0
+    for pattern, weight in _resume_signals:
+        if re.search(pattern, t):
+            score += weight
+
+    for pattern, weight in _non_resume_signals:
+        if re.search(pattern, t):
+            score += weight  # weight is negative
+            has_non_resume_signal = True
+            non_resume_hit_count += 1
+
+    # Evaluate AFTER accumulating all signals — never reject mid-loop.
+    # Genuine resumes must not be lost; only reject when evidence is overwhelming.
+
+    # Rule 1: Strongly net-negative score — non-resume content clearly dominates.
+    if score < -5:
+        print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
+        return False, "Corrupt Format / Not a Resume. Please check and upload."
+
+    # Rule 2: Net-negative score AND multiple distinct non-resume signal types hit.
+    if score < 0 and non_resume_hit_count >= 2:
+        print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
+        return False, "Corrupt Format / Not a Resume. Please check and upload."
+
+    return True, ""
+
+
 def main() -> int:
     conn = psycopg2.connect(
         dbname=os.getenv("DB_NAME"),
@@ -8087,9 +8381,9 @@ def main() -> int:
 
     # Seconds; set to 0 to disable. Helps avoid hangs on malformed PDFs.
     try:
-        pdf_timeout_seconds = float(os.getenv("PDF_TIMEOUT_SECONDS", "45"))
+        pdf_timeout_seconds = float(os.getenv("PDF_TIMEOUT_SECONDS", "120"))
     except ValueError:
-        pdf_timeout_seconds = 45.0
+        pdf_timeout_seconds = 120.0
 
     # Optional: allow processing only a subset of files (used by retry loops).
     # NOTE: Do NOT split on commas — filenames can legitimately contain commas.
@@ -8136,6 +8430,10 @@ def main() -> int:
                 if suffix == ".pdf":
                     if not quiet:
                         print(f"Parsing: {safe_file}")
+                    # Detect password-protected PDFs before attempting full extraction
+                    # to give a clear failure reason instead of silent empty-text failure.
+                    if _is_pdf_password_protected(path):
+                        raise ValueError("PDF is password-protected or encrypted — cannot extract text")
                     resume_text, links, first_page_text = extract_pdf_with_timeout(path, timeout_seconds=pdf_timeout_seconds)
                 elif suffix == ".doc":
                     if not quiet:
@@ -8157,6 +8455,9 @@ def main() -> int:
                 )
                 if not quiet:
                     print(f"Skipped (parse error): {safe_file} ({e.__class__.__name__})")
+                # Always emit to stderr so api_server.py can capture the reason
+                # regardless of the QUIET flag (which only suppresses stdout).
+                print(f"Skipped: {safe_file} reason={e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
                 _log.warning("SKIPPED [%s] reason=%s timeout=%s", file, e.__class__.__name__, is_timeout)
                 continue
 
@@ -8167,6 +8468,24 @@ def main() -> int:
             # Fix common OCR artifacts (ligature drops, bracket substitutions,
             # CID placeholders) so all extractors see corrected text.
             resume_text = ocr_cleanup(resume_text)
+
+            # ── Non-resume guard ─────────────────────────────────────────────
+            # Reject files that are clearly not resumes (invoices, contracts,
+            # books, medical records, etc.) before expensive extraction.
+            _is_resume_doc, _not_resume_reason = _is_likely_resume(resume_text, filename=file)
+            if not _is_resume_doc:
+                report["skipped"].append({"file": file, "reason": _not_resume_reason})
+                if not quiet:
+                    print(f"Skipped (not a resume): {safe_file}")
+                print(
+                    f"Skipped: {safe_file} reason=NotAResume: {_not_resume_reason}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                _log.warning("NOT-A-RESUME [%s]", file)
+                continue
+            # ── end non-resume guard ─────────────────────────────────────────
+
             extraction_text = resume_text + ("\n" + "\n".join(links) if links else "")
             resume_text_norm = resume_text.lower()
 
@@ -8504,6 +8823,53 @@ def main() -> int:
                 "lucent",
                 "sprint",
                 "comcast",
+                # ── Phase-14: marketing / business section-heading tokens ──
+                "promotional",
+                "channels",
+                "marketing",
+                "campaign",
+                "campaigns",
+                "brand",
+                "branding",
+                "digital",
+                "media",
+                "social",
+                "advertising",
+                "analytics",
+                "insights",
+                "metrics",
+                "roi",
+                "revenue",
+                "sales",
+                "growth",
+                "acquisition",
+                "retention",
+                "funnel",
+                "conversion",
+                "engagement",
+                "content",
+                "seo",
+                "sem",
+                "ppc",
+                "overview",
+                "highlights",
+                "introduction",
+                "vision",
+                "mission",
+                "scope",
+                "approach",
+                "deliverable",
+                "deliverables",
+                "outcome",
+                "outcomes",
+                "impact",
+                "contribution",
+                "contributions",
+                "accomplishment",
+                "accomplishments",
+                "recommendation",
+                "recommendations",
+                "background",
             }
             us_state_names = {v.casefold() for v in US_STATE_ABBR_TO_FULL.values()}
             # US state abbreviation codes (2-letter) that should not be last names.
@@ -8833,7 +9199,7 @@ def main() -> int:
 
                     # Education: enrich structured entries when rule-based returned none
                     _llm_edu = _llm.get("education") or []
-                    if _llm_edu and not education_entries:
+                    if _llm_edu and (not education_entries or all(not e.get("degree") for e in education_entries)):
                         education_entries = [
                             {
                                 "degree":            e.get("normalized_degree") or e.get("degree") or "",
@@ -8851,6 +9217,34 @@ def main() -> int:
                         ) if education_entries else _edu_structured
                         _log.info("LLM_ENRICH [%s] education: %d entries",
                                   file, len(education_entries))
+
+                    # Location: use LLM location when regex found nothing or only an
+                    # unreliable area-code-based guess (specific city but possibly wrong country)
+                    _llm_loc = (_llm.get("location") or "").strip()
+                    _null_loc_values = {"null", "none", "n/a", "unknown", "not found", "not available", ""}
+                    if _llm_loc and _llm_loc.lower() not in _null_loc_values and len(_llm_loc) >= 5:
+                        if not address:
+                            # Regex found nothing — fill from LLM
+                            _log.info("LLM_ENRICH [%s] location (fill): %s", file, _llm_loc)
+                            address = _llm_loc
+                        elif address.count(",") < 1:
+                            # Regex found a bare token — upgrade to LLM's richer result
+                            _log.info("LLM_ENRICH [%s] location (upgrade): %s -> %s", file, address, _llm_loc)
+                            address = _llm_loc
+                        else:
+                            # Both exist — prefer LLM when it implies a different country
+                            # (catches the phone-area-code "Austin, Texas, United States" bug for
+                            # resumes where the actual location is in a different country)
+                            _addr_lower = address.lower()
+                            _llm_lower  = _llm_loc.lower()
+                            _us_markers = {"united states", "usa", ", tx", ", ca", ", ny", ", fl",
+                                           "texas", "california", "new york", "florida"}
+                            _addr_is_us = any(m in _addr_lower for m in _us_markers)
+                            _llm_is_us  = any(m in _llm_lower for m in _us_markers)
+                            if _addr_is_us and not _llm_is_us:
+                                # Current address looks US-derived but LLM says different country
+                                _log.info("LLM_ENRICH [%s] location (country-fix): %s -> %s", file, address, _llm_loc)
+                                address = _llm_loc
             
             # Record usage statistics
             record_llm_call(
@@ -8970,6 +9364,7 @@ def main() -> int:
             # --- end DEBUG ---
 
             _existing_id = None
+            _stale_match_id = None  # tracks the old row when UPDATE fails (sha256 conflict)
             # 1) Email match — strongest identity signal
             if email and email.strip():
                 cursor.execute(
@@ -8979,6 +9374,7 @@ def main() -> int:
                 _row = cursor.fetchone()
                 if _row:
                     _existing_id = _row[0] if isinstance(_row, (tuple, list)) else _row.get("id", _row[0])
+                    _stale_match_id = _existing_id
 
             # 2) Name match — fallback when email is missing or different
             if _existing_id is None and _safe_fn and _safe_ln and len(_safe_ln) > 1:
@@ -8992,6 +9388,7 @@ def main() -> int:
                 _row = cursor.fetchone()
                 if _row:
                     _existing_id = _row[0] if isinstance(_row, (tuple, list)) else _row.get("id", _row[0])
+                    _stale_match_id = _existing_id
 
             if _existing_id is not None:
                 # Update the existing candidate row instead of inserting a duplicate.
@@ -9021,13 +9418,23 @@ def main() -> int:
                     )
                     cursor.execute("RELEASE SAVEPOINT sp_update_existing")
                     candidate_id = _existing_id
+                    _stale_match_id = None  # UPDATE succeeded — no old row to delete
                 except psycopg2.errors.UniqueViolation:
                     # SHA256 already claimed by placeholder row — fall through
                     # to the ON CONFLICT INSERT which will update the placeholder.
                     cursor.execute("ROLLBACK TO SAVEPOINT sp_update_existing")
                     _existing_id = None
+                    # _stale_match_id stays set — we must delete the old row before INSERT
+                    # so the email unique constraint doesn't fire on the placeholder update.
 
             if _existing_id is None:
+                if _stale_match_id is not None:
+                    # The old email/name-matched row couldn't be updated (sha256 conflict
+                    # with placeholder). Delete it so the INSERT can set email on the
+                    # placeholder without hitting the unique email index.
+                    cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (_stale_match_id,))
+                    cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (_stale_match_id,))
+                    _stale_match_id = None
                 cursor.execute(
                     f"""
                     INSERT INTO {CANDIDATES_TABLE}

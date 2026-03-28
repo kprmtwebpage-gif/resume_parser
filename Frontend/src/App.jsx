@@ -17,6 +17,7 @@ import DashboardOverview from './pages/admin/DashboardOverview.jsx'
 import UploadMetrics from './pages/admin/UploadMetrics.jsx'
 import UsersManagement from './pages/admin/UsersManagement.jsx'
 import ActivityLog from './pages/admin/ActivityLog.jsx'
+import UploadLog from './pages/admin/UploadLog.jsx'
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
@@ -44,14 +45,41 @@ function SearchPageChatbot() {
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const idleTimer = useRef(null)
+  const IDLE_TIMEOUT_MS = 20 * 60 * 1000 // 20 minutes
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('rp_token')
+    localStorage.removeItem('rp_user')
+    sessionStorage.removeItem('userLoginAuth')
+    setIsAuthenticated(false)
+  }, [])
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current)
+    idleTimer.current = setTimeout(handleLogout, IDLE_TIMEOUT_MS)
+  }, [handleLogout, IDLE_TIMEOUT_MS])
 
   useEffect(() => {
     const auth = sessionStorage.getItem('userLoginAuth')
     setIsAuthenticated(auth === 'true')
   }, [])
 
+  // Start/reset idle timer on user activity when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
+    events.forEach(e => window.addEventListener(e, resetIdleTimer, { passive: true }))
+    resetIdleTimer() // start timer immediately after login
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetIdleTimer))
+      if (idleTimer.current) clearTimeout(idleTimer.current)
+    }
+  }, [isAuthenticated, resetIdleTimer])
+
   const handleLoginSuccess = () => {
     setIsAuthenticated(true)
+    resetIdleTimer()
   }
 
   if (!isAuthenticated) {
@@ -99,6 +127,7 @@ function AppContent() {
           <Route path="upload-metrics" element={<UploadMetrics />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
+          <Route path="upload-log" element={<UploadLog />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
         {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}

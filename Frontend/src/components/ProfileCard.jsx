@@ -97,9 +97,9 @@ function ActionsDropdown({ anchorRef, isOpen, onClose, children, colors }) {
   )
 }
 
-export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit }) {
+export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen, onDownload, onEdit, onDelete }) {
   const { colors, isDark } = useTheme()
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
   const [isDownloaded, setIsDownloaded] = useState(false)
   const [isSendFlowOpen, setIsSendFlowOpen] = useState(false)
@@ -108,6 +108,7 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const actionsButtonRef = useRef(null)
 
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
+  const isParseFailedOrStuck = row.parse_status === 'failed' || row.parse_status === 'processing'
   const location = row.location || row.address || '—'
   const linkedinUrl = row.linkedin || row.linkedin_url
   const hasResume = row.resume_filename
@@ -225,6 +226,14 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
                 >
                   {fullName}
                 </button>
+                {isParseFailedOrStuck && (
+                  <span
+                    className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded bg-red-100 text-red-700 border border-red-200 cursor-help"
+                    title={row.parse_failure_reason || 'Resume could not be parsed'}
+                  >
+                    Parse Failed
+                  </span>
+                )}
               </div>
               <div 
                 className="truncate text-xs transition-colors duration-300" 
@@ -399,6 +408,18 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
                 >
                   Comment
                 </button>
+                {user?.role === 'superuser' && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteClick}
+                    className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                    style={{ color: '#ef4444' }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? '#3b0f0f' : '#fef2f2'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    Delete
+                  </button>
+                )}
           </ActionsDropdown>
         </div>
       </div>

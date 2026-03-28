@@ -98,6 +98,13 @@ def main() -> int:
             cur.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{candidates_table}_email ON {candidates_table}(LOWER(email))"
             )
+            # Partial unique index — prevents two completed rows sharing the same email.
+            # NULL / empty emails are excluded so placeholder rows are unaffected.
+            cur.execute(
+                f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_{candidates_table}_email_unique
+                    ON {candidates_table} (LOWER(email))
+                    WHERE email IS NOT NULL AND email != ''"""
+            )
             cur.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{candidates_table}_resume_sha256 ON {candidates_table}(resume_sha256)"
             )
