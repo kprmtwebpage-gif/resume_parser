@@ -3074,6 +3074,85 @@ async def admin_upload_metrics(request: Request):
             }
 
 
+@app.get("/api/admin/upload-log")
+async def admin_upload_log(
+    request: Request,
+    user_id: Optional[int] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 500,
+):
+    """
+    Admin upload log — returns individual resume rows showing who uploaded what and when.
+
+    Query params:
+        user_id  — filter to a specific uploader (optional)
+        status   — filter by resume_parse_status: 'completed' | 'failed' | 'not_a_resume' (optional)
+        search   — filter by candidate name or filename substring (optional)
+        limit    — max rows to return (default 500)
+    """
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            where_clauses = []
+            params: list = []
+
+            if user_id is not None:
+                where_clauses.append("c.uploaded_by = %s")
+                params.append(user_id)
+
+            if status:
+                where_clauses.append("c.resume_parse_status = %s")
+                params.append(status)
+
+            if search and search.strip():
+                q = f"%{search.strip().lower()}%"
+                where_clauses.append(
+                    "(LOWER(c.first_name) LIKE %s OR LOWER(c.last_name) LIKE %s OR LOWER(c.resume_filename) LIKE %s)"
+                )
+                params.extend([q, q, q])
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            params.append(limit)
+
+            cursor.execute(f"""
+                SELECT
+                    c.id,
+                    c.first_name,
+                    c.last_name,
+                    c.resume_filename,
+                    c.parsed_at,
+                    c.resume_parse_status,
+                    u.id          AS uploader_id,
+                    u.username    AS uploader_username,
+                    u.email       AS uploader_email,
+                    s.job_title
+                FROM candidate_profile c
+                LEFT JOIN users u ON u.id = c.uploaded_by
+                LEFT JOIN candidate_skills_profile s ON s.candidate_id = c.id
+                {where_sql}
+                ORDER BY c.parsed_at DESC NULLS LAST
+                LIMIT %s
+            """, params)
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "id":                 r["id"],
+            "first_name":         r["first_name"] or "",
+            "last_name":          r["last_name"] or "",
+            "resume_filename":    r["resume_filename"] or "",
+            "parsed_at":          r["parsed_at"].isoformat() if r["parsed_at"] else None,
+            "status":             r["resume_parse_status"] or "unknown",
+            "uploader_id":        r["uploader_id"],
+            "uploader_username":  r["uploader_username"] or "—",
+            "uploader_email":     r["uploader_email"] or "",
+            "job_title":          r["job_title"] or "",
+        }
+        for r in rows
+    ]
+
+
 # ─── LinkedIn Extension: Add candidate from LinkedIn profile ──────────
 class LinkedInCandidate(BaseModel):
     first_name: str

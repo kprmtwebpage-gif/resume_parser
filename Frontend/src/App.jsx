@@ -17,6 +17,7 @@ import DashboardOverview from './pages/admin/DashboardOverview.jsx'
 import UploadMetrics from './pages/admin/UploadMetrics.jsx'
 import UsersManagement from './pages/admin/UsersManagement.jsx'
 import ActivityLog from './pages/admin/ActivityLog.jsx'
+import UploadLog from './pages/admin/UploadLog.jsx'
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
@@ -107,6 +108,7 @@ function AppContent() {
           <Route path="upload-metrics" element={<UploadMetrics />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
+          <Route path="upload-log" element={<UploadLog />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
         {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}
