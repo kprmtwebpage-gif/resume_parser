@@ -225,12 +225,13 @@ export default function ProfileModal({
 
       {/* Right-side Drawer - 82vw width to match SignalHire size */}
       <div
-        className="fixed top-0 right-0 h-screen shadow-2xl z-50 transition-all duration-300"
+        className="fixed top-0 right-0 h-screen z-50 transition-all duration-300"
         style={{
           width: '82vw',
           height: '100vh',
           transform: show ? 'translateX(0)' : 'translateX(100%)',
           backgroundColor: colors.background,
+          boxShadow: show ? '-6px 0 18px rgba(0, 0, 0, 0.1)' : 'none',
         }}
       >
         <div className="flex h-full flex-col">

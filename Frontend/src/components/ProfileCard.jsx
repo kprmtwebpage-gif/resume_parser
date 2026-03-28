@@ -11,8 +11,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { apiUrl } from '../config'
 import { api } from '../services/api'
 import ResumeViewer from './ResumeViewer.jsx'
-import EmailProviderModal from './EmailProviderModal.jsx'
 import CommentModal from './CommentModal.jsx'
+import SendEmailPanel from './email/SendEmailPanel.jsx'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -101,9 +101,8 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const { colors, isDark } = useTheme()
   const { isAdmin, user } = useAuth()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
-  const [isGenerated, setIsGenerated] = useState(false)
   const [isDownloaded, setIsDownloaded] = useState(false)
-  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
+  const [isSendFlowOpen, setIsSendFlowOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
   const actionsButtonRef = useRef(null)
@@ -162,13 +161,11 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     setIsViewerOpen(false)
   }, [])
 
-  const handleGenerateClick = useCallback((e) => {
+  const handleSendToHRClick = useCallback((e) => {
     e.stopPropagation()
     e.preventDefault()
-    // Mark as generated and open modal
-    setIsGenerated(true)
     setIsDropdownOpen(false)
-    setIsEmailModalOpen(true)
+    setIsSendFlowOpen(true)
   }, [])
 
   const handleEmailProvider = useCallback((provider) => {
@@ -409,7 +406,7 @@ Availability: ${row.availability || 'N/A'}`
                 </button>
                 <button
                   type="button"
-                  onClick={handleGenerateClick}
+                  onClick={handleSendToHRClick}
                   className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
                   style={{ color: colors.text }}
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
@@ -493,12 +490,6 @@ Availability: ${row.availability || 'N/A'}`
         fileName={row.resume_filename}
       />
 
-      <EmailProviderModal
-        isOpen={isEmailModalOpen}
-        onClose={() => setIsEmailModalOpen(false)}
-        onSelectProvider={handleEmailProvider}
-      />
-
       <CommentModal
         isOpen={isCommentModalOpen}
         onClose={(saved) => {
@@ -507,6 +498,14 @@ Availability: ${row.availability || 'N/A'}`
         }}
         candidateId={row.id}
         candidateName={fullName}
+      />
+
+      <SendEmailPanel
+        isOpen={isSendFlowOpen}
+        onClose={() => setIsSendFlowOpen(false)}
+        candidateId={row.id}
+        candidateName={fullName}
+        provider={localStorage.getItem('emailProvider') || 'gmail'}
       />
     </div>
   )

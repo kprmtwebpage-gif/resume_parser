@@ -595,27 +595,45 @@ def bulk_delete_jobs(request: BulkDeleteRequest, db: Session = Depends(get_db)):
     """
     deleted_count = 0
     failed_ids = []
-    
+
     for job_id in request.job_ids:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if not job:
+        try:
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if not job:
+                failed_ids.append(str(job_id))
+                continue
+
+            # Delete photo file if exists
+            if job.photo_url:
+                old_file = Path(job.photo_url.lstrip("/"))
+                if old_file.exists():
+                    try:
+                        old_file.unlink()
+                    except Exception as e:
+                        print(f"Warning: Could not delete photo file for job {job_id}: {e}")
+
+            # Explicitly delete all FK-referencing rows first using raw SQL so SQLAlchemy
+            # never issues a SELECT on those tables (avoids missing-column 500 errors).
+            from sqlalchemy import text as sa_text
+            db.execute(sa_text("DELETE FROM job_applications WHERE job_id = :jid"), {"jid": str(job_id)})
+            db.execute(sa_text("DELETE FROM saved_jobs WHERE job_id = :jid"), {"jid": str(job_id)})
+
+            db.delete(job)
+            deleted_count += 1
+        except Exception as e:
+            print(f"[ERROR] Could not stage delete for job {job_id}: {e}")
             failed_ids.append(str(job_id))
-            continue
-        
-        # Delete photo file if exists
-        if job.photo_url:
-            old_file = Path(job.photo_url.lstrip("/"))
-            if old_file.exists():
-                try:
-                    old_file.unlink()
-                except Exception as e:
-                    print(f"Warning: Could not delete photo file for job {job_id}: {e}")
-        
-        db.delete(job)
-        deleted_count += 1
-    
-    db.commit()
-    
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] Bulk delete commit failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete jobs: {str(e)}",
+        )
+
     return {
         "message": f"Successfully deleted {deleted_count} job(s)",
         "deleted_count": deleted_count,
@@ -1125,25 +1143,40 @@ def delete_job(job_id: uuid.UUID, db: Session = Depends(get_db)):
 )
 def delete_job_permanently(job_id: uuid.UUID, db: Session = Depends(get_db)):
     """Permanently delete a job from the database. This action cannot be undone."""
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job {job_id} not found",
+            )
+
+        # Delete photo file if exists
+        if job.photo_url:
+            old_file = Path(job.photo_url.lstrip("/"))
+            if old_file.exists():
+                try:
+                    old_file.unlink()
+                except Exception as e:
+                    print(f"Warning: Could not delete photo file: {e}")
+
+        # Explicitly delete all FK-referencing rows with raw SQL so SQLAlchemy
+        # never issues a SELECT on those tables (avoids missing-column 500 errors).
+        from sqlalchemy import text as sa_text
+        db.execute(sa_text("DELETE FROM job_applications WHERE job_id = :jid"), {"jid": str(job_id)})
+        db.execute(sa_text("DELETE FROM saved_jobs WHERE job_id = :jid"), {"jid": str(job_id)})
+        db.delete(job)
+        db.commit()
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] Failed to permanently delete job {job_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete job: {str(e)}",
         )
-    
-    # Delete photo file if exists
-    if job.photo_url:
-        old_file = Path(job.photo_url.lstrip("/"))
-        if old_file.exists():
-            try:
-                old_file.unlink()
-            except Exception as e:
-                print(f"Warning: Could not delete photo file: {e}")
-    
-    db.delete(job)
-    db.commit()
-    return None
 
 
 # ────────────────────── PERMANENT DELETE (alternate path) ──────────────────────
@@ -1154,32 +1187,48 @@ def delete_job_permanently(job_id: uuid.UUID, db: Session = Depends(get_db)):
 )
 def delete_job_permanently_alt(job_id: uuid.UUID, db: Session = Depends(get_db)):
     """Permanently delete a job from the database. This action cannot be undone.
-    
+
     This is an alternate endpoint path for frontend compatibility.
     Returns JSON response instead of 204 No Content.
     """
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job {job_id} not found",
+            )
+
+        # Delete photo file if exists
+        if job.photo_url:
+            old_file = Path(job.photo_url.lstrip("/"))
+            if old_file.exists():
+                try:
+                    old_file.unlink()
+                except Exception as e:
+                    print(f"Warning: Could not delete photo file: {e}")
+
+        # Store job title for response
+        job_title = job.job_title
+
+        # Explicitly delete all FK-referencing rows with raw SQL so SQLAlchemy
+        # never issues a SELECT on those tables (avoids missing-column 500 errors).
+        from sqlalchemy import text as sa_text
+        db.execute(sa_text("DELETE FROM job_applications WHERE job_id = :jid"), {"jid": str(job_id)})
+        db.execute(sa_text("DELETE FROM saved_jobs WHERE job_id = :jid"), {"jid": str(job_id)})
+        db.delete(job)
+        db.commit()
+        print(f"[JOB_PROJECTS] Job '{job_title}' ({job_id}) permanently deleted")
+        return {"message": f"Job '{job_title}' permanently deleted", "success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] Failed to permanently delete job {job_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete job: {str(e)}",
         )
-    
-    # Delete photo file if exists
-    if job.photo_url:
-        old_file = Path(job.photo_url.lstrip("/"))
-        if old_file.exists():
-            try:
-                old_file.unlink()
-            except Exception as e:
-                print(f"Warning: Could not delete photo file: {e}")
-    
-    # Store job title for response
-    job_title = job.job_title
-    
-    db.delete(job)
-    db.commit()
-    return {"message": f"Job '{job_title}' permanently deleted", "success": True}
 
 
 # ────────────────────── JOB APPLICATIONS (Feature 11) ──────────────────────

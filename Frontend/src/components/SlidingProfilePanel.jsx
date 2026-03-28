@@ -83,7 +83,7 @@ export default function SlidingProfilePanel({
 
   // Use createPortal to render directly to body (like Vue's <teleport to="body">)
   return createPortal(
-    <div className="fixed inset-0 z-[9999]">
+    <div className="fixed inset-0 z-[9999] overflow-hidden">
       {/* Left-side overlay (30vw) - clicking closes the panel */}
       <div
         className={`absolute top-0 left-0 h-full transition-opacity duration-[350ms] ease-in-out ${
@@ -104,7 +104,7 @@ export default function SlidingProfilePanel({
         }`}
         style={{
           width: '70vw',
-          boxShadow: '-10px 0 25px rgba(0, 0, 0, 0.15)',
+          boxShadow: '-6px 0 18px rgba(0, 0, 0, 0.1)',
           willChange: 'transform',
         }}
         onClick={(e) => e.stopPropagation()}
