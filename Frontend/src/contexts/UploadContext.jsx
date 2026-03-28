@@ -251,8 +251,8 @@ export function UploadProvider({ children }) {
 
       setUploads((prev) => [...prev, ...newUploads])
 
-      // 6 concurrent uploads — matches 8-CPU server capacity
-      const runWithConcurrency = async (items, concurrency = 6) => {
+      // 8 concurrent uploads — feeds the 12-slot server parse queue
+      const runWithConcurrency = async (items, concurrency = 8) => {
         const queue = [...items]
         const workers = Array.from(
           { length: Math.min(concurrency, items.length) },
@@ -266,7 +266,7 @@ export function UploadProvider({ children }) {
         await Promise.all(workers)
       }
 
-      runWithConcurrency(newUploads, 6)
+      runWithConcurrency(newUploads, 8)
     },
     [uploadFileToBackend]
   )
