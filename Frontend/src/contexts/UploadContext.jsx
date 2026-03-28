@@ -52,7 +52,7 @@ export function UploadProvider({ children }) {
           setUploads(prev =>
             prev.map(u =>
               u.id === upload.id
-                ? { ...u, progress: 100, status: 'not_a_resume', errorMessage: status.message || 'This file does not appear to be a resume' }
+                ? { ...u, progress: 100, status: 'not_a_resume', errorMessage: status.message || 'Corrupt Format / Not a Resume. Please check and upload.' }
                 : u
             )
           )
@@ -61,7 +61,7 @@ export function UploadProvider({ children }) {
           setUploads(prev =>
             prev.map(u =>
               u.id === upload.id
-                ? { ...u, progress: 100, status: 'failed', errorMessage: status.message || 'Parsing failed' }
+                ? { ...u, progress: 100, status: 'failed', errorMessage: status.message || 'Corrupt Format / Parse Error. Please check and upload.' }
                 : u
             )
           )
@@ -102,7 +102,7 @@ export function UploadProvider({ children }) {
           setUploads(prev =>
             prev.map(u =>
               u.id === upload.id
-                ? { ...u, progress: 100, status: 'failed', errorMessage: 'File could not be parsed — please try re-uploading' }
+                ? { ...u, progress: 100, status: 'failed', errorMessage: 'Corrupt Format / Not a Resume. Please check and upload.' }
                 : u
             )
           )

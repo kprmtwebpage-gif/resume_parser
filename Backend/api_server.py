@@ -1089,15 +1089,33 @@ async def delete_candidate(
     candidate_id: int,
     _: dict = Depends(get_current_admin),
 ):
-    """Delete a candidate and their associated skills. Superuser/admin only."""
+    """Delete a candidate, their skills, and their resume file from disk. Superuser/admin only."""
+    from pathlib import Path
+    resume_filename = None
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(f"SELECT id FROM {CANDIDATES_TABLE} WHERE id = %s", (candidate_id,))
-            if not cursor.fetchone():
+            cursor.execute(
+                f"SELECT id, resume_filename FROM {CANDIDATES_TABLE} WHERE id = %s",
+                (candidate_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
                 raise HTTPException(status_code=404, detail="Candidate not found")
+            resume_filename = row.get("resume_filename")
             cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (candidate_id,))
             cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (candidate_id,))
         conn.commit()
+
+    # Remove the physical resume file so the ingestion service doesn't re-index it.
+    if resume_filename:
+        backend_dir = Path(__file__).resolve().parent
+        candidate_file = backend_dir / resume_filename
+        try:
+            if candidate_file.exists():
+                candidate_file.unlink()
+        except Exception:
+            pass  # Non-fatal — DB record is already deleted
+
     return {"success": True, "deleted_id": candidate_id}
 
 

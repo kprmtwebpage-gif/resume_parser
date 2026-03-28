@@ -8262,15 +8262,16 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         (r'\b(about\s+the\s+(role|position|team)|job\s+requirements|ideal\s+candidate|must\s+have\s+experience)\b', -4),
         # Certificates / awards
         (r'\b(certificate\s+of\s+(completion|achievement|participation)|this\s+is\s+to\s+certify|has\s+successfully\s+completed|awarded\s+to)\b', -5),
-        # Cover letters (not resumes by themselves)
-        (r'\b(dear\s+(sir|madam|hiring\s+manager)|to\s+whom\s+it\s+may\s+concern)\b', -3),
-        # Company / organisation profiles and brochures
-        (r'\b(about\s+us|our\s+services|our\s+team|our\s+clients|our\s+expertise|our\s+mission|our\s+vision|our\s+values)\b', -5),
-        (r'\b(we\s+(provide|offer|specialize|specialise|deliver|develop|support|help)\b)', -4),
+        # Cover letters — weight reduced: combined resume+cover-letter PDFs are common and genuine.
+        (r'\b(dear\s+(sir|madam|hiring\s+manager)|to\s+whom\s+it\s+may\s+concern)\b', -1),
+        # Company / organisation profiles and brochures — reduced weights because
+        # genuine resumes frequently include company descriptions in experience sections.
+        (r'\b(about\s+us|our\s+services|our\s+team|our\s+clients|our\s+expertise|our\s+mission|our\s+vision|our\s+values)\b', -2),
+        (r'\b(we\s+(provide|offer|specialize|specialise|deliver|develop|support|help)\b)', -2),
         (r'\b(company\s+profile|organisation\s+profile|organizational\s+profile|business\s+profile|company\s+overview)\b', -6),
-        (r'\b(established\s+in|founded\s+in|since\s+\d{4}|incorporated\s+in)\b', -4),
-        (r'\b(our\s+company|our\s+organization|our\s+organisation|our\s+business|our\s+firm)\b', -5),
-        (r'\b(contact\s+us|get\s+in\s+touch|reach\s+us|visit\s+us|follow\s+us)\b', -3),
+        (r'\b(established\s+in|founded\s+in|since\s+\d{4}|incorporated\s+in)\b', -2),
+        (r'\b(our\s+company|our\s+organization|our\s+organisation|our\s+business|our\s+firm)\b', -2),
+        (r'\b(contact\s+us|get\s+in\s+touch|reach\s+us|visit\s+us|follow\s+us)\b', -1),
         (r'\b(translation\s+services|travel\s+(agency|packages|tours)|event\s+(management|planning|organiz))\b', -5),
         # Court / legal filings and exhibits
         (r'\b(plaintiff|defendant|docket\s+no\.?|case\s+no\.?\s*\d|court\s+of|judgment|affidavit|deposition|subpoena)\b', -5),
@@ -8280,6 +8281,7 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
     ]
 
     has_non_resume_signal = False
+    non_resume_hit_count = 0
     for pattern, weight in _resume_signals:
         if re.search(pattern, t):
             score += weight
@@ -8288,17 +8290,20 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         if re.search(pattern, t):
             score += weight  # weight is negative
             has_non_resume_signal = True
+            non_resume_hit_count += 1
 
-        # Reject rule 1: net-negative score — non-resume signals outweigh resume signals.
-        # Score == 0 with no non-resume flags gets benefit of the doubt (sparse/non-English PDF).
-        if score < 0:
-            print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
-            return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
+    # Evaluate AFTER accumulating all signals — never reject mid-loop.
+    # Genuine resumes must not be lost; only reject when evidence is overwhelming.
 
-        # Reject rule 2: zero/weak score AND an explicit non-resume document type detected.
-        if score < 3 and has_non_resume_signal:
-            print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
-            return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
+    # Rule 1: Strongly net-negative score — non-resume content clearly dominates.
+    if score < -5:
+        print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
+        return False, "Corrupt Format / Not a Resume. Please check and upload."
+
+    # Rule 2: Net-negative score AND multiple distinct non-resume signal types hit.
+    if score < 0 and non_resume_hit_count >= 2:
+        print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
+        return False, "Corrupt Format / Not a Resume. Please check and upload."
 
     return True, ""
 

@@ -76,7 +76,7 @@ export default function Upload() {
       case 'duplicate':
         return 'Already in database'
       case 'not_a_resume':
-        return 'Not a resume'
+        return 'Not a Resume'
       case 'failed':
         return 'Failed'
       case 'background':
@@ -260,7 +260,7 @@ export default function Upload() {
                       {/* Not-a-resume info */}
                       {upload.status === 'not_a_resume' && (
                         <p className="mt-1 text-xs text-amber-700 leading-tight break-words">
-                          {upload.errorMessage || 'This file does not appear to be a resume. Please upload a valid CV or resume.'}
+                          {upload.errorMessage || 'Corrupt Format / Not a Resume. Please check and upload.'}
                         </p>
                       )}
                       {/* Inline failure reason */}
