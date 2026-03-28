@@ -8167,20 +8167,23 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
     score = 0
 
     # Resume indicators (each found once counts once).
+    # NOTE: generic words like "company"/"organization" intentionally excluded —
+    # they appear equally in company brochures and are not resume-specific.
     _resume_signals = [
-        (r'\b(experience|work history|employment history|work experience)\b', 3),
+        (r'\b(work history|employment history|work experience)\b', 3),   # section headings on resumes
         (r'\b(education|academic|university|college|degree|b\.?tech|m\.?tech|m\.?b\.?a|bachelor|master|diploma)\b', 2),
-        (r'\b(skill|skills|expertise|proficienc|technologies|tech stack)\b', 2),
+        (r'\b(skills|expertise|proficienc|technologies|tech stack)\b', 2),
         (r'[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}', 2),          # email
         (r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}', 1), # phone (intl)
         (r'\b(resume|cv|curriculum vitae|biodata)\b', 3),
-        (r'\b(objective|professional summary|career summary|summary|profile)\b', 2),
-        (r'\b(project|projects|certification|certifications|achievement|accomplishment)\b', 1),
+        (r'\b(objective|professional summary|career summary|career objective)\b', 3), # personal summary headings
+        (r'\b(certification|certifications|achievement|accomplishment)\b', 1),
         (r'\b(linkedin|github|portfolio|stackoverflow)\b', 2),
-        (r'\b(years?\s+of\s+experience|worked\s+(?:at|for|with)|responsible\s+for|role|designation)\b', 2),
-        (r'\b(intern|internship|trainee|freelanc|consultant|engineer|developer|manager|analyst|architect)\b', 1),
-        (r'\b(company|employer|organization|organisation|pvt|ltd|inc|llc|corp)\b', 1),
+        (r'\b(years?\s+of\s+experience|worked\s+(?:at|for|with)|responsible\s+for|designation)\b', 2),
+        (r'\b(internship|trainee|freelanc)\b', 2),                   # clearly personal career terms
+        (r'\b(employer|pvt\.?\s*ltd|pvt|ltd|inc\b|llc|corp)\b', 1), # employer context (not generic "company")
         (r'\b(reference|hobbies|interests|languages\s+known|personal\s+details|date\s+of\s+birth|dob|nationality|passport)\b', 1),
+        (r'\b(i\s+am\s+a|i\s+have\s+(?:\d+|worked|experience)|my\s+(?:skills|experience|career|background))\b', 2), # first-person personal voice
     ]
 
     # Strong non-resume indicators — set has_non_resume_signal and subtract
@@ -8201,11 +8204,19 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
         # Job postings / JDs (employer advertising a role, not a person's resume)
         (r'\b(we\s+are\s+(hiring|looking\s+for|seeking)|job\s+(posting|advertisement|ad)\b|apply\s+now|apply\s+here|how\s+to\s+apply)\b', -5),
         (r'\b(equal\s+opportunity\s+employer|eoe|benefits\s+package|compensation\s+package|salary\s+range|we\s+offer)\b', -5),
-        (r'\b(about\s+(the\s+)?(company|role|position|team)|job\s+requirements|ideal\s+candidate|must\s+have\s+experience)\b', -4),
+        (r'\b(about\s+the\s+(role|position|team)|job\s+requirements|ideal\s+candidate|must\s+have\s+experience)\b', -4),
         # Certificates / awards
         (r'\b(certificate\s+of\s+(completion|achievement|participation)|this\s+is\s+to\s+certify|has\s+successfully\s+completed|awarded\s+to)\b', -5),
-        # Newsletters / articles / reports (not personal documents)
-        (r'\b(dear\s+(sir|madam|hiring\s+manager)|to\s+whom\s+it\s+may\s+concern)\b', -3),  # cover letters
+        # Cover letters (not resumes by themselves)
+        (r'\b(dear\s+(sir|madam|hiring\s+manager)|to\s+whom\s+it\s+may\s+concern)\b', -3),
+        # Company / organisation profiles and brochures
+        (r'\b(about\s+us|our\s+services|our\s+team|our\s+clients|our\s+expertise|our\s+mission|our\s+vision|our\s+values)\b', -5),
+        (r'\b(we\s+(provide|offer|specialize|specialise|deliver|develop|support|help)\b)', -4),
+        (r'\b(company\s+profile|organisation\s+profile|organizational\s+profile|business\s+profile|company\s+overview)\b', -6),
+        (r'\b(established\s+in|founded\s+in|since\s+\d{4}|incorporated\s+in)\b', -4),
+        (r'\b(our\s+company|our\s+organization|our\s+organisation|our\s+business|our\s+firm)\b', -5),
+        (r'\b(contact\s+us|get\s+in\s+touch|reach\s+us|visit\s+us|follow\s+us)\b', -3),
+        (r'\b(translation\s+services|travel\s+(agency|packages|tours)|event\s+(management|planning|organiz))\b', -5),
     ]
 
     has_non_resume_signal = False
@@ -8218,12 +8229,12 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
             score += weight  # weight is negative
             has_non_resume_signal = True
 
-    # Reject rule 1: zero resume signals at all — clearly not a resume.
+    # Reject rule 1: zero or negative score — no resume signals at all.
     if score <= 0:
         return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
 
-    # Reject rule 2: very low resume score AND an explicit non-resume document type detected.
-    if score < 2 and has_non_resume_signal:
+    # Reject rule 2: weak resume score AND an explicit non-resume document type detected.
+    if score < 3 and has_non_resume_signal:
         return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
 
     return True, ""
