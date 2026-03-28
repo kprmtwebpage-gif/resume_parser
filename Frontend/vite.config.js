@@ -28,7 +28,10 @@ export default defineConfig({
       '/saved-jobs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/search-history': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/job-applications': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/email': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/uploads': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/standalone-comments': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/candidate-comments': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })
