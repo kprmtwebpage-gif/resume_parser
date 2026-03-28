@@ -260,17 +260,26 @@ export function UploadProvider({ children }) {
 
       // 8 concurrent uploads — feeds the 12-slot server parse queue
       const runWithConcurrency = async (items, concurrency = 8) => {
+        console.log(`[Upload DEBUG] Starting upload of ${items.length} files with ${Math.min(concurrency, items.length)} workers`)
+        items.forEach((u, i) => console.log(`[Upload DEBUG] Queued [${i+1}/${items.length}]: ${u.file.name} (${u.file.size} bytes)`))
         const queue = [...items]
+        let dispatched = 0
         const workers = Array.from(
           { length: Math.min(concurrency, items.length) },
-          async () => {
+          async (_, workerIdx) => {
             while (queue.length > 0) {
               const item = queue.shift()
-              if (item) await uploadFileToBackend(item)
+              if (item) {
+                dispatched++
+                console.log(`[Upload DEBUG] Worker-${workerIdx} dispatching [${dispatched}]: ${item.file.name}`)
+                await uploadFileToBackend(item)
+                console.log(`[Upload DEBUG] Worker-${workerIdx} finished: ${item.file.name}, queue remaining: ${queue.length}`)
+              }
             }
           }
         )
         await Promise.all(workers)
+        console.log(`[Upload DEBUG] All workers done. Total dispatched: ${dispatched} / ${items.length}`)
       }
 
       runWithConcurrency(newUploads, 8)

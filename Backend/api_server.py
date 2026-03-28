@@ -1715,6 +1715,8 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     import sys
     from pathlib import Path
 
+    print(f"[UPLOAD RECEIVED] filename={file.filename!r}", flush=True)
+
     MAX_CONCURRENT_UPLOADS = 50  # per-user limit to prevent pool exhaustion
 
     allowed = {".pdf", ".doc", ".docx"}
