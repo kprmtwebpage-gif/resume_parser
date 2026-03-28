@@ -74,10 +74,7 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
 # Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
-# Keep concurrency low to avoid exhausting the DB connection pool during bulk uploads.
-# Each parser subprocess opens its own psycopg2 connection, plus the background task
-# and status-polling endpoints also need pool connections.
-_parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "5")))
+_parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "12")))
 _parse_waiting = 0   # tasks queued, waiting for a semaphore slot
 _parse_active  = 0   # tasks currently holding the semaphore (actively parsing)
 
@@ -2066,11 +2063,10 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                                 (placeholder_id,),
                                             )
                                         else:
-                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — marking as failed (will allow re-upload)", flush=True)
-                                            # Mark as failed instead of deleting — the SHA256 re-upload
-                                            # logic will delete failed rows automatically on next upload.
+                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — deleting placeholder after retry", flush=True)
+                                            # Delete the placeholder — failed parses are not stored so user can re-upload
                                             cur2.execute(
-                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = 'Parsing timed out — please re-upload' WHERE id = %s",
+                                                f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
                                                 (placeholder_id,),
                                             )
                                 conn2.commit()
