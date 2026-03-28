@@ -18,7 +18,7 @@ export function UploadProvider({ children }) {
     // Phase 1: wait in queue — no timeout, just keep polling every 2s until
     // the file leaves the queue (queue_ahead drops to 0 or status changes)
     // Phase 2: once parsing has started, allow max 90 attempts (3 min) to complete
-    const MAX_PARSE_ATTEMPTS = 90 // 90 * 2s = 3 min — NLP parse is <30s, huge buffer
+    const MAX_PARSE_ATTEMPTS = 180 // 180 * 2s = 6 min — covers OCR-heavy PDFs (tesseract on scanned docs)
     let parseAttempts = 0
     let parsingStarted = false
 
