@@ -8275,10 +8275,8 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         # Court / legal filings and exhibits
         (r'\b(plaintiff|defendant|docket\s+no\.?|case\s+no\.?\s*\d|court\s+of|judgment|affidavit|deposition|subpoena)\b', -5),
         (r'\b(exhibit\s+[a-z0-9]|filing\s+no|court\s+filing|legal\s+exhibit|sworn\s+statement)\b', -5),
-        # HR opportunity / requisition templates (not resumes)
-        (r'\b(opportunity\s+id|oppt\.?\s*id|req(?:uisition)?\s*(?:id|no|#)|opening\s+id|position\s+id|job\s+id\b)\b', -6),
-        # Call centre / agent operational documents
-        (r'\b(outbound\s+calls?|inbound\s+calls?|call\s+center\s+(?:agent|script|guide)|contact\s+center\s+agent)\b', -4),
+        # HR opportunity / agent operational docs — only very specific phrases unlikely in real resumes
+        (r'\b(opportunity\s+id|oppt\.?\s*id|requisition\s+(?:id|no|#))\b', -5),
     ]
 
     has_non_resume_signal = False
@@ -8291,18 +8289,16 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
             score += weight  # weight is negative
             has_non_resume_signal = True
 
-# Reject rule 1: net-negative score (non-resume signals outweigh resume signals).
+        # Reject rule 1: net-negative score — non-resume signals outweigh resume signals.
         # Score == 0 with no non-resume flags gets benefit of the doubt (sparse/non-English PDF).
         if score < 0:
-            if filename:
-                print(f"[FILTER REJECT] file={filename!r} score={score} non_resume_signal={has_non_resume_signal}", flush=True)
+            print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
             return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
 
         # Reject rule 2: zero/weak score AND an explicit non-resume document type detected.
         if score < 3 and has_non_resume_signal:
-            if filename:
-                print(f"[FILTER REJECT] file={filename!r} score={score} non_resume_signal={has_non_resume_signal}", flush=True)
-        return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
+            print(f"[FILTER REJECT] file={filename!r} score={score}", file=sys.stderr, flush=True)
+            return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
 
     return True, ""
 
