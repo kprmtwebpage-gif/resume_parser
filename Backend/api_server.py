@@ -2983,6 +2983,47 @@ async def admin_get_users(request: Request):
     ]
 
 
+@app.get("/api/admin/upload-log")
+async def admin_upload_log(request: Request):
+    """Return every uploaded resume with candidate name, file, uploader, date, and status."""
+    require_admin(request)
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    cp.id,
+                    cp.first_name,
+                    cp.last_name,
+                    cp.resume_filename,
+                    cp.resume_parse_status  AS status,
+                    cp.parsed_at,
+                    cp.uploaded_by          AS uploader_id,
+                    u.username              AS uploader_username,
+                    u.email                 AS uploader_email,
+                    csp.job_title
+                FROM candidate_profile cp
+                LEFT JOIN users u   ON u.id  = cp.uploaded_by
+                LEFT JOIN candidate_skills_profile csp ON csp.candidate_id = cp.id
+                ORDER BY cp.parsed_at DESC NULLS LAST
+            """)
+            rows = cursor.fetchall()
+    return [
+        {
+            "id":                r["id"],
+            "first_name":        r["first_name"],
+            "last_name":         r["last_name"],
+            "resume_filename":   r["resume_filename"],
+            "status":            r["status"],
+            "parsed_at":         r["parsed_at"].isoformat() if r["parsed_at"] else None,
+            "uploader_id":       r["uploader_id"],
+            "uploader_username": r["uploader_username"],
+            "uploader_email":    r["uploader_email"],
+            "job_title":         r["job_title"],
+        }
+        for r in rows
+    ]
+
+
 @app.get("/api/admin/upload-metrics")
 async def admin_upload_metrics(request: Request):
     """Return upload time-series data grouped by user for the Upload Metrics dashboard."""

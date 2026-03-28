@@ -59,9 +59,9 @@ export default function UploadLog() {
       const name = `${r.first_name} ${r.last_name}`.toLowerCase()
       return (
         name.includes(q) ||
-        r.resume_filename.toLowerCase().includes(q) ||
-        r.job_title.toLowerCase().includes(q) ||
-        r.uploader_username.toLowerCase().includes(q)
+        (r.resume_filename || '').toLowerCase().includes(q) ||
+        (r.job_title || '').toLowerCase().includes(q) ||
+        (r.uploader_username || '').toLowerCase().includes(q)
       )
     }
     return true

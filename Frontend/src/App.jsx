@@ -106,9 +106,9 @@ function AppContent() {
         <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
           <Route index element={<DashboardOverview />} />
           <Route path="upload-metrics" element={<UploadMetrics />} />
+          <Route path="upload-log" element={<UploadLog />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
-          <Route path="upload-log" element={<UploadLog />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
         {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}
