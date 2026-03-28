@@ -8194,7 +8194,7 @@ def extract_all_job_titles(text: str, *, first_name: str = "", last_name: str = 
 # Non-resume detection
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _is_likely_resume(text: str) -> tuple[bool, str]:
+def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
     """Conservative non-resume detector.
 
     Returns (is_resume, rejection_reason).  Only rejects documents that are
@@ -8202,11 +8202,20 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
     When in doubt it returns (True, ""), so genuine resumes with unusual
     formatting are never blocked.
 
+    If the filename explicitly contains 'resume' or 'cv' the file is always
+    accepted regardless of content scoring.
+
     Scoring:
       Score >= 2  → accepted as a resume
       Score < 2 AND at least one strong non-resume signal → rejected
       Otherwise → accepted (benefit of the doubt)
     """
+    # Filename fast-path: if the file is explicitly named as a resume/CV, trust it.
+    if filename:
+        fname = re.sub(r'[_\-\s]+', ' ', Path(filename).stem).lower()
+        if re.search(r'\b(resume|cv|curriculum.?vitae|biodata)\b', fname):
+            return True, ""
+
     if not text or len(text.strip()) < 80:
         # Too little text to decide — accept and let the parser handle it.
         return True, ""
@@ -8437,7 +8446,7 @@ def main() -> int:
             # ── Non-resume guard ─────────────────────────────────────────────
             # Reject files that are clearly not resumes (invoices, contracts,
             # books, medical records, etc.) before expensive extraction.
-            _is_resume_doc, _not_resume_reason = _is_likely_resume(resume_text)
+            _is_resume_doc, _not_resume_reason = _is_likely_resume(resume_text, filename=file)
             if not _is_resume_doc:
                 report["skipped"].append({"file": file, "reason": _not_resume_reason})
                 if not quiet:
