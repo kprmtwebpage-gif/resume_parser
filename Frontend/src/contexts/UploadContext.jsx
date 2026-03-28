@@ -241,6 +241,11 @@ export function UploadProvider({ children }) {
         return
       }
 
+      if (validFiles.length > 50) {
+        alert('You can upload a maximum of 50 resumes at a time.')
+        return
+      }
+
       const newUploads = validFiles.map((file) => ({
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         file,
