@@ -18,7 +18,7 @@ import sponsor4  from '../assets/assets/sponsor-4.png'
 import './Login.css'
 
 export default function Login() {
-  const { login, isAuthenticated, loading, error } = useAuth()
+  const { login, isAuthenticated, loading, error, sessionExpired } = useAuth()
   const navigate = useNavigate()
 
   const [username, setUsername] = useState('')
@@ -81,6 +81,12 @@ export default function Login() {
               <h2 className="admin-logo-text">KPRMT Sign In</h2>
             </div>
 
+            {/* Session expired banner */}
+            {sessionExpired && (
+              <div className="admin-error-message" style={{ background: '#fef3c7', color: '#92400e', borderColor: '#f59e0b', borderWidth: 1, borderStyle: 'solid' }}>
+                Session expired after 20 minutes of inactivity. Please sign in again.
+              </div>
+            )}
             {/* Error banner */}
             {error && <div className="admin-error-message">{error}</div>}
 
