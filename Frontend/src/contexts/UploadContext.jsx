@@ -15,9 +15,9 @@ export function UploadProvider({ children }) {
 
   // ---- poll for background parse completion ----
   const pollParseStatus = useCallback(async (upload, candidateId) => {
-    const maxAttempts = 120 // 120 * 3s = 6 min max
+    const maxAttempts = 240 // 240 * 2s = 8 min max
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await new Promise(r => setTimeout(r, 3000))
+      await new Promise(r => setTimeout(r, 2000))
       try {
         const status = await checkUploadStatus(candidateId)
         if (status.status === 'completed') {
@@ -55,7 +55,7 @@ export function UploadProvider({ children }) {
         setUploads(prev =>
           prev.map(u =>
             u.id === upload.id
-              ? { ...u, progress: Math.min(50 + attempt, 95) }
+              ? { ...u, progress: Math.min(50 + attempt, 95), queueAhead: status.queue_ahead ?? 0 }
               : u
           )
         )
@@ -201,8 +201,8 @@ export function UploadProvider({ children }) {
 
       setUploads((prev) => [...prev, ...newUploads])
 
-      // max 3 concurrent uploads
-      const runWithConcurrency = async (items, concurrency = 3) => {
+      // max 2 concurrent uploads
+      const runWithConcurrency = async (items, concurrency = 2) => {
         const queue = [...items]
         const workers = Array.from(
           { length: Math.min(concurrency, items.length) },
@@ -216,7 +216,7 @@ export function UploadProvider({ children }) {
         await Promise.all(workers)
       }
 
-      runWithConcurrency(newUploads, 3)
+      runWithConcurrency(newUploads, 2)
     },
     [uploadFileToBackend]
   )

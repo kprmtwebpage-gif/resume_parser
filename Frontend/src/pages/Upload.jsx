@@ -79,6 +79,9 @@ export default function Upload() {
       case 'pending':
         return 'Queued'
       default:
+        if (upload.queueAhead > 0) {
+          return `Parsing — ${upload.queueAhead} file${upload.queueAhead === 1 ? '' : 's'} ahead`
+        }
         return 'Uploading...'
     }
   }

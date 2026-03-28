@@ -74,7 +74,9 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
 # Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
-_parse_semaphore = asyncio.Semaphore(4)
+_parse_semaphore = asyncio.Semaphore(2)
+_parse_waiting = 0   # tasks queued, waiting for a semaphore slot
+_parse_active  = 0   # tasks currently holding the semaphore (actively parsing)
 
 # ── Resume Download Quota Tracking ────────────────────────────────────────────
 DAILY_DOWNLOAD_LIMIT = 10
@@ -1677,6 +1679,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
 
     # Parse in background — returns immediately to frontend
     async def _background_parse():
+        global _parse_waiting, _parse_active
         import subprocess as _sp
         env = os.environ.copy()
         env["RESUME_INPUT_DIR"] = str(cache_dir)
@@ -1693,12 +1696,18 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 timeout=600,  # 10 min — allows LLM-powered parsing to complete
             )
 
+        _parse_waiting += 1
         try:
             async with _parse_semaphore:
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, _run_parser)
-                returncode = result.returncode
-                stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
+                _parse_waiting -= 1
+                _parse_active += 1
+                try:
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(None, _run_parser)
+                    returncode = result.returncode
+                    stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
+                finally:
+                    _parse_active -= 1
 
             if returncode != 0:
                 # Extract a concise reason from stderr (or stdout for parse errors)
@@ -1789,8 +1798,14 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             conn.commit()  # commit current state before retry
                             try:
                                 await asyncio.sleep(2)  # brief delay to let other parsers finish
+                                _parse_waiting += 1
                                 async with _parse_semaphore:
-                                    retry_result = await loop.run_in_executor(None, _run_parser)
+                                    _parse_waiting -= 1
+                                    _parse_active += 1
+                                    try:
+                                        retry_result = await loop.run_in_executor(None, _run_parser)
+                                    finally:
+                                        _parse_active -= 1
                                 retry_rc = retry_result.returncode
                                 retry_stderr = (retry_result.stderr or b"").decode("utf-8", errors="replace")
                                 if retry_rc != 0:
@@ -1995,6 +2010,9 @@ async def get_upload_status(candidate_id: int):
 
     status = row.get("resume_parse_status", "completed")
     result = {"id": row["id"], "status": status}
+
+    if status == "processing":
+        result["queue_ahead"] = _parse_waiting + _parse_active
 
     if status == "completed":
         full_name = " ".join(filter(None, [row.get("first_name"), row.get("last_name")])) or None
