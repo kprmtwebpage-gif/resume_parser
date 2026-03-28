@@ -104,7 +104,9 @@ class Job(Base):
     )
     
     # Relationship to applications
-    applications = relationship("JobApplication", back_populates="job", cascade="all, delete-orphan")
+    # passive_deletes=True: rely on DB-level ON DELETE CASCADE / explicit SQL pre-deletion
+    # instead of issuing a SELECT on job_applications (avoids missing-column 500 errors)
+    applications = relationship("JobApplication", back_populates="job", cascade="all, delete-orphan", passive_deletes=True)
 
     # Salary constraint is enforced at DB level via create_jobs_table.sql
 

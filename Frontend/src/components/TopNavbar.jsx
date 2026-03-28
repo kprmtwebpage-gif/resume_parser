@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { SunIcon, MoonIcon } from '@heroicons/react/24/outline'
 import { useTheme } from '../contexts/ThemeContext'
 import { useAuth } from '../contexts/AuthContext'
@@ -10,11 +10,13 @@ const baseNavItems = [
   { label: 'Search', path: '/' },
   { label: 'Jobs', path: '/jobs' },
   { label: 'Upload', path: '/upload' },
+  { label: 'Customer', path: '/customer' },
 ]
 
 export default function TopNavbar() {
   const { isDark, toggleTheme, colors } = useTheme()
   const { getAuthHeaders, isAdmin, isUploadUser } = useAuth()
+  const location = useLocation()
   const navItems = isUploadUser
     ? [{ label: 'Upload', path: '/upload' }]
     : isAdmin
@@ -69,23 +71,28 @@ export default function TopNavbar() {
         <div className="flex items-center gap-6">
           <img src={logoUrl} alt="Company Logo" className="h-10 w-auto object-contain" />
           <nav className="hidden items-center gap-1 md:flex">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.label}
-                to={item.path}
-                className={({ isActive }) =>
-                  `rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
-                    isActive
-                      ? 'bg-brand-500 text-white'
-                      : isDark 
-                        ? 'text-neutral-300 hover:bg-neutral-700 hover:text-white'
-                        : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
-                  }`
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
+            {navItems.map((item) => {
+              const isItemActive = item.path === '/'
+                ? location.pathname === '/'
+                : location.pathname.startsWith(item.path)
+              return (
+                <NavLink
+                  key={item.label}
+                  to={item.path}
+                  className={() =>
+                    `rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                      isItemActive
+                        ? 'bg-brand-500 text-white'
+                        : isDark 
+                          ? 'text-neutral-300 hover:bg-neutral-700 hover:text-white'
+                          : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+                    }`
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              )
+            })}
           </nav>
         </div>
 
