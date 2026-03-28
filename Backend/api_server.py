@@ -1243,18 +1243,89 @@ async def get_all_skills():
             return {"results": sorted_skills, "count": len(sorted_skills)}
 
 
+def _is_valid_location_string(addr: str) -> bool:
+    """Return True only if addr looks like a real geographic location string.
+
+    Rejects skill fragments, tech phrases, and sentences accidentally stored
+    in the address column (e.g. 'Activity Diagrams Using', 'Full Stack Developer').
+    """
+    import re as _re
+    a = (addr or "").strip()
+    if not a or len(a) > 100:
+        return False
+    al = a.lower()
+
+    # Reject phrases containing verb-context tech words that are never geographic
+    _BAD_WORDS = {
+        "using", "working", "developing", "building", "managing", "designing",
+        "developer", "engineer", "architect", "analyst", "consultant", "specialist",
+        "software", "hardware", "diagrams", "framework", "database", "testing",
+        "deployment", "integration", "migration", "automation", "implementation",
+        "experience", "years", "skills", "responsibilities", "summary", "objective",
+        "activity", "module", "system", "platform", "solution", "process",
+    }
+    for bad in _BAD_WORDS:
+        if _re.search(rf'\b{bad}\b', al):
+            return False
+
+    # A valid location must match at least one of:
+    # 1. Contains a comma → "City, State" / "City, Country"
+    if "," in a:
+        return True
+    # 2. Is or contains a known country name
+    _COUNTRIES = {
+        "united states", "usa", "u.s.a", "india", "canada", "australia",
+        "united kingdom", "uk", "germany", "france", "singapore", "dubai",
+        "uae", "pakistan", "china", "japan", "netherlands", "ireland",
+        "new zealand", "south africa", "malaysia", "philippines",
+    }
+    if any(_re.search(rf'\b{_re.escape(c)}\b', al) for c in _COUNTRIES):
+        return True
+    # 3. Is or contains a US state full name
+    _US_STATES = {
+        "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+        "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+        "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+        "maine", "maryland", "massachusetts", "michigan", "minnesota",
+        "mississippi", "missouri", "montana", "nebraska", "nevada",
+        "new hampshire", "new jersey", "new mexico", "new york",
+        "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+        "pennsylvania", "rhode island", "south carolina", "south dakota",
+        "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+        "west virginia", "wisconsin", "wyoming",
+    }
+    if any(_re.search(rf'\b{_re.escape(s)}\b', al) for s in _US_STATES):
+        return True
+    # 4. Contains a US ZIP code pattern
+    if _re.search(r'\b\d{5}(?:-\d{4})?\b', a):
+        return True
+    # 5. Two-word city names like "New York" or "Los Angeles" — single-token cities
+    #    that passed all bad-word checks are likely valid (e.g. "Mumbai", "London").
+    words = a.split()
+    if len(words) <= 3:
+        return True
+
+    return False
+
+
 @app.get("/locations/all")
 async def get_all_locations():
-    """Return every distinct location/address from candidate profiles."""
+    """Return distinct, validated location/address values from candidate profiles."""
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(f"""
                 SELECT DISTINCT address
                 FROM {CANDIDATES_TABLE}
                 WHERE address IS NOT NULL AND address != ''
+                  AND length(address) <= 100
                 ORDER BY address
             """)
-            locations = [row["address"] for row in cursor.fetchall()]
+            # Apply Python-level geographic validation to strip non-location garbage
+            locations = [
+                row["address"]
+                for row in cursor.fetchall()
+                if _is_valid_location_string(row["address"])
+            ]
             return {"results": locations, "count": len(locations)}
 
 
