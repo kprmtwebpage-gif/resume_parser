@@ -93,6 +93,7 @@ def _migrate_job_applications():
             'experience': 'INTEGER',
             'linkedin_url': 'TEXT',
             'domain_expert': 'TEXT',
+            'application_status': 'VARCHAR(50)',
         }
         with engine.connect() as conn:
             for col_name, col_type in new_columns.items():

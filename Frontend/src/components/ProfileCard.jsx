@@ -11,8 +11,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { apiUrl } from '../config'
 import { api } from '../services/api'
 import ResumeViewer from './ResumeViewer.jsx'
-import EmailProviderModal from './EmailProviderModal.jsx'
 import CommentModal from './CommentModal.jsx'
+import SendEmailPanel from './email/SendEmailPanel.jsx'
 
 function initials(first, last) {
   const a = (first || '').trim()[0] || ''
@@ -101,9 +101,8 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const { colors, isDark } = useTheme()
   const { isAdmin } = useAuth()
   const [isViewerOpen, setIsViewerOpen] = useState(false)
-  const [isGenerated, setIsGenerated] = useState(false)
   const [isDownloaded, setIsDownloaded] = useState(false)
-  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
+  const [isSendFlowOpen, setIsSendFlowOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
   const actionsButtonRef = useRef(null)
@@ -161,60 +160,12 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     setIsViewerOpen(false)
   }, [])
 
-  const handleGenerateClick = useCallback((e) => {
+  const handleSendToHRClick = useCallback((e) => {
     e.stopPropagation()
     e.preventDefault()
-    // Mark as generated and open modal
-    setIsGenerated(true)
     setIsDropdownOpen(false)
-    setIsEmailModalOpen(true)
+    setIsSendFlowOpen(true)
   }, [])
-
-  const handleEmailProvider = useCallback((provider) => {
-    // Generate email subject and body from candidate data
-    const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
-    const primarySkill = row.job_title || row.primary_skill || 'N/A'
-    
-    const subject = `Profile Submission – ${fullName} – ${primarySkill}`
-    
-    const body = `PERSONAL DETAILS:
-Full Name: ${fullName}
-Current Location: ${row.location || row.address || 'N/A'}
-Phone: ${row.phone || 'N/A'}
-Email: ${row.email || 'N/A'}
-LinkedIn: ${linkedinUrl || 'N/A'}
-
-EDUCATIONAL DETAILS:
-Degree: ${row.degree || row.education || 'N/A'}
-University: ${row.university || 'N/A'}
-Year of Completion: ${row.graduation_year || 'N/A'}
-
-SUBMITTAL DETAILS:
-Work Authorization: ${row.work_authorization || row.visa_status || 'N/A'}
-Submittal Type: ${row.submittal_type || 'N/A'}
-Rate: $${row.rate || row.hourly_rate || 'N/A'}
-Availability: ${row.availability || 'N/A'}`
-
-    // Encode subject and body for URL
-    const encodedSubject = encodeURIComponent(subject)
-    const encodedBody = encodeURIComponent(body)
-
-    // Build email URL based on provider
-    let emailUrl = ''
-    if (provider === 'gmail') {
-      emailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=&su=${encodedSubject}&body=${encodedBody}`
-    } else if (provider === 'outlook') {
-      emailUrl = `https://outlook.office.com/mail/deeplink/compose?to=&subject=${encodedSubject}&body=${encodedBody}`
-    }
-
-    // Open in new tab
-    if (emailUrl) {
-      window.open(emailUrl, '_blank', 'noopener,noreferrer')
-    }
-
-    // Close modal
-    setIsEmailModalOpen(false)
-  }, [row])
 
   const handleEditClick = useCallback((e) => {
     e.stopPropagation()
@@ -387,7 +338,7 @@ Availability: ${row.availability || 'N/A'}`
                 </button>
                 <button
                   type="button"
-                  onClick={handleGenerateClick}
+                  onClick={handleSendToHRClick}
                   className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
                   style={{ color: colors.text }}
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
@@ -459,12 +410,6 @@ Availability: ${row.availability || 'N/A'}`
         fileName={row.resume_filename}
       />
 
-      <EmailProviderModal
-        isOpen={isEmailModalOpen}
-        onClose={() => setIsEmailModalOpen(false)}
-        onSelectProvider={handleEmailProvider}
-      />
-
       <CommentModal
         isOpen={isCommentModalOpen}
         onClose={(saved) => {
@@ -473,6 +418,14 @@ Availability: ${row.availability || 'N/A'}`
         }}
         candidateId={row.id}
         candidateName={fullName}
+      />
+
+      <SendEmailPanel
+        isOpen={isSendFlowOpen}
+        onClose={() => setIsSendFlowOpen(false)}
+        candidateId={row.id}
+        candidateName={fullName}
+        provider={localStorage.getItem('emailProvider') || 'gmail'}
       />
     </div>
   )
