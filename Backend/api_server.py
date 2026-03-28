@@ -1775,36 +1775,65 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             (parser_id,),
                         )
                         parsed_data = cursor.fetchone()
-                        # Delete placeholder's skills row first (if any) to avoid PK conflict,
-                        # then re-point parser's skills row to placeholder_id.
-                        cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
-                        cursor.execute(
-                            f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
-                            (placeholder_id, parser_id),
-                        )
-                        cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
-                        if parsed_data:
+
+                        # Guard against email collision: if another completed row (not parser_id
+                        # or placeholder_id) already owns this email, discard the placeholder
+                        # and point to the existing record instead.
+                        _parsed_email = (parsed_data or {}).get("email")
+                        _collision_id = None
+                        if _parsed_email and _parsed_email.strip():
                             cursor.execute(
-                                f"""UPDATE {CANDIDATES_TABLE}
-                                    SET first_name = %s, last_name = %s, address = %s,
-                                        phone = %s, email = %s, qualification = %s,
-                                        visa_support = %s, work_authorization_type = %s,
-                                        linkedin = %s, profile_picture_url = %s,
-                                        parsed_at = %s, resume_parse_status = 'completed'
-                                    WHERE id = %s""",
-                                (parsed_data["first_name"], parsed_data["last_name"],
-                                 parsed_data["address"], parsed_data["phone"],
-                                 parsed_data["email"], parsed_data["qualification"],
-                                 parsed_data["visa_support"], parsed_data["work_authorization_type"],
-                                 parsed_data["linkedin"], parsed_data["profile_picture_url"],
-                                 parsed_data["parsed_at"], placeholder_id),
+                                f"""SELECT id FROM {CANDIDATES_TABLE}
+                                    WHERE LOWER(email) = LOWER(%s)
+                                      AND id NOT IN (%s, %s)
+                                    LIMIT 1""",
+                                (_parsed_email.strip(), parser_id, placeholder_id),
                             )
+                            _col = cursor.fetchone()
+                            if _col:
+                                _collision_id = _col["id"] if isinstance(_col, dict) else _col[0]
+
+                        if _collision_id:
+                            # A completed row already exists for this email — delete both
+                            # the placeholder and the parser row, keep the original.
+                            cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
+                            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
+                            if parser_id != _collision_id:
+                                cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (parser_id,))
+                                cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
+                            print(f"[DEDUP] email collision for {_parsed_email!r} — kept id={_collision_id}, discarded placeholder={placeholder_id}", flush=True)
+                            final_candidate_id = _collision_id
                         else:
+                            # Delete placeholder's skills row first (if any) to avoid PK conflict,
+                            # then re-point parser's skills row to placeholder_id.
+                            cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
                             cursor.execute(
-                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
-                                (placeholder_id,),
+                                f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
+                                (placeholder_id, parser_id),
                             )
-                        final_candidate_id = placeholder_id
+                            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
+                            if parsed_data:
+                                cursor.execute(
+                                    f"""UPDATE {CANDIDATES_TABLE}
+                                        SET first_name = %s, last_name = %s, address = %s,
+                                            phone = %s, email = %s, qualification = %s,
+                                            visa_support = %s, work_authorization_type = %s,
+                                            linkedin = %s, profile_picture_url = %s,
+                                            parsed_at = %s, resume_parse_status = 'completed'
+                                        WHERE id = %s""",
+                                    (parsed_data["first_name"], parsed_data["last_name"],
+                                     parsed_data["address"], parsed_data["phone"],
+                                     parsed_data["email"], parsed_data["qualification"],
+                                     parsed_data["visa_support"], parsed_data["work_authorization_type"],
+                                     parsed_data["linkedin"], parsed_data["profile_picture_url"],
+                                     parsed_data["parsed_at"], placeholder_id),
+                                )
+                            else:
+                                cursor.execute(
+                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                                    (placeholder_id,),
+                                )
+                            final_candidate_id = placeholder_id
                     else:
                         # Parser updated placeholder in-place via ON CONFLICT — verify it has data
                         cursor.execute(
