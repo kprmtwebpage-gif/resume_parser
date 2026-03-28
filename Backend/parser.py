@@ -8183,15 +8183,29 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
         (r'\b(reference|hobbies|interests|languages\s+known|personal\s+details|date\s+of\s+birth|dob|nationality|passport)\b', 1),
     ]
 
-    # Strong non-resume indicators — only trigger rejection when the document
-    # is clearly a different type of document with near-zero resume signals.
+    # Strong non-resume indicators — set has_non_resume_signal and subtract
+    # from score when the document is clearly NOT a resume.
     _non_resume_signals = [
+        # Invoices / billing
         (r'\b(invoice|invoices|invoice\s+number|inv\s*#|bill\s+to|amount\s+due|total\s+amount|subtotal|tax\s+amount)\b', -6),
+        # Purchase orders
         (r'\b(purchase\s+order|p\.?o\.?\s+number|ship\s+to|payment\s+terms|net\s+\d+\s+days)\b', -5),
+        # Legal contracts
         (r'\b(whereas|hereinafter|party\s+of\s+the|witnesseth|in\s+witness\s+whereof)\b', -5),
+        # Books / academic papers
         (r'\b(table\s+of\s+contents|chapter\s+\d|bibliography|references\s+cited)\b', -4),
+        # Medical records
         (r'\b(patient\s+name|diagnosis|prescription|medication|dosage|medical\s+record)\b', -5),
+        # Item/product lists
         (r'\b(quantity|unit\s+price|line\s+item|item\s+description|product\s+code|sku)\b', -4),
+        # Job postings / JDs (employer advertising a role, not a person's resume)
+        (r'\b(we\s+are\s+(hiring|looking\s+for|seeking)|job\s+(posting|advertisement|ad)\b|apply\s+now|apply\s+here|how\s+to\s+apply)\b', -5),
+        (r'\b(equal\s+opportunity\s+employer|eoe|benefits\s+package|compensation\s+package|salary\s+range|we\s+offer)\b', -5),
+        (r'\b(about\s+(the\s+)?(company|role|position|team)|job\s+requirements|ideal\s+candidate|must\s+have\s+experience)\b', -4),
+        # Certificates / awards
+        (r'\b(certificate\s+of\s+(completion|achievement|participation)|this\s+is\s+to\s+certify|has\s+successfully\s+completed|awarded\s+to)\b', -5),
+        # Newsletters / articles / reports (not personal documents)
+        (r'\b(dear\s+(sir|madam|hiring\s+manager)|to\s+whom\s+it\s+may\s+concern)\b', -3),  # cover letters
     ]
 
     has_non_resume_signal = False
@@ -8204,10 +8218,14 @@ def _is_likely_resume(text: str) -> tuple[bool, str]:
             score += weight  # weight is negative
             has_non_resume_signal = True
 
-    # Only reject if score is very low AND there's a clear non-resume signal.
-    # This prevents false positives on genuine resumes with unusual formatting.
+    # Reject rule 1: zero resume signals at all — clearly not a resume.
+    if score <= 0:
+        return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
+
+    # Reject rule 2: very low resume score AND an explicit non-resume document type detected.
     if score < 2 and has_non_resume_signal:
         return False, "This file does not appear to be a resume. Please upload a valid resume or CV."
+
     return True, ""
 
 
