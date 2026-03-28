@@ -2799,29 +2799,23 @@ async def admin_upload_metrics(request: Request):
             user_map = {r["id"]: r["username"] for r in users_rows}
             user_ids = list(user_map.keys())
 
-            # Grand total of successfully parsed resumes in DB
-            # Apply the same email-dedup logic as the /candidates endpoint
-            # so admin count matches what the homepage shows.
-            cursor.execute(f"""SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE} c
-                WHERE c.resume_parse_status = 'completed'
-                  AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
-                    SELECT 1 FROM {CANDIDATES_TABLE} newer
-                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
-                  ))""")
+            # Grand total of successfully parsed resumes in DB.
+            # Shows total uploads (not deduped) — matches upload activity tracking.
+            # People Search shows fewer (213) because it hides older duplicate emails,
+            # but the admin count intentionally reflects all successful work done.
+            cursor.execute(f"SELECT COUNT(*) AS total FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'")
             total_resumes = cursor.fetchone()["total"]
 
-            # Get daily upload counts per user for last 90 days (completed + deduped by email)
-            # Uses same NOT EXISTS dedup as /candidates so numbers match People Search.
+            # Get daily upload counts per user for last 90 days (completed only)
+            # Counts every successful upload — dedup is intentionally NOT applied here
+            # because metrics track user activity (how many resumes were processed),
+            # not unique visible profiles (that's what People Search is for).
             cursor.execute(f"""
                 SELECT DATE(c.parsed_at) as day, c.uploaded_by, COUNT(*) as cnt
                 FROM {CANDIDATES_TABLE} c
                 WHERE c.parsed_at IS NOT NULL AND c.uploaded_by IS NOT NULL
                   AND c.resume_parse_status = 'completed'
                   AND c.parsed_at >= CURRENT_DATE - INTERVAL '90 days'
-                  AND (c.email IS NULL OR c.email = '' OR NOT EXISTS (
-                    SELECT 1 FROM {CANDIDATES_TABLE} newer
-                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
-                  ))
                 GROUP BY DATE(c.parsed_at), c.uploaded_by
                 ORDER BY day
             """)
