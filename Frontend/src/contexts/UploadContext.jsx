@@ -236,9 +236,8 @@ export function UploadProvider({ children }) {
 
       setUploads((prev) => [...prev, ...newUploads])
 
-      // 3 concurrent uploads — fast but each file's timeout only counts from
-      // when it actually starts parsing, not from when it enters the queue
-      const runWithConcurrency = async (items, concurrency = 3) => {
+      // 6 concurrent uploads — matches 8-CPU server capacity
+      const runWithConcurrency = async (items, concurrency = 6) => {
         const queue = [...items]
         const workers = Array.from(
           { length: Math.min(concurrency, items.length) },
@@ -252,7 +251,7 @@ export function UploadProvider({ children }) {
         await Promise.all(workers)
       }
 
-      runWithConcurrency(newUploads, 3)
+      runWithConcurrency(newUploads, 6)
     },
     [uploadFileToBackend]
   )
