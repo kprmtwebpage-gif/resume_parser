@@ -646,6 +646,30 @@ async def _create_indexes():
     except Exception as e:
         print(f"[WARN] Could not clean up stuck processing records: {e}")
 
+    # Warm up parser subprocess so spaCy/pdfplumber are already loaded in the OS
+    # disk cache before the first real upload arrives. This cuts first-parse latency
+    # from ~5s (cold) to <1s (warm).
+    try:
+        import subprocess as _warmup_sp
+        import sys as _warmup_sys
+        _warmup_env = os.environ.copy()
+        _warmup_env["RESUME_INPUT_DIR"] = "/tmp"
+        _warmup_env["RESUME_PROCESS_ONLY"] = "__warmup__"
+        _warmup_env["QUIET"] = "1"
+        _warmup_env["PYTHONIOENCODING"] = "utf-8"
+        _warmup_proc = _warmup_sp.Popen(
+            [_warmup_sys.executable, str(_UploadPath(__file__).parent / "parser.py")],
+            env=_warmup_env,
+            stdout=_warmup_sp.DEVNULL,
+            stderr=_warmup_sp.DEVNULL,
+            cwd=str(Path(__file__).parent),
+        )
+        # Don't wait — fire and forget; just importing & loading spaCy warms the cache
+        asyncio.get_event_loop().run_in_executor(None, _warmup_proc.wait)
+        print("[OK] Parser warmup subprocess launched")
+    except Exception as _we:
+        print(f"[WARN] Parser warmup failed: {_we}")
+
     # Ensure the download-quota table exists (the module-level call at import
     # time was a no-op because get_db() wasn't defined yet).
     try:

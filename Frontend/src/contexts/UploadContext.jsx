@@ -94,8 +94,21 @@ export function UploadProvider({ children }) {
               : u
           )
         )
-      } catch {
-        // Polling error — keep trying
+      } catch (err) {
+        // 404 means the placeholder was deleted (parse failed or not-a-resume)
+        // Stop polling and surface it as a failure so the user can re-upload
+        const status = err?.response?.status
+        if (status === 404) {
+          setUploads(prev =>
+            prev.map(u =>
+              u.id === upload.id
+                ? { ...u, progress: 100, status: 'failed', errorMessage: 'File could not be parsed — please try re-uploading' }
+                : u
+            )
+          )
+          return
+        }
+        // Other network errors — keep trying
       }
     }
     // Polling window elapsed — parsing is still running in the background.
