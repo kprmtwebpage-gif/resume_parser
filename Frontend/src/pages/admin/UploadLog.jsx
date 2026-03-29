@@ -208,7 +208,9 @@ export default function UploadLog() {
                       <td className="px-5 py-3.5">
                         <span
                           className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${sm.cls}`}
-                          title={r.status === 'duplicate' && r.existing_id ? `Already in DB as candidate #${r.existing_id}` : undefined}
+                          title={r.status === 'duplicate' && r.parse_failure_reason
+                            ? r.parse_failure_reason.replace('duplicate_of:', 'Already in DB as candidate #')
+                            : undefined}
                         >
                           {sm.label}
                         </span>

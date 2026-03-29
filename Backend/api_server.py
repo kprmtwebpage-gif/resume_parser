@@ -1832,17 +1832,24 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             # Fall through to normal upload flow below
         else:
             full_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or None
-            _log_upload_event(
-                status="duplicate",
-                resume_filename=file.filename,
-                uploader_id=_uploader_id,
-                uploader_username=_uploader_username,
-                uploader_email=_uploader_email,
-                first_name=sha_existing.get("first_name"),
-                last_name=sha_existing.get("last_name"),
-                job_title=sha_existing.get("job_title"),
-                existing_id=sha_existing["id"],
-            )
+            # Store duplicate event in DB so all uvicorn workers see it in Upload Log.
+            # resume_sha256 is intentionally omitted — the existing completed row already
+            # owns that SHA; inserting it here would violate the UNIQUE constraint.
+            try:
+                _dup_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or ""
+                _dup_reason = f"duplicate_of:{sha_existing['id']}" + (f" ({_dup_name})" if _dup_name else "")
+                with get_db() as _dup_conn:
+                    with _dup_conn.cursor() as _dup_cur:
+                        _dup_cur.execute(
+                            f"""INSERT INTO {CANDIDATES_TABLE}
+                                 (resume_filename, resume_parse_status, parsed_at,
+                                  uploaded_by, parse_failure_reason)
+                                 VALUES (%s, 'duplicate', NOW(), %s, %s)""",
+                            (file.filename, _uploader_id, _dup_reason),
+                        )
+                    _dup_conn.commit()
+            except Exception as _dup_exc:
+                print(f"[UPLOAD] Warning: failed to log duplicate event to DB: {_dup_exc}", flush=True)
             return {
                 "status": "duplicate",
                 "message": "This exact resume has already been uploaded (content match)",
@@ -3033,7 +3040,12 @@ async def admin_get_users(request: Request):
 
 @app.get("/api/admin/upload-log")
 async def admin_upload_log(request: Request):
-    """Return every uploaded resume with candidate name, file, uploader, date, and status."""
+    """Return every uploaded resume with candidate name, file, uploader, date, and status.
+
+    Duplicate events are now stored as DB rows (resume_parse_status='duplicate') so
+    they are visible across all uvicorn workers.  The in-memory ring buffer is no
+    longer used for the response.
+    """
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute("""
@@ -3044,6 +3056,7 @@ async def admin_upload_log(request: Request):
                     cp.resume_filename,
                     cp.resume_parse_status  AS status,
                     cp.parsed_at,
+                    cp.parse_failure_reason,
                     cp.uploaded_by          AS uploader_id,
                     u.username              AS uploader_username,
                     u.email                 AS uploader_email,
@@ -3055,31 +3068,22 @@ async def admin_upload_log(request: Request):
             """)
             rows = cursor.fetchall()
 
-    db_entries = [
+    return [
         {
-            "id":                r["id"],
-            "existing_id":       None,
-            "first_name":        r["first_name"],
-            "last_name":         r["last_name"],
-            "resume_filename":   r["resume_filename"],
-            "status":            r["status"],
-            "parsed_at":         r["parsed_at"].isoformat() if r["parsed_at"] else None,
-            "uploader_id":       r["uploader_id"],
-            "uploader_username": r["uploader_username"],
-            "uploader_email":    r["uploader_email"],
-            "job_title":         r["job_title"],
+            "id":                   r["id"],
+            "first_name":           r["first_name"],
+            "last_name":            r["last_name"],
+            "resume_filename":      r["resume_filename"],
+            "status":               r["status"],
+            "parsed_at":            r["parsed_at"].isoformat() if r["parsed_at"] else None,
+            "parse_failure_reason": r["parse_failure_reason"],
+            "uploader_id":          r["uploader_id"],
+            "uploader_username":    r["uploader_username"],
+            "uploader_email":       r["uploader_email"],
+            "job_title":            r["job_title"],
         }
         for r in rows
     ]
-
-    # Merge in-memory events (duplicates etc.) — newest first, no DB id
-    mem_entries = list(_upload_events)
-
-    # Combine: in-memory events first (they tend to be more recent), then DB rows.
-    # Re-sort everything by parsed_at descending so the table stays chronological.
-    combined = mem_entries + db_entries
-    combined.sort(key=lambda x: x.get("parsed_at") or "", reverse=True)
-    return combined
 
 
 @app.get("/api/admin/upload-metrics")
