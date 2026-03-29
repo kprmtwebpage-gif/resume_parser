@@ -3,9 +3,11 @@ FastAPI server for Resume Parsing Application
 Serves candidate data from PostgreSQL database
 """
 import asyncio
+import collections
 import json
 import os
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 try:
@@ -77,6 +79,37 @@ app = FastAPI(title="Resume Parser API", version="1.0.0")
 _parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "8")))
 _parse_waiting = 0   # tasks queued, waiting for a semaphore slot
 _parse_active  = 0   # tasks currently holding the semaphore (actively parsing)
+
+# In-memory ring buffer for upload events that never reach the DB:
+# duplicate, failed-type-check, etc.  Holds last 2000 events; cleared on restart.
+_upload_events: collections.deque = collections.deque(maxlen=2000)
+
+def _log_upload_event(
+    *,
+    status: str,
+    resume_filename: str,
+    uploader_id=None,
+    uploader_username: str = None,
+    uploader_email: str = None,
+    first_name: str = None,
+    last_name: str = None,
+    job_title: str = None,
+    existing_id: int = None,
+):
+    """Push a non-DB upload event into the in-memory ring buffer."""
+    _upload_events.appendleft({
+        "id":                None,          # no DB row
+        "existing_id":       existing_id,   # for duplicates: the id of the record already in DB
+        "first_name":        first_name,
+        "last_name":         last_name,
+        "resume_filename":   resume_filename,
+        "status":            status,
+        "parsed_at":         datetime.now(timezone.utc).isoformat(),
+        "uploader_id":       uploader_id,
+        "uploader_username": uploader_username,
+        "uploader_email":    uploader_email,
+        "job_title":         job_title,
+    })
 
 # ── Resume Download Quota Tracking ────────────────────────────────────────────
 DAILY_DOWNLOAD_LIMIT = 10
@@ -1727,6 +1760,8 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     # Enforce per-user concurrent upload limit
     auth_header = request.headers.get("Authorization", "")
     _uploader_id = None
+    _uploader_username = None
+    _uploader_email = None
     if AUTH_AVAILABLE and auth_header.startswith("Bearer "):
         try:
             from auth import decode_token, get_user_by_username
@@ -1736,6 +1771,8 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 u = get_user_by_username(uname)
                 if u:
                     _uploader_id = u.get("id")
+                    _uploader_username = u.get("username")
+                    _uploader_email = u.get("email")
         except Exception:
             pass
 
@@ -1795,6 +1832,17 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             # Fall through to normal upload flow below
         else:
             full_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or None
+            _log_upload_event(
+                status="duplicate",
+                resume_filename=file.filename,
+                uploader_id=_uploader_id,
+                uploader_username=_uploader_username,
+                uploader_email=_uploader_email,
+                first_name=sha_existing.get("first_name"),
+                last_name=sha_existing.get("last_name"),
+                job_title=sha_existing.get("job_title"),
+                existing_id=sha_existing["id"],
+            )
             return {
                 "status": "duplicate",
                 "message": "This exact resume has already been uploaded (content match)",
@@ -3006,9 +3054,11 @@ async def admin_upload_log(request: Request):
                 ORDER BY cp.parsed_at DESC NULLS LAST
             """)
             rows = cursor.fetchall()
-    return [
+
+    db_entries = [
         {
             "id":                r["id"],
+            "existing_id":       None,
             "first_name":        r["first_name"],
             "last_name":         r["last_name"],
             "resume_filename":   r["resume_filename"],
@@ -3021,6 +3071,15 @@ async def admin_upload_log(request: Request):
         }
         for r in rows
     ]
+
+    # Merge in-memory events (duplicates etc.) — newest first, no DB id
+    mem_entries = list(_upload_events)
+
+    # Combine: in-memory events first (they tend to be more recent), then DB rows.
+    # Re-sort everything by parsed_at descending so the table stays chronological.
+    combined = mem_entries + db_entries
+    combined.sort(key=lambda x: x.get("parsed_at") or "", reverse=True)
+    return combined
 
 
 @app.get("/api/admin/upload-metrics")

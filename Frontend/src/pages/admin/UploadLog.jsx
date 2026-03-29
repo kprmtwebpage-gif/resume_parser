@@ -6,6 +6,7 @@ const STATUS_META = {
   completed:    { label: 'Parsed',       cls: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' },
   failed:       { label: 'Failed',       cls: 'bg-red-50 text-red-600 ring-1 ring-red-200' },
   not_a_resume: { label: 'Not a Resume', cls: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' },
+  duplicate:    { label: 'Duplicate',    cls: 'bg-orange-50 text-orange-600 ring-1 ring-orange-200' },
   unknown:      { label: 'Unknown',      cls: 'bg-gray-100 text-gray-500 ring-1 ring-gray-200' },
 }
 
@@ -115,6 +116,7 @@ export default function UploadLog() {
           <option value="completed">Parsed</option>
           <option value="failed">Failed</option>
           <option value="not_a_resume">Not a Resume</option>
+          <option value="duplicate">Duplicate</option>
         </select>
 
         {/* Uploader filter */}
@@ -204,7 +206,10 @@ export default function UploadLog() {
                       </td>
                       <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap text-[12px]">{formatDate(r.parsed_at)}</td>
                       <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${sm.cls}`}>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${sm.cls}`}
+                          title={r.status === 'duplicate' && r.existing_id ? `Already in DB as candidate #${r.existing_id}` : undefined}
+                        >
                           {sm.label}
                         </span>
                       </td>
