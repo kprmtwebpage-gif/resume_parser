@@ -180,6 +180,12 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     setIsCommentModalOpen(true)
   }, [])
 
+  const handleDeleteClick = useCallback((e) => {
+    e.stopPropagation()
+    setIsDropdownOpen(false)
+    if (onDelete) onDelete()
+  }, [onDelete])
+
   return (
     <div 
       className="transition-all duration-300"

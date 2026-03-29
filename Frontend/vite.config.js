@@ -17,6 +17,8 @@ export default defineConfig({
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/candidates': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/upload-resume': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/upload-status': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/upload': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/stats': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/search': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/skills': { target: 'http://127.0.0.1:8000', changeOrigin: true },
@@ -32,6 +34,9 @@ export default defineConfig({
       '/uploads': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/standalone-comments': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/candidate-comments': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/company-jobs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/version': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })

@@ -6,7 +6,7 @@ Completely independent — does NOT modify any existing tables.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from .database import Base
@@ -23,10 +23,10 @@ class CandidateComment(Base):
         nullable=False,
     )
     candidate_id = Column(
-        PG_UUID(as_uuid=True),
+        Integer,
         nullable=False,
         index=True,
-        comment="References the candidates table id column",
+        comment="References the candidate_profile table id column",
     )
     comment_text = Column(Text, nullable=False)
     created_at = Column(
