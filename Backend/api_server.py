@@ -1820,15 +1820,15 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             )
             sha_existing = cursor.fetchone()
     if sha_existing:
-        # If the previous upload failed, delete the failed row so user can re-upload
-        if sha_existing.get("resume_parse_status") in ("failed", "processing"):
+        # If the previous upload failed/was not a resume, delete the row so user can re-upload
+        if sha_existing.get("resume_parse_status") in ("failed", "processing", "not_a_resume"):
             failed_id = sha_existing["id"]
             with get_db() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (failed_id,))
                     cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (failed_id,))
                 conn.commit()
-            print(f"[RE-UPLOAD] Deleted failed row id={failed_id} for file={file.filename}, allowing re-upload", flush=True)
+            print(f"[RE-UPLOAD] Deleted {sha_existing.get('resume_parse_status')} row id={failed_id} for file={file.filename}, allowing re-upload", flush=True)
             # Fall through to normal upload flow below
         else:
             full_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or None
