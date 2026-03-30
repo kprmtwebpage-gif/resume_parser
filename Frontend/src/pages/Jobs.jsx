@@ -4,6 +4,7 @@ import { ChevronDownIcon, ChevronUpIcon, XMarkIcon, ArchiveBoxIcon, ArrowPathIco
 import { api } from '../services/api'
 import CreateJobModal from '../components/CreateJobModal'
 import JobCard from '../components/JobCard'
+import JobMatchPanel from '../components/ats/JobMatchPanel'
 import FloatingInput from '../components/FloatingInput'
 import TagInput from '../components/TagInput'
 import '../components/FloatingInput.css'
@@ -117,6 +118,7 @@ export default function Jobs() {
   
   /* ── Jobs state ── */
   const [jobs, setJobs] = useState([])
+  const [analyzeJobTarget, setAnalyzeJobTarget] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -1072,6 +1074,7 @@ export default function Jobs() {
                       onUnhold={handleUnholdJob}
                       onClose={handleCloseJob}
                       onApplied={handleAppliedClick}
+                      onAnalyze={(job) => setAnalyzeJobTarget(job)}
                     />
                   ))}
                 </div>
@@ -1091,6 +1094,15 @@ export default function Jobs() {
         onDelete={handleArchiveJob}
         onDuplicate={handleDuplicateJob}
       />
+
+      {/* ATS Match Panel */}
+      {analyzeJobTarget && (
+        <JobMatchPanel
+          jobId={analyzeJobTarget.id}
+          jobTitle={analyzeJobTarget.job_title}
+          onClose={() => setAnalyzeJobTarget(null)}
+        />
+      )}
     </div>
   )
 }

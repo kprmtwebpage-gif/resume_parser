@@ -16,7 +16,7 @@ import './JobCard.css'
  *  - onClose       : (job) => void   — close job
  *  - onApplied     : (job) => void   — view applied candidates
  */
-export default function JobCard({ job, onEdit, onReview, onPublish, onCopy, onHold, onUnhold, onClose, onApplied }) {
+export default function JobCard({ job, onEdit, onReview, onPublish, onCopy, onHold, onUnhold, onClose, onApplied, onAnalyze }) {
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef(null)
   
@@ -155,14 +155,27 @@ export default function JobCard({ job, onEdit, onReview, onPublish, onCopy, onHo
       <div className="jc-actions-col">
         {/* Applied Candidates Button (Feature 11) */}
         {onApplied && (
-          <button 
-            type="button" 
-            className="jc-action-btn jc-action-btn--applied" 
+          <button
+            type="button"
+            className="jc-action-btn jc-action-btn--applied"
             title="View applied candidates"
             onClick={() => onApplied(job)}
           >
             <UserGroupIcon className="w-4 h-4" />
             <span>Applied ({applicationsCount})</span>
+          </button>
+        )}
+        {/* ATS Analyze Profiles */}
+        {onAnalyze && (
+          <button
+            type="button"
+            className="jc-action-btn"
+            style={{ backgroundColor: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe' }}
+            title="Analyze candidate profiles for this job"
+            onClick={() => onAnalyze(job)}
+          >
+            <BriefcaseIcon className="w-4 h-4" />
+            <span>Analyze</span>
           </button>
         )}
         

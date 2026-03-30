@@ -279,6 +279,14 @@ try:
 except Exception as e:
     print(f"[WARN] Pipeline module not available: {e}")
 
+# ── ATS Matching router ──────────────────────────────────
+try:
+    from ats_module import ats_router                                # noqa: E402
+    app.include_router(ats_router)
+    print("[OK] ATS module loaded")
+except Exception as e:
+    print(f"[WARN] ATS module not available: {e}")
+
 # ── Job Applications API ───────────────────────────────────────
 from fastapi import Form as FastAPIForm
 from typing import Optional as OptionalType
