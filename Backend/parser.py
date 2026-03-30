@@ -1622,6 +1622,11 @@ def extract_phone(text):
 
     text = _normalize_digits(text)
 
+    # Strip email addresses before phone extraction so that digit-heavy email
+    # usernames (e.g. "saran9655033211@gmail.com") are never mistaken for phone
+    # numbers.  Replace with a space so surrounding tokens stay separated.
+    text = re.sub(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}', ' ', text)
+
     # Prefer scanning obvious contact lines first to avoid false positives
     # from experience bullets (years, versions, etc.).
     phone_kw = re.compile(r"(?i)\b(phone|mobile|cell|tel|telephone|contact)\b")
@@ -4187,7 +4192,21 @@ def extract_address(
                 if len(digits) >= 11 and digits[0] != "0":
                     num = phonenumbers.parse("+" + digits, None)
                 else:
-                    num = phonenumbers.parse(digits, os.getenv("PHONE_DEFAULT_REGION", "US"))
+                    _default_region = os.getenv("PHONE_DEFAULT_REGION", "US")
+                    num = phonenumbers.parse(digits, _default_region)
+                    # If the default-region parse is invalid (e.g., Indian mobile
+                    # "9360878880" maps to US area code 936 but exchange "087"
+                    # starts with 0 → not a real NANP number), retry with other
+                    # common regions to identify the actual country.
+                    if not phonenumbers.is_valid_number(num):
+                        for _region_alt in ["IN", "GB", "AU", "CA"]:
+                            try:
+                                _num_alt = phonenumbers.parse(digits, _region_alt)
+                                if phonenumbers.is_valid_number(_num_alt):
+                                    num = _num_alt
+                                    break
+                            except Exception:
+                                continue
 
                 region = phonenumbers.region_code_for_number(num) or ""
                 if region and pycountry is not None:
