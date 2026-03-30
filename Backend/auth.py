@@ -431,6 +431,34 @@ async def change_password(
 
 # â”€â”€ Admin-only routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+@router.get("/roles")
+async def get_available_roles():
+    """Get all available user roles from the user_roles table."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT role_key, role_label, description, permissions, is_active FROM user_roles WHERE is_active = true ORDER BY role_label")
+            rows = cur.fetchall()
+            if rows:
+                return rows
+            # Fallback if table doesn't exist
+            return [
+                {"role_key": "superuser", "role_label": "Super Admin", "description": "Full access"},
+                {"role_key": "admin", "role_label": "Admin", "description": "Admin access"},
+                {"role_key": "user", "role_label": "User", "description": "Standard user"},
+                {"role_key": "upload_user", "role_label": "Upload User", "description": "Upload only"},
+            ]
+    except Exception:
+        return [
+            {"role_key": "superuser", "role_label": "Super Admin"},
+            {"role_key": "admin", "role_label": "Admin"},
+            {"role_key": "user", "role_label": "User"},
+            {"role_key": "upload_user", "role_label": "Upload User"},
+        ]
+    finally:
+        _put_conn(conn)
+
+
 @router.get("/admin/users")
 async def admin_get_users(
     _: dict = Depends(get_current_admin),

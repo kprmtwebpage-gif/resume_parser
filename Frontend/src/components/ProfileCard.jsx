@@ -243,6 +243,66 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
                     Parse Failed
                   </span>
                 )}
+                {/* Market availability status indicator */}
+                {row.market_status && row.market_status !== 'open_to_work' && (
+                  <span
+                    className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded cursor-pointer"
+                    style={{
+                      backgroundColor: row.market_status === 'not_available' ? '#fee2e2'
+                        : row.market_status === 'available_higher_rate' ? '#fef3c7'
+                        : row.market_status === 'passive' ? '#e0e7ff'
+                        : '#dcfce7',
+                      color: row.market_status === 'not_available' ? '#991b1b'
+                        : row.market_status === 'available_higher_rate' ? '#92400e'
+                        : row.market_status === 'passive' ? '#4338ca'
+                        : '#166534',
+                    }}
+                    title={row.market_status_note || row.market_status.replace(/_/g, ' ')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const newStatus = prompt(
+                        'Set market status:\n- open_to_work\n- not_available\n- available_higher_rate\n- passive\n- actively_looking',
+                        row.market_status
+                      )
+                      if (newStatus) {
+                        import('../services/api').then(({ api }) => {
+                          api.patch(`/candidates/${row.id}`, { market_status: newStatus })
+                            .then(() => window.location.reload())
+                            .catch(err => alert('Failed: ' + err.message))
+                        })
+                      }
+                    }}
+                  >
+                    {row.market_status === 'not_available' ? '⊘ Unavailable'
+                      : row.market_status === 'available_higher_rate' ? '$ Higher Rate'
+                      : row.market_status === 'passive' ? '◑ Passive'
+                      : row.market_status === 'actively_looking' ? '★ Active'
+                      : row.market_status.replace(/_/g, ' ')}
+                  </span>
+                )}
+                {(!row.market_status || row.market_status === 'open_to_work') && (
+                  <span
+                    className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded cursor-pointer"
+                    style={{ backgroundColor: '#dcfce7', color: '#166534' }}
+                    title="Open to work — click to change status"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const newStatus = prompt(
+                        'Set market status:\n- open_to_work\n- not_available\n- available_higher_rate\n- passive\n- actively_looking',
+                        'open_to_work'
+                      )
+                      if (newStatus && newStatus !== 'open_to_work') {
+                        import('../services/api').then(({ api }) => {
+                          api.patch(`/candidates/${row.id}`, { market_status: newStatus })
+                            .then(() => window.location.reload())
+                            .catch(err => alert('Failed: ' + err.message))
+                        })
+                      }
+                    }}
+                  >
+                    ✓ Open
+                  </span>
+                )}
               </div>
               <div 
                 className="truncate text-xs transition-colors duration-300" 

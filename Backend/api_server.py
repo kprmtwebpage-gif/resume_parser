@@ -616,6 +616,9 @@ class Candidate(BaseModel):
     # Parse status — lets the UI flag candidates whose resume failed to parse
     parse_status: Optional[str] = None
     parse_failure_reason: Optional[str] = None
+    # Market availability status
+    market_status: Optional[str] = None
+    market_status_note: Optional[str] = None
 
 
 import subprocess as _subprocess
@@ -933,7 +936,8 @@ async def get_candidates(
                            c.linkedin, c.visa_support, 
                            c.work_authorization_type as work_authorization, s.certifications, 
                            s.tech_skills, s.years_of_experience as professional_experience,
-                           c.resume_parse_status, c.parse_failure_reason
+                           c.resume_parse_status, c.parse_failure_reason,
+                           c.market_status
                     FROM {CANDIDATES_TABLE} c
                     LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                     WHERE {where_clause}
@@ -1106,9 +1110,10 @@ async def get_candidate(candidate_id: int):
             cursor.execute(f"""
                 SELECT c.id, c.first_name, c.last_name, c.email, c.phone, c.address,
                        c.resume_filename, c.education_structured,
-                       s.job_title, c.qualification, c.linkedin, c.visa_support, 
-                       c.work_authorization_type as work_authorization, s.certifications, 
-                       s.tech_skills, s.years_of_experience as professional_experience
+                       s.job_title, c.qualification, c.linkedin, c.visa_support,
+                       c.work_authorization_type as work_authorization, s.certifications,
+                       s.tech_skills, s.years_of_experience as professional_experience,
+                       c.market_status, c.market_status_note
                 FROM {CANDIDATES_TABLE} c
                 LEFT JOIN {SKILLS_TABLE} s ON c.id = s.candidate_id
                 WHERE c.id = %s
@@ -1145,6 +1150,8 @@ async def get_candidate(candidate_id: int):
                     years_of_experience=float(row.get("professional_experience")) if row.get("professional_experience") is not None else None,
                     certifications=_split_csv(row.get("certifications")),
                 ),
+                market_status=row.get("market_status"),
+                market_status_note=row.get("market_status_note"),
             )
 
 
@@ -1620,6 +1627,8 @@ class CandidateUpdate(BaseModel):
     phone: Optional[str] = None
     linkedin: Optional[str] = None
     skills: Optional[List[str]] = None
+    market_status: Optional[str] = None
+    market_status_note: Optional[str] = None
 
 
 @app.patch("/candidates/{candidate_id}")
@@ -1646,12 +1655,21 @@ async def update_candidate(candidate_id: int, data: CandidateUpdate):
                 profile_fields["linkedin"] = data.linkedin.strip() or None
             if data.location is not None:
                 profile_fields["address"] = data.location.strip() or None
+            if data.market_status is not None:
+                profile_fields["market_status"] = data.market_status
+            if data.market_status_note is not None:
+                profile_fields["market_status_note"] = data.market_status_note
+
+            # Handle market_status_updated_at separately (SQL function)
+            extra_set = ""
+            if data.market_status is not None:
+                extra_set = ", market_status_updated_at = NOW()"
 
             if profile_fields:
                 set_clause = ", ".join(f"{col} = %s" for col in profile_fields)
                 values = list(profile_fields.values()) + [candidate_id]
                 cursor.execute(
-                    f"UPDATE {CANDIDATES_TABLE} SET {set_clause} WHERE id = %s",
+                    f"UPDATE {CANDIDATES_TABLE} SET {set_clause}{extra_set} WHERE id = %s",
                     values
                 )
 

@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import StageColumn from '../../components/pipeline/StageColumn'
 import FeedbackModal from '../../components/pipeline/FeedbackModal'
 import CandidateDetailPanel from '../../components/pipeline/CandidateDetailPanel'
+import StageTransitionModal from '../../components/pipeline/StageTransitionModal'
 import { useNavigate } from 'react-router-dom'
 import {
   fetchBoard, moveCandidate, addFeedback, addToPipeline,
@@ -24,6 +25,7 @@ export default function PipelineBoard() {
   // Modals
   const [feedbackTarget, setFeedbackTarget] = useState(null)
   const [detailTarget, setDetailTarget] = useState(null)
+  const [transitionData, setTransitionData] = useState(null) // {candidateId, candidate, fromStage, toStage}
 
   const loadBoard = useCallback(async () => {
     setLoading(true)
@@ -48,9 +50,19 @@ export default function PipelineBoard() {
   useEffect(() => { loadBoard() }, [loadBoard])
   useEffect(() => { if (tab === 'analytics') loadAnalytics() }, [tab, loadAnalytics])
 
-  const handleDrop = async (candidateId, fromStage, toStage) => {
+  const handleDrop = (candidateId, fromStage, toStage) => {
+    // Find the candidate object from board data
+    const candidate = board?.columns
+      ?.flatMap(c => c.candidates)
+      ?.find(c => c.id === candidateId)
+    setTransitionData({ candidateId, candidate, fromStage, toStage })
+  }
+
+  const handleTransitionConfirm = async (details) => {
+    if (!transitionData) return
     try {
-      await moveCandidate(candidateId, toStage)
+      await moveCandidate(transitionData.candidateId, transitionData.toStage, 'moved', details.notes)
+      setTransitionData(null)
       loadBoard()
     } catch (err) {
       console.error('Move failed:', err)
@@ -251,6 +263,17 @@ export default function PipelineBoard() {
         <CandidateDetailPanel
           candidateId={detailTarget}
           onClose={() => { setDetailTarget(null); loadBoard() }}
+        />
+      )}
+
+      {/* Stage Transition Modal (interview details + notifications) */}
+      {transitionData && (
+        <StageTransitionModal
+          candidate={transitionData.candidate}
+          fromStage={transitionData.fromStage}
+          toStage={transitionData.toStage}
+          onConfirm={handleTransitionConfirm}
+          onCancel={() => setTransitionData(null)}
         />
       )}
     </div>
