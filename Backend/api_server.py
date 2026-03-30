@@ -819,7 +819,7 @@ async def get_candidates(
     experienceYears: Optional[float] = Query(None, description="Minimum years of experience (joint with jobTitle, legacy)"),
     experienceFrom: Optional[float] = Query(None, description="Minimum years of experience (joint with jobTitle)"),
     experienceTo: Optional[float] = Query(None, description="Maximum years of experience (joint with jobTitle)"),
-    limit: int = Query(10, ge=1, le=10000, description="Number of results per page"),
+    limit: int = Query(100000, ge=1, description="Number of results per page (no upper cap)"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
     """
