@@ -496,6 +496,48 @@ def get_db():
             pool.putconn(conn)
 
 
+def _resolve_resume_path(db_filename: str) -> Optional[str]:
+    """Resolve the actual on-disk path for a resume filename stored in the DB.
+
+    The DB may hold timestamped filenames like ``resumes_cache/Foo_1773050892.pdf``
+    while the actual file on disk is ``resumes_cache/Foo.pdf`` (the timestamp was
+    appended on upload collision then lost when UAT was seeded from production).
+    This function tries progressively looser matches and returns the first
+    existing path, or None if nothing is found.
+    """
+    import re as _re
+    backend_dir = os.path.dirname(__file__)
+    exact = os.path.join(backend_dir, db_filename)
+    if os.path.exists(exact):
+        return exact
+
+    parent = os.path.dirname(exact)
+    base = os.path.basename(exact)
+    stem, ext = os.path.splitext(base)
+
+    # Strip trailing _<digits>  (e.g. Foo_1773050892 → Foo)
+    stem_no_ts = _re.sub(r'_\d+$', '', stem)
+    if stem_no_ts != stem:
+        candidate = os.path.join(parent, stem_no_ts + ext)
+        if os.path.exists(candidate):
+            return candidate
+
+    # Strip trailing (n) bracket variant  (e.g. Foo(1) → Foo)
+    stem_no_paren = _re.sub(r'\(\d+\)$', '', stem).rstrip()
+    if stem_no_paren != stem:
+        candidate = os.path.join(parent, stem_no_paren + ext)
+        if os.path.exists(candidate):
+            return candidate
+        # Also strip _<digits> after removing bracket
+        stem_both = _re.sub(r'_\d+$', '', stem_no_paren)
+        if stem_both != stem_no_paren:
+            candidate = os.path.join(parent, stem_both + ext)
+            if os.path.exists(candidate):
+                return candidate
+
+    return None
+
+
 def _split_csv(value: Optional[str]) -> List[str]:
     if not value:
         return []
@@ -1520,9 +1562,9 @@ async def download_resume(
             if not row or not row.get("resume_filename"):
                 raise HTTPException(status_code=404, detail="Resume file not found")
             
-            resume_path = os.path.join(os.path.dirname(__file__), row["resume_filename"])
+            resume_path = _resolve_resume_path(row["resume_filename"])
             
-            if not os.path.exists(resume_path):
+            if not resume_path:
                 raise HTTPException(status_code=404, detail="Resume file does not exist on disk")
             
             filename = os.path.basename(resume_path)
@@ -1571,9 +1613,9 @@ async def get_resume_text(candidate_id: int):
             if not row or not row.get("resume_filename"):
                 raise HTTPException(status_code=404, detail="Resume file not found")
 
-            resume_path = os.path.join(os.path.dirname(__file__), row["resume_filename"])
+            resume_path = _resolve_resume_path(row["resume_filename"])
 
-            if not os.path.exists(resume_path):
+            if not resume_path:
                 raise HTTPException(status_code=404, detail="Resume file does not exist on disk")
 
             ext = os.path.splitext(resume_path)[1].lower()
