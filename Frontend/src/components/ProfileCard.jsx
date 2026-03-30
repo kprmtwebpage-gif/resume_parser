@@ -105,6 +105,9 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const [isSendFlowOpen, setIsSendFlowOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
+  const [showPipelineJobPicker, setShowPipelineJobPicker] = useState(false)
+  const [pipelineJobs, setPipelineJobs] = useState([])
+  const [pipelineLoading, setPipelineLoading] = useState(false)
   const actionsButtonRef = useRef(null)
 
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
@@ -414,6 +417,20 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
                 >
                   Comment
                 </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsDropdownOpen(false)
+                    setShowPipelineJobPicker(true)
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm transition-all duration-300"
+                  style={{ color: '#6366f1' }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? '#1e1b4b' : '#eef2ff'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  Add to Pipeline
+                </button>
                 {user?.role === 'superuser' && (
                   <button
                     type="button"
@@ -454,6 +471,81 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
         candidateName={fullName}
         provider={localStorage.getItem('emailProvider') || 'gmail'}
       />
+
+      {/* Job Picker for Pipeline */}
+      {showPipelineJobPicker && (
+        <div style={{ position:'fixed',inset:0,zIndex:9999,backgroundColor:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center' }}
+             onClick={() => setShowPipelineJobPicker(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            backgroundColor: isDark ? '#1e293b' : '#fff', borderRadius:'16px', padding:'28px',
+            width:'100%', maxWidth:'480px', maxHeight:'70vh', overflowY:'auto',
+            boxShadow:'0 25px 50px -12px rgba(0,0,0,0.3)',
+          }}>
+            <h3 style={{ fontSize:'18px', fontWeight:700, color: colors.text, marginBottom:'4px' }}>Add to Interview Pipeline</h3>
+            <p style={{ fontSize:'13px', color: isDark ? '#94a3b8' : '#64748b', marginBottom:'16px' }}>
+              Select a job for <strong>{fullName}</strong>
+            </p>
+            {!pipelineJobs.length && !pipelineLoading && (
+              <div style={{ textAlign:'center', padding:'20px', color: isDark ? '#64748b' : '#94a3b8' }}>
+                <button onClick={() => {
+                  setPipelineLoading(true)
+                  api.get('/api/job-projects').then(r => setPipelineJobs(r.data)).catch(console.error).finally(() => setPipelineLoading(false))
+                }} style={{ padding:'10px 24px', borderRadius:'8px', border:'none', backgroundColor:'#6366f1', color:'#fff', fontWeight:600, cursor:'pointer', fontSize:'14px' }}>
+                  Load Jobs
+                </button>
+              </div>
+            )}
+            {pipelineLoading && <div style={{ padding:'20px', textAlign:'center', color: isDark ? '#64748b' : '#94a3b8' }}>Loading jobs...</div>}
+            {pipelineJobs.map(job => (
+              <div key={job.id} onClick={() => {
+                import('../services/pipelineApi').then(({ addToPipeline }) => {
+                  addToPipeline({
+                    candidate_id: row.id,
+                    candidate_name: fullName,
+                    candidate_email: row.email,
+                    candidate_phone: row.phone,
+                    job_id: job.id,
+                    job_title: job.job_title,
+                    current_stage: 'screening',
+                  }).then(() => { setShowPipelineJobPicker(false); alert(`${fullName} added to pipeline for "${job.job_title}"`) })
+                    .catch(err => alert(err.response?.data?.detail || 'Failed'))
+                })
+              }} style={{
+                padding:'12px 16px', borderRadius:'10px', cursor:'pointer', marginBottom:'8px',
+                border:`1px solid ${isDark ? '#334155' : '#e5e7eb'}`, transition:'all 0.15s',
+                backgroundColor: isDark ? '#0f172a' : '#f8fafc',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor='#6366f1'; e.currentTarget.style.backgroundColor = isDark ? '#1e1b4b' : '#eef2ff' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = isDark ? '#334155' : '#e5e7eb'; e.currentTarget.style.backgroundColor = isDark ? '#0f172a' : '#f8fafc' }}>
+                <div style={{ fontWeight:600, fontSize:'14px', color: colors.text }}>{job.job_title}</div>
+                <div style={{ fontSize:'12px', color: isDark ? '#64748b' : '#9ca3af', marginTop:'2px' }}>
+                  {job.company} {job.location ? `• ${job.location}` : ''} {job.status ? `• ${job.status}` : ''}
+                </div>
+              </div>
+            ))}
+            {pipelineJobs.length > 0 && (
+              <div onClick={() => {
+                import('../services/pipelineApi').then(({ addToPipeline }) => {
+                  addToPipeline({
+                    candidate_id: row.id, candidate_name: fullName,
+                    candidate_email: row.email, candidate_phone: row.phone,
+                    current_stage: 'screening',
+                  }).then(() => { setShowPipelineJobPicker(false); alert(`${fullName} added to pipeline (no specific job)`) })
+                    .catch(err => alert(err.response?.data?.detail || 'Failed'))
+                })
+              }} style={{
+                padding:'12px 16px', borderRadius:'10px', cursor:'pointer', marginTop:'4px',
+                border:`1px dashed ${isDark ? '#475569' : '#cbd5e1'}`, textAlign:'center',
+                color: isDark ? '#94a3b8' : '#64748b', fontSize:'13px',
+              }}
+              onMouseEnter={e => e.currentTarget.style.borderColor='#6366f1'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = isDark ? '#475569' : '#cbd5e1'}>
+                Add without specific job
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

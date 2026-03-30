@@ -27,6 +27,9 @@ import CustomerCreate from './pages/customer/CustomerCreate.jsx'
 import CustomerDetail from './pages/customer/CustomerDetail.jsx'
 import SendMail from './pages/SendMail.jsx'
 import TemplatesPage from './pages/TemplatesPage.jsx'
+import Interviews from './pages/Interviews.jsx'
+import PipelineBoard from './pages/pipeline/PipelineBoard.jsx'
+import PipelineSettings from './pages/pipeline/PipelineSettings.jsx'
 
 function AdminGuard({ children }) {
   try {
@@ -117,6 +120,11 @@ function AppContent() {
         <Route path="/customer" element={<DashboardLayout><CustomerList /></DashboardLayout>} />
         <Route path="/customer/new" element={<DashboardLayout><CustomerCreate /></DashboardLayout>} />
         <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
+        {/* Interview Scheduling */}
+        <Route path="/interviews" element={<DashboardLayout><Interviews /></DashboardLayout>} />
+        {/* Interview Pipeline Kanban */}
+        <Route path="/pipeline" element={<DashboardLayout><PipelineBoard /></DashboardLayout>} />
+        <Route path="/pipeline/settings" element={<AdminGuard><DashboardLayout><PipelineSettings /></DashboardLayout></AdminGuard>} />
         {/* Send Mail page */}
         <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
         {/* Templates page (part of Customer module) */}

@@ -71,9 +71,10 @@ export default function LoginPage({ onLoginSuccess }) {
           </div>
 
           <div className="admin-login-right">
-            <div className="admin-logo-section">
-              <img src={logoImage} alt="KPRMT Logo" className="admin-logo-image" />
-              <h2 className="admin-logo-text">KPRMT Sign In</h2>
+            <div className="admin-logo-section" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+              <img src={logoImage} alt="KPRMT Logo" className="admin-logo-image" style={{ width: '64px', height: '64px', objectFit: 'contain' }} />
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', margin: 0, letterSpacing: '1px' }}>KPRMT Global Solutions</h2>
+              <p style={{ fontSize: '14px', color: '#6366f1', fontWeight: 600, margin: 0 }}>Sign In</p>
             </div>
 
             {error && <div className="admin-error-message">{error}</div>}

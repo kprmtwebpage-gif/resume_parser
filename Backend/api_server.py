@@ -263,6 +263,22 @@ try:
 except Exception as e:
     print(f"[WARN] Email module not available: {e}")
 
+# ── Interview Scheduling router ──────────────────────────────
+try:
+    from interview_module import interview_router                    # noqa: E402
+    app.include_router(interview_router)
+    print("[OK] Interview module loaded")
+except Exception as e:
+    print(f"[WARN] Interview module not available: {e}")
+
+# ── Pipeline Kanban router ───────────────────────────────
+try:
+    from pipeline_module import pipeline_router                      # noqa: E402
+    app.include_router(pipeline_router)
+    print("[OK] Pipeline module loaded")
+except Exception as e:
+    print(f"[WARN] Pipeline module not available: {e}")
+
 # ── Job Applications API ───────────────────────────────────────
 from fastapi import Form as FastAPIForm
 from typing import Optional as OptionalType

@@ -9,6 +9,8 @@ import logoUrl from '../assets/company-logo.png'
 const baseNavItems = [
   { label: 'Search', path: '/' },
   { label: 'Jobs', path: '/jobs' },
+  { label: 'Pipeline', path: '/pipeline' },
+  { label: 'Interviews', path: '/interviews' },
   { label: 'Upload', path: '/upload' },
   { label: 'Customer', path: '/customer' },
 ]

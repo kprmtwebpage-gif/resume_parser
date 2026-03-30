@@ -331,6 +331,32 @@ def search_jobs(
     return [get_job_with_app_count(job, db) for job in jobs]
 
 
+# ────────────────────── JOB ANALYTICS (must be before /{job_id}) ──────────────────────
+
+@router.get("/analytics", summary="Job pipeline analytics")
+def get_job_analytics(db: Session = Depends(get_db)):
+    from .models import Job, JobApplication
+    total = db.query(func.count(Job.id)).scalar() or 0
+    by_status = {}
+    for row in db.query(Job.status, func.count(Job.id)).group_by(Job.status).all():
+        by_status[row[0] or 'UNKNOWN'] = row[1]
+    posted = by_status.get('POSTED', 0)
+    draft = by_status.get('DRAFT', 0)
+    hold = by_status.get('HOLD', 0)
+    closed = by_status.get('CLOSED', 0)
+    total_applications = db.query(func.count(JobApplication.id)).scalar() or 0
+    avg_apps = round(total_applications / posted, 1) if posted > 0 else 0
+    return {
+        "total_jobs": total,
+        "posted": posted,
+        "draft": draft,
+        "on_hold": hold,
+        "closed": closed,
+        "total_applications": total_applications,
+        "avg_applications_per_job": avg_apps,
+        "by_status": by_status,
+    }
+
 # ────────────────────── EXCEL EXPORT (must be before /{job_id}) ──────────────────────
 
 @router.get(
