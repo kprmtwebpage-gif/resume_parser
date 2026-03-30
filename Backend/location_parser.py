@@ -982,14 +982,6 @@ def detect_location_from_phone(phone: str) -> LocationResult | None:
     if len(national) != 10:
         return None
 
-    # NANP structural validation: the exchange (digits 4-6, i.e. national[3:6])
-    # must start with 2-9 (never 0 or 1).  This is a strict NANP standard.
-    # Without this guard, Indian 10-digit mobile numbers whose area-code portion
-    # happens to be in _AREA_CODE_MAP are misidentified as US numbers.
-    # e.g. "9360878880": exchange "087" starts with 0 → invalid NANP → return None.
-    if national[3] in "01":
-        return None
-
     area = national[:3]
     if area not in _AREA_CODE_MAP:
         return None
