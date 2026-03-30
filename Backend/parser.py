@@ -8289,6 +8289,15 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         (r'\b(exhibit\s+[a-z0-9]|filing\s+no|court\s+filing|legal\s+exhibit|sworn\s+statement)\b', -5),
         # HR opportunity / agent operational docs — only very specific phrases unlikely in real resumes
         (r'\b(opportunity\s+id|oppt\.?\s*id|requisition\s+(?:id|no|#))\b', -5),
+        # Insurance policies (health, life, vehicle — LIC, mediclaim, etc.)
+        (r'\b(sum\s+insured|sum\s+assured|policy\s+(?:no|number|holder)|premium\s+(?:amount|due|paid)|maturity\s+(?:date|amount)|insurer|coverage\s+(?:amount|period)|renewal\s+date|policy\s+term|policy\s+benefit|insurance\s+(?:policy|certificate|bond|card)|claim\s+(?:no|number|form|settlement)|hospitalization|cashless\s+(?:claim|treatment))\b', -6),
+        (r'\b(nominee|proposer|life\s+assured|policyholder|insured\s+member|beneficiary\s+name|risk\s+commencement|grace\s+period|lapse|surrender\s+value)\b', -5),
+        # Exam / assignment papers
+        (r'\b(question\s+(?:no|number|\d)|answer\s+(?:all|any|the\s+following)|marks?\s*:\s*\d|total\s+marks|maximum\s+marks|time\s+(?:allowed|limit)\s*:\s*\d|section\s+[a-z]\s*[\:\-]|attempt\s+(?:all|any)\s+questions?)\b', -6),
+        (r'\b(roll\s+(?:no|number)|exam(?:ination)?\s+(?:paper|code|date)|mid\s*[-\s]?term|end\s*[-\s]?term|semester\s+exam|internal\s+assessment|solved\s+(?:paper|exam|question))\b', -5),
+        # Textbooks / study notes / academic papers
+        (r'\b(table\s+of\s+contents|chapter\s+\d|unit\s+\d[\s\:\-]|preface|foreword|bibliography|references\s+cited|further\s+reading|index\s+of|appendix\s+[a-z])\b', -5),
+        (r'\b(abstract[\s\:\-]|keywords[\s\:\-]|introduction[\s\:\-]|methodology|conclusion[\s\:\-]|literature\s+review|research\s+(paper|study|findings)|doi\s*:\s*10\.|issn|isbn)\b', -4),
     ]
 
     has_non_resume_signal = False
