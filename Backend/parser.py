@@ -8292,6 +8292,8 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         # Insurance policies (health, life, vehicle — LIC, mediclaim, etc.)
         (r'\b(sum\s+insured|sum\s+assured|policy\s+(?:no|number|holder)|premium\s+(?:amount|due|paid)|maturity\s+(?:date|amount)|insurer|coverage\s+(?:amount|period)|renewal\s+date|policy\s+term|policy\s+benefit|insurance\s+(?:policy|certificate|bond|card)|claim\s+(?:no|number|form|settlement)|hospitalization|cashless\s+(?:claim|treatment))\b', -6),
         (r'\b(nominee|proposer|life\s+assured|policyholder|insured\s+member|beneficiary\s+name|risk\s+commencement|grace\s+period|lapse|surrender\s+value)\b', -5),
+        # Passport / government identity documents
+        (r'\b(passport\s+(?:no|number|copy)|place\s+of\s+(?:birth|issue)|date\s+of\s+issue|date\s+of\s+expiry|nationality\s+code|surname\s*\/\s*given\s+name|issuing\s+authority|travel\s+document|visa\s+(?:no|number|type|stamp)|aadhaar|pan\s+(?:no|number|card)|driving\s+licen[sc]e\s+(?:no|number))\b', -6),
         # Exam / assignment papers
         (r'\b(question\s+(?:no|number|\d)|answer\s+(?:all|any|the\s+following)|marks?\s*:\s*\d|total\s+marks|maximum\s+marks|time\s+(?:allowed|limit)\s*:\s*\d|section\s+[a-z]\s*[\:\-]|attempt\s+(?:all|any)\s+questions?)\b', -6),
         (r'\b(roll\s+(?:no|number)|exam(?:ination)?\s+(?:paper|code|date)|mid\s*[-\s]?term|end\s*[-\s]?term|semester\s+exam|internal\s+assessment|solved\s+(?:paper|exam|question))\b', -5),
