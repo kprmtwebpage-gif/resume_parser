@@ -8210,10 +8210,6 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
       Score < 2 AND at least one strong non-resume signal → rejected
       Otherwise → accepted (benefit of the doubt)
     """
-    # Web uploads always come from a human intentionally uploading their resume.
-    if os.getenv("IS_WEB_UPLOAD") == "1":
-        return True, ""
-
     # Filename fast-path: use broad Unicode normalization (handles em/en dashes,
     # accented chars, any non-ASCII punctuation) so that filenames like
     # "A Resume – John Doe.pdf" or "2026 STEPHANIE COOPER RESUME - Cigna.pdf"
