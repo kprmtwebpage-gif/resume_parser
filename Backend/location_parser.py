@@ -975,7 +975,11 @@ def detect_location_from_phone(phone: str) -> LocationResult | None:
     national = digits
     if len(digits) == 11 and digits.startswith("1"):
         national = digits[1:]
-    if len(national) < 10:
+    # A valid NANP national number is exactly 10 digits.
+    # Numbers with more digits after stripping are international (e.g., +91 India,
+    # +44 UK, +61 Australia) — their leading digits must NOT be treated as US area codes.
+    # e.g., "+91 9176456033" → raw "919176456033" (12 digits) → area "919" = Raleigh, NC (WRONG).
+    if len(national) != 10:
         return None
 
     area = national[:3]
