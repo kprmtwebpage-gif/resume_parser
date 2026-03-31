@@ -163,8 +163,8 @@ export default function SendEmailPanel({ isOpen, onClose, candidateId, candidate
       isOpen={isOpen}
       onClose={onClose}
       width={panelWidth}
-      title="Send Email to HR"
-      subtitle={candidateName ? `Candidate: ${candidateName}` : undefined}
+      title={candidateName ? `📤 Submit Profile to Client – (${candidateName})` : '📤 Submit Profile to Client'}
+      subtitle={undefined}
       footer={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
           <button

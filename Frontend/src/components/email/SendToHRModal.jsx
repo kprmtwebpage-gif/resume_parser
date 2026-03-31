@@ -120,7 +120,7 @@ export default function SendToHRModal({ contactPerson, onClose, onSent }) {
         recipientEmail: cpEmail,
         subject,
         body: prepareEmailHtml(body),
-        provider: 'gmail',
+        provider: localStorage.getItem('emailProvider') || 'gmail',
       })
       onSent?.()
       onClose()
@@ -167,7 +167,7 @@ export default function SendToHRModal({ contactPerson, onClose, onSent }) {
         }}>
           <div>
             <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#1e293b', margin: 0 }}>
-              Send Email to {cpName}
+              📤 Submit Profile to {cpName}
             </h3>
             <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{cpEmail || 'No email'}</div>
           </div>

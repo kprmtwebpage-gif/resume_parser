@@ -186,13 +186,8 @@ export default function SendMailFlowModal({ isOpen, onClose, candidateId, candid
         }}>
           <div>
             <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#0f172a' }}>
-              Send Email to HR
+              📤 {candidateName ? `Submit Profile to Client – (${candidateName})` : 'Submit Profile to Client'}
             </h3>
-            {candidateName && (
-              <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b' }}>
-                Candidate: {candidateName}
-              </p>
-            )}
           </div>
           <button onClick={onClose} style={{
             width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center',
