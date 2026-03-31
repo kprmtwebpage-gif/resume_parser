@@ -11,6 +11,7 @@ const baseNavItems = [
   { label: 'Jobs', path: '/jobs' },
   { label: 'Upload', path: '/upload' },
   { label: 'Customer', path: '/customer' },
+  { label: 'User', path: '/user/email' },
 ]
 
 export default function TopNavbar() {

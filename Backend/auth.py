@@ -199,6 +199,35 @@ except Exception:
     pass
 
 
+def _ensure_users_columns():
+    """Idempotent: add any missing columns to the users table."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            # resumes_uploaded — used by admin/users endpoint
+            cur.execute("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS resumes_uploaded INTEGER NOT NULL DEFAULT 0
+            """)
+            # Make email nullable so admin can create users without email
+            cur.execute("""
+                ALTER TABLE users ALTER COLUMN email DROP NOT NULL
+            """)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        _put_conn(conn)
+
+try:
+    _ensure_users_columns()
+except Exception:
+    pass
+
+
 def _generate_otp() -> str:
     """Generate a 6-digit OTP code."""
     return f"{random.randint(100000, 999999)}"
@@ -418,11 +447,13 @@ async def admin_get_users(
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, username, email, role, is_active, total_logins, 
-                       last_login AT TIME ZONE 'UTC' AS last_login,
+                SELECT id,
+                       COALESCE(username, email, 'user_' || id::text) AS username,
+                       email, role, is_active, total_logins,
+                       last_login,
                        last_ip,
-                       created_at AT TIME ZONE 'UTC' AS created_at,
-                       resumes_uploaded
+                       created_at,
+                       COALESCE(resumes_uploaded, 0) AS resumes_uploaded
                 FROM users
                 ORDER BY created_at DESC
             """)
@@ -467,8 +498,8 @@ async def admin_create_user(
                     raise HTTPException(status_code=409, detail=f"Email '{clean_email}' already exists")
 
             cur.execute("""
-                INSERT INTO users (username, email, password_hash, role)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO users (username, email, password_hash, role, provider)
+                VALUES (%s, %s, %s, %s, 'local')
                 RETURNING id, username, email, role, is_active,
                           total_logins, last_login, created_at
             """, (clean_username, clean_email, hash_password(body.password), body.role))

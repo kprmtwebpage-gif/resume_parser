@@ -624,7 +624,7 @@ export default function CustomerDetail() {
         />
       )}
 
-      {/* Send Email to HR Modal */}
+      {/* Submit Profile to Client Modal */}
       {sendEmailCP && (
         <SendToHRModal
           contactPerson={sendEmailCP}

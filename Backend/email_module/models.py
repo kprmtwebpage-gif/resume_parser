@@ -97,6 +97,46 @@ class UserEmailConfig(Base):
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class UserEmailSetting(Base):
+    """Per-user, per-provider email settings (IMAP + SMTP).
+
+    Each user can configure multiple providers (gmail, outlook, zoho),
+    but only ONE can be the default at any time.
+    Passwords are stored encrypted via Fernet symmetric encryption.
+    """
+    __tablename__ = "user_email_settings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_provider"),
+    )
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, nullable=False, index=True)
+    provider = Column(String(50), nullable=False)          # "gmail" | "outlook" | "zoho"
+    email = Column(String(255), nullable=False)
+    imap_host = Column(String(255), nullable=True)
+    imap_port = Column(Integer, nullable=True)
+    smtp_host = Column(String(255), nullable=True)
+    smtp_port = Column(Integer, nullable=True)
+    # IMAP credentials
+    username = Column(String(255), nullable=True)           # IMAP username
+    password_encrypted = Column(Text, nullable=True)        # IMAP password (Fernet-encrypted)
+    ssl_enabled = Column(String(50), default="Autodetect")  # IMAP SSL
+    auth_method = Column(String(50), default="Autodetect")  # IMAP auth method
+    # SMTP credentials (separate from IMAP, like SignalHire)
+    smtp_username = Column(String(255), nullable=True)
+    smtp_password_encrypted = Column(Text, nullable=True)   # Fernet-encrypted
+    smtp_ssl_enabled = Column(String(50), default="Autodetect")
+    smtp_auth_method = Column(String(50), default="Autodetect")
+    # OAuth2 tokens
+    oauth_access_token = Column(Text, nullable=True)        # Fernet-encrypted OAuth2 access token
+    oauth_refresh_token = Column(Text, nullable=True)       # Fernet-encrypted OAuth2 refresh token
+    oauth_expires_at = Column(DateTime(timezone=True), nullable=True)
+    is_default = Column(Boolean, default=False)
+    is_connected = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class ContactPersonTemplate(Base):
     """Maps email templates to contact persons (HR) — many-to-many."""
     __tablename__ = "contact_person_templates"

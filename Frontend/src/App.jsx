@@ -26,6 +26,8 @@ import CustomerCreate from './pages/customer/CustomerCreate.jsx'
 import CustomerDetail from './pages/customer/CustomerDetail.jsx'
 import SendMail from './pages/SendMail.jsx'
 import TemplatesPage from './pages/TemplatesPage.jsx'
+import EmailSettingsPage from './pages/EmailSettingsPage.jsx'
+import UserEmailModule from './pages/UserEmailModule.jsx'
 
 function AdminGuard({ children }) {
   try {
@@ -91,6 +93,10 @@ function AppContent() {
         <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
         {/* Send Mail page */}
         <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
+        {/* User section */}
+        <Route path="/user/email" element={<DashboardLayout><UserEmailModule /></DashboardLayout>} />
+        <Route path="/user" element={<DashboardLayout><EmailSettingsPage /></DashboardLayout>} />
+        <Route path="/user/email-settings" element={<DashboardLayout><EmailSettingsPage /></DashboardLayout>} />
         {/* Templates page (part of Customer module) */}
         <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
         {/* Admin routes — protected by role check */}

@@ -87,3 +87,61 @@ class TemplatePreviewRequest(BaseModel):
 
 class ContactPersonTemplateAssign(BaseModel):
     template_id: str
+
+
+# ── User Email Settings schemas ───────────────────────────────
+
+class EmailSettingSave(BaseModel):
+    """Payload to save/update a provider's email settings."""
+    provider: str                                    # "gmail" | "outlook" | "zoho"
+    email: str
+    # IMAP (receiving)
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None                   # plaintext — encrypted on save
+    ssl_enabled: Optional[str] = "Autodetect"
+    auth_method: Optional[str] = "Autodetect"
+    # SMTP (sending)
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None              # plaintext — encrypted on save
+    smtp_ssl_enabled: Optional[str] = "Autodetect"
+    smtp_auth_method: Optional[str] = "Autodetect"
+    is_default: Optional[bool] = False
+
+
+class EmailSettingRead(BaseModel):
+    """Response schema — never exposes passwords."""
+    id: str
+    provider: str
+    email: str
+    # IMAP
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    username: Optional[str] = None
+    ssl_enabled: Optional[str] = None
+    auth_method: Optional[str] = None
+    # SMTP
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_ssl_enabled: Optional[str] = None
+    smtp_auth_method: Optional[str] = None
+    is_default: bool
+    is_connected: bool
+    oauth2_connected: Optional[bool] = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class EmailSettingTestRequest(BaseModel):
+    """Payload to test SMTP connection without saving."""
+    smtp_host: str
+    smtp_port: int
+    username: str
+    password: str
+    ssl_enabled: Optional[str] = "Autodetect"
