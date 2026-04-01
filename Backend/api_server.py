@@ -719,11 +719,18 @@ async def _create_indexes():
     try:
         import subprocess as _warmup_sp
         import sys as _warmup_sys
+        _upload_fast_mode = os.getenv("WEB_UPLOAD_FAST_MODE", "1").strip().lower() in ("1", "true", "yes", "on")
         _warmup_env = os.environ.copy()
         _warmup_env["RESUME_INPUT_DIR"] = "/tmp"
         _warmup_env["RESUME_PROCESS_ONLY"] = "__warmup__"
         _warmup_env["QUIET"] = "1"
         _warmup_env["PYTHONIOENCODING"] = "utf-8"
+        _warmup_env["TRANSFORMERS_OFFLINE"] = "1"
+        _warmup_env["HF_HUB_OFFLINE"] = "1"
+        if _upload_fast_mode:
+            _warmup_env["USE_LLM"] = "false"
+            _warmup_env["PARSE_MODE"] = "nlp"
+            _warmup_env["GLINER_ENABLED"] = "0"
         _warmup_proc = _warmup_sp.Popen(
             [_warmup_sys.executable, str(_UploadPath(__file__).parent / "parser.py")],
             env=_warmup_env,
@@ -1894,6 +1901,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
     async def _background_parse():
         global _parse_waiting, _parse_active
         import subprocess as _sp
+        _upload_fast_mode = os.getenv("WEB_UPLOAD_FAST_MODE", "1").strip().lower() in ("1", "true", "yes", "on")
         env = os.environ.copy()
         env["RESUME_INPUT_DIR"] = str(cache_dir)
         env["RESUME_PROCESS_ONLY"] = save_name
@@ -1901,6 +1909,14 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         env["PYTHONIOENCODING"] = "utf-8"
         # Web-uploaded files are always resumes — skip the non-resume content filter
         env["IS_WEB_UPLOAD"] = "1"
+        # Prevent HuggingFace network calls per subprocess — model is cached locally
+        env["TRANSFORMERS_OFFLINE"] = "1"
+        env["HF_HUB_OFFLINE"] = "1"
+        if _upload_fast_mode:
+            # Fast mode keeps batch uploads predictable on low-memory machines.
+            env["USE_LLM"] = "false"
+            env["PARSE_MODE"] = "nlp"
+            env["GLINER_ENABLED"] = "0"
 
         def _run_parser():
             return _sp.run(
@@ -1994,6 +2010,22 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             print(f"[DEDUP] email collision for {_parsed_email!r} — kept id={_collision_id}, discarded placeholder={placeholder_id}", flush=True)
                             final_candidate_id = _collision_id
                         else:
+                            # Verify placeholder still exists before merging (concurrent
+                            # parser may have deleted it via email-match dedup).
+                            cursor.execute(
+                                f"SELECT id FROM {CANDIDATES_TABLE} WHERE id = %s",
+                                (placeholder_id,),
+                            )
+                            if not cursor.fetchone():
+                                # Placeholder was deleted — keep the parser row directly.
+                                cursor.execute(
+                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                                    (parser_id,),
+                                )
+                                final_candidate_id = parser_id
+                                conn.commit()
+                                await _dedup_candidate(final_candidate_id, f"file={save_name}")
+                                return
                             # Delete placeholder's skills row first (if any) to avoid PK conflict,
                             # then re-point parser's skills row to placeholder_id.
                             cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
@@ -2031,7 +2063,13 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             (placeholder_id,),
                         )
                         check = cursor.fetchone()
-                        if check and check.get("parsed_at"):
+                        if not check:
+                            # Placeholder was deleted by concurrent parser's dedup —
+                            # the data is in a different row now, nothing to do.
+                            print(f"[PLACEHOLDER GONE] file={save_name} — placeholder {placeholder_id} deleted by concurrent parse", flush=True)
+                            conn.commit()
+                            return
+                        if check.get("parsed_at"):
                             cursor.execute(
                                 f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
                                 (placeholder_id,),
@@ -2092,6 +2130,18 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                             (rpid,),
                                         )
                                         rpdata = cur2.fetchone()
+                                        # Verify placeholder still exists before merging
+                                        cur2.execute(f"SELECT id FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
+                                        if not cur2.fetchone():
+                                            # Placeholder deleted by concurrent parser — keep parser row
+                                            cur2.execute(
+                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
+                                                (rpid,),
+                                            )
+                                            final_candidate_id = rpid
+                                            conn2.commit()
+                                            await _dedup_candidate(final_candidate_id, f"file={save_name}")
+                                            return
                                         cur2.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
                                         cur2.execute(
                                             f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
@@ -2230,10 +2280,24 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             try:
                 with get_db() as conn:
                     with conn.cursor() as cursor:
+                        # Some parser subprocesses can time out on process exit even after
+                        # successfully writing parsed fields. If parsed_at is present, treat
+                        # the row as completed instead of incorrectly marking it failed.
                         cursor.execute(
-                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = %s WHERE id = %s",
-                            (_bg_reason, placeholder_id),
+                            f"SELECT parsed_at FROM {CANDIDATES_TABLE} WHERE id = %s",
+                            (placeholder_id,),
                         )
+                        _existing = cursor.fetchone()
+                        if _existing and _existing.get("parsed_at"):
+                            cursor.execute(
+                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed', parse_failure_reason = NULL WHERE id = %s",
+                                (placeholder_id,),
+                            )
+                        else:
+                            cursor.execute(
+                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = %s WHERE id = %s",
+                                (_bg_reason, placeholder_id),
+                            )
                     conn.commit()
             except Exception:
                 pass

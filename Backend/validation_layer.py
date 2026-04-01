@@ -18,14 +18,33 @@ from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Optional spaCy NER (name & location hints)
+# Loaded lazily to avoid blocking subprocess startup when thinc/spaCy
+# hangs during initialization (known issue on Python 3.14 / Windows).
+# Set SPACY_ENABLED=0 in subprocess env to disable entirely.
 # ---------------------------------------------------------------------------
-try:
-    import spacy as _spacy                               # type: ignore
-    _NLP = _spacy.load("en_core_web_sm")
-    _SPACY_AVAILABLE = True
-except Exception:
-    _NLP = None
-    _SPACY_AVAILABLE = False
+import os as _os
+
+_NLP = None
+_SPACY_AVAILABLE = False
+_SPACY_LOAD_ATTEMPTED = False
+
+
+def _get_nlp():
+    """Lazy-load the spaCy model on first use (thread-safe via GIL)."""
+    global _NLP, _SPACY_AVAILABLE, _SPACY_LOAD_ATTEMPTED
+    if _SPACY_LOAD_ATTEMPTED:
+        return _NLP
+    _SPACY_LOAD_ATTEMPTED = True
+    if _os.getenv("SPACY_ENABLED", "1").strip() in ("0", "false", "off", "no"):
+        return None
+    try:
+        import spacy as _spacy                               # type: ignore
+        _NLP = _spacy.load("en_core_web_sm")
+        _SPACY_AVAILABLE = True
+    except Exception:
+        _NLP = None
+        _SPACY_AVAILABLE = False
+    return _NLP
 
 
 def _cf(s: str) -> str:
@@ -385,9 +404,10 @@ def validate_name(
     # checks above are very likely real person names, so we only reject when
     # the string is longer (more likely a sentence / company name) and spaCy
     # confirms the ORG classification.
-    if _SPACY_AVAILABLE and _NLP is not None:
+    _nlp = _get_nlp()
+    if _SPACY_AVAILABLE and _nlp is not None:
         try:
-            doc = _NLP(combined[:200])
+            doc = _nlp(combined[:200])
             ents = [e for e in doc.ents]
             person_ents = [e for e in ents if e.label_ == "PERSON"]
             org_product_ents = [e for e in ents if e.label_ in ("ORG", "PRODUCT", "WORK_OF_ART")]
@@ -473,9 +493,10 @@ def validate_location(location_string: Optional[str]) -> Optional[str]:
 
     # spaCy GPE / LOC entity assist
     spacy_geo_found = False
-    if _SPACY_AVAILABLE and _NLP is not None:
+    _nlp = _get_nlp()
+    if _SPACY_AVAILABLE and _nlp is not None:
         try:
-            doc = _NLP(loc[:300])
+            doc = _nlp(loc[:300])
             if any(e.label_ in {"GPE", "LOC", "FAC"} for e in doc.ents):
                 spacy_geo_found = True
             # ORG entity with no GPE/LOC -> probably a company, not a location

@@ -22,6 +22,18 @@ passlib[bcrypt]>=1.7.4
 # Required for consistent name parsing across environments
 spacy>=3.7
 
+# GLiNER: zero-shot NER for resume field extraction (name, title, location, skills)
+# Significantly improves accuracy over spaCy en_core_web_sm on resume domain
+# Model (~500MB) is auto-downloaded on first use from HuggingFace
+gliner>=0.2.0
+
+# Required by GLiNER
+transformers>=4.35.0
+torch>=2.0.0
+
+# OpenAI SDK — used for Groq and Ollama (OpenAI-compatible) LLM calls
+openai>=1.0
+
 # Optional: Google Drive folder sync (RESUME_INPUT_MODE=gdrive)
 google-api-python-client>=2.120
 google-auth>=2.25

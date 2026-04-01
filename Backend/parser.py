@@ -174,6 +174,14 @@ except ImportError:
     def validate_applied_title(title, text):  # type: ignore[misc]
         return title
 
+try:
+    from gliner_extractor import gliner_extract_header as _gliner_extract
+    _GLINER_AVAILABLE = True
+except ImportError:
+    _GLINER_AVAILABLE = False
+    def _gliner_extract(text):  # type: ignore[misc]
+        return {"first_name": "", "last_name": "", "job_title": "", "location": "", "skills": []}
+
 
 # Shared canonicalization for US state abbreviations.
 US_STATE_ABBR_TO_FULL: dict[str, str] = {
@@ -8520,6 +8528,27 @@ def main() -> int:
 
             # Extract email early (header-first); it can improve name detection.
             email = extract_email(header_extraction_text) or extract_email(extraction_text) or None
+
+            # ── GLiNER pre-pass: NER-based extraction on header block ─────────
+            # Runs before regex so high-confidence NER results can be used as
+            # seeds / overrides for name, job_title, and location.
+            _gliner_result: dict = {"first_name": "", "last_name": "", "job_title": "", "location": "", "skills": []}
+            if _GLINER_AVAILABLE and os.getenv("GLINER_ENABLED", "1") not in ("0", "false", "off"):
+                try:
+                    _gliner_result = _gliner_extract(header_text)
+                    _log.debug(
+                        "GLINER [%s] name=(%s,%s) title=%s loc=%s skills=%d",
+                        file,
+                        _gliner_result.get("first_name", ""),
+                        _gliner_result.get("last_name", ""),
+                        _gliner_result.get("job_title", ""),
+                        _gliner_result.get("location", ""),
+                        len(_gliner_result.get("skills", [])),
+                    )
+                except Exception as _ge:
+                    _log.warning("GLINER [%s] error: %s", file, _ge)
+            # ── end GLiNER pre-pass ──────────────────────────────────────────
+
             # Prefer extracting name from the priority block first; fall back to full text.
             body_name_top = extract_name(header_text, email=email)
             body_name_full = extract_name(resume_text, email=email)
@@ -8552,6 +8581,23 @@ def main() -> int:
                 file, body_name, file_name_guess, email_guess,
                 first_name, last_name,
             )
+
+            # ── GLiNER name override ──────────────────────────────────────────
+            # Use GLiNER result when regex returned nothing or only one part,
+            # OR when regex first name is a junk/role token.
+            _g_fn = _gliner_result.get("first_name", "")
+            _g_ln = _gliner_result.get("last_name", "")
+            if _g_fn:
+                _regex_missing = not first_name or not last_name
+                _regex_single = bool(first_name) and not last_name
+                if _regex_missing or _regex_single:
+                    _log.info(
+                        "GLINER_OVERRIDE [%s] name: (%s,%s) -> (%s,%s)",
+                        file, first_name, last_name, _g_fn, _g_ln,
+                    )
+                    first_name = _g_fn
+                    last_name = _g_ln
+            # ── end GLiNER name override ──────────────────────────────────────
 
             # If the extracted name parts are actually skill/role tokens (e.g., "Net", "Data"), drop them.
             skills_master = _skills_master_set()
@@ -9009,6 +9055,21 @@ def main() -> int:
                 or extract_address(resume_text, first_name=first_name, last_name=last_name, phone=phone)
                 or None
             )
+
+            # ── GLiNER location override ──────────────────────────────────────
+            # Use GLiNER location when regex found nothing or only a bare country
+            # (GLiNER scans the header which avoids past-job city contamination)
+            _g_loc = _gliner_result.get("location", "")
+            if _g_loc and len(_g_loc) >= 4:
+                _addr_weak = not address or (address and address.count(",") < 1 and len(address) < 20)
+                if _addr_weak:
+                    _log.info(
+                        "GLINER_OVERRIDE [%s] location: %s -> %s",
+                        file, address or "(empty)", _g_loc,
+                    )
+                    address = _g_loc
+            # ── end GLiNER location override ──────────────────────────────────
+
             # ── Education: structured parse first, flat fallback ────────────
             education_entries = parse_education_section(resume_text)
             if education_entries:
@@ -9099,7 +9160,37 @@ def main() -> int:
                 _fn_title = infer_title_from_filename(file, first_name=first_name, last_name=last_name)
                 if _fn_title and len(_fn_title) > len(job_title):
                     job_title = _fn_title
+
+            # ── GLiNER job_title override ─────────────────────────────────────
+            _g_title = _gliner_result.get("job_title", "")
+            if _g_title:
+                # Use GLiNER title when regex found nothing or only a single word
+                _regex_title_weak = not job_title or len(job_title.split()) <= 1
+                if _regex_title_weak:
+                    _log.info(
+                        "GLINER_OVERRIDE [%s] title: %s -> %s",
+                        file, job_title or "(empty)", _g_title,
+                    )
+                    job_title = _g_title
+            # ── end GLiNER job_title override ─────────────────────────────────
+
             skills = canonicalize_skill_list(extract_skills(resume_text) or "") or None
+
+            # ── GLiNER skills merge ───────────────────────────────────────────
+            # Merge GLiNER-detected skills with dictionary-matched skills.
+            # GLiNER catches skills not in skills_master.txt; dictionary catches
+            # skills GLiNER misses (common abbreviations, multi-word tools).
+            _g_skills = _gliner_result.get("skills", [])
+            if _g_skills:
+                from data_normalization import canonicalize_skill_list as _csl
+                _existing_set = {s.strip().casefold() for s in (skills or "").split(",") if s.strip()}
+                _new_skills = [s for s in _g_skills if s.strip().casefold() not in _existing_set]
+                if _new_skills:
+                    _merged = ((skills + ", ") if skills else "") + ", ".join(_new_skills)
+                    skills = _csl(_merged) or skills
+                    _log.debug("GLINER_SKILLS [%s] added %d new skills", file, len(_new_skills))
+            # ── end GLiNER skills merge ───────────────────────────────────────
+
             experience_years = extract_role_experience_years(resume_text_norm, job_title) or extract_experience_years(resume_text_norm)
             certifications = extract_standard_certifications(resume_text, job_title=job_title, skills=skills)
 
@@ -9135,20 +9226,21 @@ def main() -> int:
             extraction_method = "regex"  # Default
             
             # ── PARSE_MODE switch ──────────────────────────────────────────
-            # PARSE_MODE=nlp    → Pure NLP/regex only, no LLM calls (fast, free)
-            # PARSE_MODE=hybrid → NLP + LLM fallback when confidence < threshold
+            # PARSE_MODE=nlp       → Pure NLP/regex only, no LLM calls (fast, free)
+            # PARSE_MODE=hybrid    → NLP + LLM fallback when confidence < threshold
+            # PARSE_MODE=llm_first → LLM always runs, NLP fills gaps LLM missed
             _parse_mode = os.getenv("PARSE_MODE", "nlp").strip().casefold()
             
             # Determine if we should use LLM based on mode
             use_llm = False
-            llm_explicitly_enabled = False
             if _parse_mode == "hybrid":
                 use_llm = should_use_llm_fallback(
                     confidence_score,
                     threshold=float(os.getenv("LLM_CONFIDENCE_THRESHOLD", "0.75")),
                     missing_critical_fields=missing_critical
                 )
-                llm_explicitly_enabled = True
+            elif _parse_mode == "llm_first":
+                use_llm = True
             
             _log.info(
                 "CONFIDENCE [%s] score=%.2f (%s) missing_critical=%d parse_mode=%s use_llm=%s",
@@ -9164,32 +9256,42 @@ def main() -> int:
             if not llm_allowed:
                 _log.warning("LLM_LIMIT [%s] %s", file, llm_status_msg)
                 use_llm = False
-            elif use_llm or llm_explicitly_enabled:
+            elif use_llm:
                 if "Warning" in llm_status_msg:
                     _log.warning("LLM_USAGE [%s] %s", file, llm_status_msg)
             
-            if use_llm or llm_explicitly_enabled:
+            if use_llm:
                 _llm = _llm_extract(resume_text, ocr_text="")
                 if _llm:
-                    extraction_method = "hybrid" if confidence_score >= 0.5 else "llm"
+                    extraction_method = "llm_first" if _parse_mode == "llm_first" else ("hybrid" if confidence_score >= 0.5 else "llm")
+                    _llm_prefer = (_parse_mode == "llm_first")  # in llm_first mode, LLM takes priority
+                    
+                    # Name: LLM-first mode overrides NLP name
+                    _llm_fn = (_llm.get("first_name") or "").strip()
+                    _llm_ln = (_llm.get("last_name") or "").strip()
+                    if _llm_fn and _llm_ln and (_llm_prefer or (not first_name and not last_name)):
+                        _log.info("LLM_ENRICH [%s] name: %s %s -> %s %s",
+                                  file, first_name or "(empty)", last_name or "(empty)", _llm_fn, _llm_ln)
+                        first_name = _llm_fn
+                        last_name = _llm_ln
                     
                     # Job title: prefer LLM when it has high confidence or rule-based missed
                     _llm_jt = _llm.get("job_title")
                     _llm_jt_conf = _llm.get("job_title_confidence") or 0.0
-                    if _llm_jt and (_llm_jt_conf >= 0.85 or not job_title):
+                    if _llm_jt and (_llm_prefer or _llm_jt_conf >= 0.85 or not job_title):
                         _log.info("LLM_ENRICH [%s] job_title: %s -> %s (conf=%.2f)", 
                                   file, job_title or "(empty)", _llm_jt, _llm_jt_conf)
                         job_title = _llm_jt
 
                     # LinkedIn: fill in when rule-based extraction missed it
                     _llm_li = _llm.get("linkedin_url")
-                    if _llm_li and not linkedin:
+                    if _llm_li and (_llm_prefer or not linkedin):
                         _log.info("LLM_ENRICH [%s] linkedin: %s", file, _llm_li[:60])
                         linkedin = _llm_li
 
                     # Certifications: use LLM list when rule-based returned nothing
                     _llm_certs = _llm.get("certifications") or []
-                    if _llm_certs and not certifications:
+                    if _llm_certs and (_llm_prefer or not certifications):
                         certifications = ", ".join(
                             c.get("normalized_name") or c.get("name", "")
                             for c in _llm_certs if c.get("name")
@@ -9199,7 +9301,7 @@ def main() -> int:
 
                     # Education: enrich structured entries when rule-based returned none
                     _llm_edu = _llm.get("education") or []
-                    if _llm_edu and (not education_entries or all(not e.get("degree") for e in education_entries)):
+                    if _llm_edu and (_llm_prefer or not education_entries or all(not e.get("degree") for e in education_entries)):
                         education_entries = [
                             {
                                 "degree":            e.get("normalized_degree") or e.get("degree") or "",
@@ -9223,7 +9325,7 @@ def main() -> int:
                     _llm_loc = (_llm.get("location") or "").strip()
                     _null_loc_values = {"null", "none", "n/a", "unknown", "not found", "not available", ""}
                     if _llm_loc and _llm_loc.lower() not in _null_loc_values and len(_llm_loc) >= 5:
-                        if not address:
+                        if _llm_prefer or not address:
                             # Regex found nothing — fill from LLM
                             _log.info("LLM_ENRICH [%s] location (fill): %s", file, _llm_loc)
                             address = _llm_loc
@@ -9432,8 +9534,24 @@ def main() -> int:
                     # The old email/name-matched row couldn't be updated (sha256 conflict
                     # with placeholder). Delete it so the INSERT can set email on the
                     # placeholder without hitting the unique email index.
-                    cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (_stale_match_id,))
-                    cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (_stale_match_id,))
+                    # But NEVER delete an active placeholder (resume_parse_status='processing')
+                    # — another upload's background task owns it.
+                    cursor.execute(
+                        f"SELECT resume_parse_status FROM {CANDIDATES_TABLE} WHERE id = %s",
+                        (_stale_match_id,),
+                    )
+                    _stale_row = cursor.fetchone()
+                    _stale_status = (_stale_row.get("resume_parse_status") if isinstance(_stale_row, dict) else (_stale_row[0] if _stale_row else None)) if _stale_row else None
+                    if _stale_status == "processing":
+                        # Active placeholder — clear its email so our INSERT doesn't conflict,
+                        # but do NOT delete it.
+                        cursor.execute(
+                            f"UPDATE {CANDIDATES_TABLE} SET email = NULL WHERE id = %s",
+                            (_stale_match_id,),
+                        )
+                    else:
+                        cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (_stale_match_id,))
+                        cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (_stale_match_id,))
                     _stale_match_id = None
                 cursor.execute(
                     f"""

@@ -292,7 +292,8 @@ def add_to_pipeline(payload: PipelineCandidateCreate, request: Request,
         raise HTTPException(status_code=409,
                             detail="Candidate is already in the pipeline for this job")
 
-    stage_idx = PIPELINE_STAGES.index(payload.current_stage) if payload.current_stage in PIPELINE_STAGES else 0
+    active_stages = [s["stage"] for s in _get_active_stages(db)]
+    stage_idx = active_stages.index(payload.current_stage) if payload.current_stage in active_stages else 0
 
     pc = PipelineCandidate(
         **payload.model_dump(),
@@ -387,7 +388,7 @@ def move_candidate(pc_id: str, transition: StageTransition, request: Request,
 
     username = _get_username(request)
     old_stage = pc.current_stage
-    new_idx = PIPELINE_STAGES.index(transition.to_stage)
+    new_idx = valid_keys.index(transition.to_stage) if transition.to_stage in valid_keys else 0
 
     # Record history
     history = PipelineStageHistory(
@@ -539,10 +540,10 @@ def get_pipeline_analytics(db: Session = Depends(get_db)):
     # Conversion rates: % that reached each stage
     conversion = {}
     if total > 0:
-        for stage in PIPELINE_STAGES:
-            idx = PIPELINE_STAGES.index(stage)
-            count = active.filter(PipelineCandidate.stage_order >= idx).count()
-            conversion[stage] = round(count / total * 100, 1)
+        active_stages = _get_active_stages(db)
+        for s in active_stages:
+            count = active.filter(PipelineCandidate.stage_order >= s["order"]).count()
+            conversion[s["stage"]] = round(count / total * 100, 1)
 
     # Recent moves
     recent = db.query(PipelineStageHistory).order_by(

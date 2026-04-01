@@ -157,10 +157,39 @@ def _call_groq(prompt: str) -> str | None:
         raise RuntimeError(f"Groq error: {type(e).__name__}: {e}") from e
 
 
+def _call_ollama(prompt: str) -> str | None:
+    """Call a locally-running Ollama instance (OpenAI-compatible API).
+
+    Environment variables:
+        OLLAMA_BASE_URL   Ollama API base URL (default: http://localhost:11434/v1)
+        OLLAMA_MODEL      Model name as shown in `ollama list` (default: llama3.1:8b)
+
+    Ollama does not require an API key — any non-empty string is accepted.
+    """
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").strip()
+    model = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
+    try:
+        import openai
+        client = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=60.0)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a resume parser. Return ONLY valid JSON."},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=512,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        raise RuntimeError(f"Ollama error: {type(e).__name__}: {e}") from e
+
+
 # Registry: name → callable
 _PROVIDER_REGISTRY: dict[str, Any] = {
-    "hf":   _call_hf,
-    "groq": _call_groq,
+    "hf":     _call_hf,
+    "groq":   _call_groq,
+    "ollama": _call_ollama,
 }
 
 
@@ -204,8 +233,8 @@ def call_llm_chain(prompt: str, source_file: str = "") -> dict | None:
     """
     # ── PARSE_MODE gate ────────────────────────────────────────────────
     parse_mode = os.getenv("PARSE_MODE", "nlp").strip().casefold()
-    if parse_mode != "hybrid":
-        logger.debug("llm_chain: PARSE_MODE=%s (not hybrid), skipping LLM", parse_mode)
+    if parse_mode not in ("hybrid", "llm_first"):
+        logger.debug("llm_chain: PARSE_MODE=%s (not hybrid/llm_first), skipping LLM", parse_mode)
         return None
 
     # ── Provider priority list ────────────────────────────────────────────

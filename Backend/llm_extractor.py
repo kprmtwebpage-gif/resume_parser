@@ -244,6 +244,8 @@ _COMPACT_PROMPT_TEMPLATE = """\
 Extract from the resume below and return ONLY valid JSON with these fields:
 
 {{
+  "first_name": string or null,
+  "last_name": string or null,
   "job_title": string or null,
   "job_title_confidence": number or null,
   "linkedin_url": string or null,
@@ -253,6 +255,7 @@ Extract from the resume below and return ONLY valid JSON with these fields:
 }}
 
 Rules:
+- first_name/last_name: candidate's actual name from the resume header. Do NOT use company names, addresses, or email prefixes.
 - job_title: normalize (Sr->Senior, no company prefix). Confidence: 0.95 explicit, 0.90 headline, 0.85 experience, 0.70 inferred.
 - linkedin_url: full https://www.linkedin.com/in/username format, null if absent.
 - location: candidate's current city/location as "City, State/Province, Country". Use full names (Texas not TX, India not IN). Examples: "Hyderabad, Telangana, India", "Austin, Texas, United States". Null if not present.
@@ -278,6 +281,11 @@ def _is_enabled() -> bool:
     master = os.getenv("USE_LLM", "false").strip().casefold()
     if master not in {"1", "true", "yes", "on"}:
         return False
+    # Auto-enable when PARSE_MODE requires LLM (hybrid/llm_first),
+    # or when explicitly set via LLM_EXTRACT_ENABLED.
+    _mode = os.getenv("PARSE_MODE", "nlp").strip().casefold()
+    if _mode in ("hybrid", "llm_first"):
+        return True
     return os.getenv("LLM_EXTRACT_ENABLED", "false").strip().casefold() in {
         "1", "true", "yes", "on"
     }
@@ -504,7 +512,17 @@ def llm_extract(
     prompt = _build_prompt(resume_text, ocr_text or "")
     provider = _provider()
 
-    if provider == "anthropic":
+    # Check if we should route through the provider chain (Ollama support)
+    _providers = os.getenv("LLM_PROVIDERS", "").strip()
+    if _providers and "ollama" in _providers.lower():
+        try:
+            from llm_provider_chain import _call_ollama
+            _rate_delay()
+            raw = _call_ollama(prompt)
+        except Exception as _chain_err:
+            logger.warning("LLM extractor: Ollama error: %s", _chain_err)
+            raw = None
+    elif provider == "anthropic":
         raw = _call_anthropic(prompt)
     else:
         # "openai" and "openai-compatible" both use the openai SDK

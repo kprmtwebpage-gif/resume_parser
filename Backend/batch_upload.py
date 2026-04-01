@@ -15,7 +15,7 @@ MAX_WAIT_SECONDS = 120  # max wait per resume for parsing
 
 def get_token():
     r = requests.post(f"{API_BASE}/api/auth/login",
-                      data={"username": "admin", "password": "Admin@123"})
+                      data={"username": "admin", "password": "admin123"})
     r.raise_for_status()
     return r.json()["access_token"]
 
