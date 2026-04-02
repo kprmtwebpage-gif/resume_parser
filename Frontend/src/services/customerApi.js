@@ -6,11 +6,12 @@ import { api } from './api'
 
 // ── Customers ──────────────────────────────────────────────────
 
-export async function fetchCustomers({ search, status, sortBy, sortOrder, limit, offset } = {}) {
+export async function fetchCustomers({ search, status, entityType, sortBy, sortOrder, limit, offset } = {}) {
   const res = await api.get('/api/customers', {
     params: {
       search: search || undefined,
       status: status || undefined,
+      entity_type: entityType || undefined,
       sort_by: sortBy || undefined,
       sort_order: sortOrder || undefined,
       limit: limit || 100,
@@ -86,5 +87,12 @@ export async function deleteDocument(customerId, docId) {
 
 export async function fetchActivities(customerId) {
   const res = await api.get(`/api/customers/${customerId}/activities`)
+  return res.data
+}
+
+// ── Status Toggle ──────────────────────────────────────────────
+
+export async function updateCustomerStatus(id, status) {
+  const res = await api.patch(`/api/customers/${id}/status`, { status })
   return res.data
 }

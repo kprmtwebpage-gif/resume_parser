@@ -67,6 +67,7 @@ class ActivityLogRead(BaseModel):
 
 class CustomerCreate(BaseModel):
     customer_type: str = "Business"
+    entity_type: str = "client"
     salutation: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -81,6 +82,7 @@ class CustomerCreate(BaseModel):
 
 class CustomerUpdate(BaseModel):
     customer_type: Optional[str] = None
+    entity_type: Optional[str] = None
     salutation: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -97,6 +99,7 @@ class CustomerRead(BaseModel):
     id: UUID
     customer_id: str
     customer_type: str
+    entity_type: str
     salutation: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -123,6 +126,7 @@ class CustomerListRead(BaseModel):
     id: UUID
     customer_id: str
     customer_type: str
+    entity_type: str
     salutation: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None

@@ -399,7 +399,7 @@ Availability: ${row.availability || 'N/A'}`
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  Send Mail
+                  Send Email
                 </button>
                 {hasResume ? (
                   <>

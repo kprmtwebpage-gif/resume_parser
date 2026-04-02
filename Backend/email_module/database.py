@@ -55,7 +55,11 @@ def _seed_default_templates():
             existing = db.query(EmailTemplate).filter_by(name=name).first()
             if existing is None:
                 db.add(EmailTemplate(
-                    name=name, subject=subject, body=body, created_by="System",
+                name=name,
+                subject=subject,
+                body=body,
+                created_by="System",
+                template_type="COMMON",
                 ))
             elif "<table" not in (existing.body or ""):
                 existing.body = body

@@ -98,6 +98,7 @@ export default function TemplatesPage() {
           onTogglePreview={(id) => setPreviewId(prev => prev === id ? null : id)}
           onPreviewClick={(t) => setPreviewTemplate(t)}
           onCreateClick={() => setShowCreate(true)}
+          onDeleted={loadTemplates}
         />
       </div>
 

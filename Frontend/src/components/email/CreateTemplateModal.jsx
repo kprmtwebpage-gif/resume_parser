@@ -105,12 +105,13 @@ export default function CreateTemplateModal({ isOpen, onClose, onCreated }) {
               style={inputStyle} />
           </div>
 
-          <div style={{ marginBottom: '6px' }}>
+          <div style={{ marginBottom: '14px' }}>
             <label style={labelStyle}>Subject Line</label>
             <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)}
               placeholder="e.g. Candidate Submission: {{candidate_name}}"
               style={inputStyle} />
           </div>
+
         </div>
 
         {/* Footer */}

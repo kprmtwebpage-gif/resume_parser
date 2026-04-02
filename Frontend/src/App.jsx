@@ -17,14 +17,14 @@ import DashboardOverview from './pages/admin/DashboardOverview.jsx'
 import UploadMetrics from './pages/admin/UploadMetrics.jsx'
 import UsersManagement from './pages/admin/UsersManagement.jsx'
 import ActivityLog from './pages/admin/ActivityLog.jsx'
-import UploadLog from './pages/admin/UploadLog.jsx'
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
 import LoginPage from './login/LoginPage.jsx'
-import CustomerList from './pages/customer/CustomerList.jsx'
+import CustomerPage from './pages/customer/CustomerPage.jsx'
 import CustomerCreate from './pages/customer/CustomerCreate.jsx'
 import CustomerDetail from './pages/customer/CustomerDetail.jsx'
+import CustomerEdit from './pages/customer/CustomerEdit.jsx'
 import SendMail from './pages/SendMail.jsx'
 import TemplatesPage from './pages/TemplatesPage.jsx'
 import EmailSettingsPage from './pages/EmailSettingsPage.jsx'
@@ -116,8 +116,9 @@ function AppContent() {
         <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
         <Route path="/jobs/:jobId/applied" element={<DashboardLayout><AppliedCandidatesPage /></DashboardLayout>} />
         {/* Customer routes */}
-        <Route path="/customer" element={<DashboardLayout><CustomerList /></DashboardLayout>} />
+        <Route path="/customer" element={<DashboardLayout><CustomerPage /></DashboardLayout>} />
         <Route path="/customer/new" element={<DashboardLayout><CustomerCreate /></DashboardLayout>} />
+        <Route path="/customer/:id/edit" element={<DashboardLayout><CustomerEdit /></DashboardLayout>} />
         <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
         {/* Send Mail page */}
         <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
@@ -131,9 +132,9 @@ function AppContent() {
         <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
           <Route index element={<DashboardOverview />} />
           <Route path="upload-metrics" element={<UploadMetrics />} />
-          <Route path="upload-log" element={<UploadLog />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
+          <Route path="candidate-templates" element={<CandidateTemplates />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
         {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}

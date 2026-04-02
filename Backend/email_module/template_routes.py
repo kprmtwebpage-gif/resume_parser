@@ -6,9 +6,9 @@ CRUD for templates + preview with variable substitution + contact-person mapping
 import logging
 import re
 import uuid
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from .database import get_db
@@ -24,6 +24,23 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/email/templates", tags=["email-templates"])
+
+
+def _normalize_template_type(raw: Optional[str]) -> str:
+    ttype = (raw or "COMMON").upper()
+    if ttype not in ("COMMON", "CANDIDATE"):
+        raise HTTPException(status_code=400, detail="Invalid template type. Use COMMON or CANDIDATE")
+    return ttype
+
+
+def _ensure_common_template_type(raw: Optional[str]) -> str:
+    ttype = _normalize_template_type(raw)
+    if ttype != "COMMON":
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate templates are managed via /api/candidate-templates",
+        )
+    return ttype
 
 
 def _get_username_from_request(request: Request) -> str:
@@ -51,10 +68,12 @@ def create_template(
 ):
     """Create a new email template."""
     username = _get_username_from_request(request)
+    _ensure_common_template_type(payload.type or payload.template_type)
     template = EmailTemplate(
         name=payload.name,
         subject=payload.subject,
         body=payload.body,
+        template_type="COMMON",
         created_by=username,
     )
     db.add(template)
@@ -64,14 +83,18 @@ def create_template(
 
 
 @router.get("", response_model=List[EmailTemplateRead])
-def list_templates(db: Session = Depends(get_db)):
-    """List all active email templates."""
-    templates = (
-        db.query(EmailTemplate)
-        .filter(EmailTemplate.is_active == True)
-        .order_by(EmailTemplate.created_at.desc())
-        .all()
+def list_templates(
+    type: Optional[str] = Query(None, description="Filter by type: COMMON"),
+    db: Session = Depends(get_db),
+):
+    """List all active email templates, optionally filtered by type."""
+    q = db.query(EmailTemplate).filter(
+        EmailTemplate.is_active == True,
+        EmailTemplate.template_type == "COMMON",
     )
+    if type:
+        _ensure_common_template_type(type)
+    templates = q.order_by(EmailTemplate.created_at.desc()).all()
     return [_template_to_dict(t) for t in templates]
 
 
@@ -81,6 +104,7 @@ def get_template(template_id: str, db: Session = Depends(get_db)):
     template = db.query(EmailTemplate).filter(
         EmailTemplate.id == uuid.UUID(template_id),
         EmailTemplate.is_active == True,
+        EmailTemplate.template_type == "COMMON",
     ).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -97,6 +121,7 @@ def update_template(
     template = db.query(EmailTemplate).filter(
         EmailTemplate.id == uuid.UUID(template_id),
         EmailTemplate.is_active == True,
+        EmailTemplate.template_type == "COMMON",
     ).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -106,6 +131,9 @@ def update_template(
         template.subject = payload.subject
     if payload.body is not None:
         template.body = payload.body
+    if payload.type is not None or payload.template_type is not None:
+        _ensure_common_template_type(payload.type or payload.template_type)
+        template.template_type = "COMMON"
     db.commit()
     db.refresh(template)
     return _template_to_dict(template)
@@ -117,6 +145,7 @@ def delete_template(template_id: str, db: Session = Depends(get_db)):
     template = db.query(EmailTemplate).filter(
         EmailTemplate.id == uuid.UUID(template_id),
         EmailTemplate.is_active == True,
+        EmailTemplate.template_type == "COMMON",
     ).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -139,6 +168,7 @@ def preview_template(
     template = db.query(EmailTemplate).filter(
         EmailTemplate.id == uuid.UUID(template_id),
         EmailTemplate.is_active == True,
+        EmailTemplate.template_type == "COMMON",
     ).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -151,10 +181,20 @@ def preview_template(
 
 def _substitute_variables(text: str, data: dict) -> str:
     """Replace all {{key}} placeholders with values from data dict."""
+    # Strip HTML tags from inside {{ }} placeholders (editor fragmentation)
+    text = re.sub(
+        r"\{\{(.*?)\}\}",
+        lambda m: "{{" + re.sub(r"<[^>]*>", "", m.group(1)).strip() + "}}",
+        text,
+        flags=re.DOTALL,
+    )
+
     def replacer(match):
         key = match.group(1).strip()
-        return str(data.get(key, match.group(0)))
-    return re.sub(r"\{\{(\s*\w+\s*)\}\}", replacer, text)
+        # Try exact key, then lowercase, then with underscores for spaces
+        val = data.get(key) or data.get(key.lower()) or data.get(key.lower().replace(" ", "_"))
+        return str(val) if val is not None else match.group(0)
+    return re.sub(r"\{\{(\s*[\w\s]+\s*)\}\}", replacer, text)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -175,7 +215,11 @@ def get_cp_templates(cp_id: str, db: Session = Depends(get_db)):
 
     templates = (
         db.query(EmailTemplate)
-        .filter(EmailTemplate.id.in_(template_ids), EmailTemplate.is_active == True)
+        .filter(
+            EmailTemplate.id.in_(template_ids),
+            EmailTemplate.is_active == True,
+            EmailTemplate.template_type == "COMMON",
+        )
         .all()
     )
     return [_template_to_dict(t) for t in templates]
@@ -192,6 +236,7 @@ def assign_cp_template(
     template = db.query(EmailTemplate).filter(
         EmailTemplate.id == uuid.UUID(payload.template_id),
         EmailTemplate.is_active == True,
+        EmailTemplate.template_type == "COMMON",
     ).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -232,11 +277,14 @@ def unassign_cp_template(
 
 
 def _template_to_dict(t: EmailTemplate) -> dict:
+    template_type = getattr(t, "template_type", "COMMON") or "COMMON"
     return {
         "id": str(t.id),
         "name": t.name,
         "subject": t.subject,
         "body": t.body,
+        "type": template_type,
+        "template_type": template_type,
         "created_by": t.created_by,
         "is_active": t.is_active,
         "created_at": t.created_at,
