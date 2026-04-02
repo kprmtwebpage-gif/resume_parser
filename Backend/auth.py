@@ -200,25 +200,36 @@ except Exception:
 
 
 def _ensure_users_columns():
-    """Idempotent: add any missing columns to the users table."""
+    """Idempotent: add any missing columns to the users table.
+    Each migration runs in its own transaction so one failure cannot
+    prevent the others from committing.
+    """
+    migrations = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS resumes_uploaded INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(50) NULL",
+    ]
     conn = _get_conn()
     try:
-        with conn.cursor() as cur:
-            # resumes_uploaded — used by admin/users endpoint
-            cur.execute("""
-                ALTER TABLE users
-                ADD COLUMN IF NOT EXISTS resumes_uploaded INTEGER NOT NULL DEFAULT 0
-            """)
-            # Make email nullable so admin can create users without email
-            cur.execute("""
-                ALTER TABLE users ALTER COLUMN email DROP NOT NULL
-            """)
-        conn.commit()
-    except Exception:
+        for sql in migrations:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        # Make email nullable separately
         try:
-            conn.rollback()
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE users ALTER COLUMN email DROP NOT NULL")
+            conn.commit()
         except Exception:
-            pass
+            try:
+                conn.rollback()
+            except Exception:
+                pass
     finally:
         _put_conn(conn)
 
@@ -278,20 +289,35 @@ def record_login(user_id: int, ip: str):
     """Increment total_logins, update last_login / last_ip, and log session."""
     _ensure_login_sessions_table()
     conn = _get_conn()
+    username = ""
     try:
+        # Try update with last_ip; fall back without it if the column is missing
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET total_logins = total_logins + 1,
+                        last_login   = NOW(),
+                        last_ip      = %s
+                    WHERE id = %s
+                    RETURNING username
+                """, (ip, user_id))
+                row = cur.fetchone()
+                username = row["username"] if row else ""
+        except Exception:
+            conn.rollback()
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET total_logins = total_logins + 1,
+                        last_login   = NOW()
+                    WHERE id = %s
+                    RETURNING username
+                """, (user_id,))
+                row = cur.fetchone()
+                username = row["username"] if row else ""
+        # Insert session record
         with conn.cursor() as cur:
-            # Update user stats
-            cur.execute("""
-                UPDATE users
-                SET total_logins = total_logins + 1,
-                    last_login   = NOW(),
-                    last_ip      = %s
-                WHERE id = %s
-                RETURNING username
-            """, (ip, user_id))
-            row = cur.fetchone()
-            username = row["username"] if row else ""
-            # Insert session record
             cur.execute("""
                 INSERT INTO login_sessions (user_id, username, ip_address)
                 VALUES (%s, %s, %s)
@@ -1047,13 +1073,24 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 upload_monthly = []
 
             # User performance (all users with stats + daily/weekly/monthly uploads)
-            cur.execute("""
-                SELECT u.id, u.username, u.role, u.is_active, u.total_logins,
-                       u.last_login, u.resumes_uploaded, u.email, u.created_at
-                FROM users u
-                ORDER BY u.resumes_uploaded DESC NULLS LAST
-            """)
-            user_performance = [dict(u) for u in cur.fetchall()]
+            try:
+                cur.execute("""
+                    SELECT u.id, u.username, u.role, u.is_active, u.total_logins,
+                           u.last_login, u.resumes_uploaded, u.email, u.created_at
+                    FROM users u
+                    ORDER BY u.resumes_uploaded DESC NULLS LAST
+                """)
+                user_performance = [dict(u) for u in cur.fetchall()]
+            except Exception:
+                conn.rollback()
+                # Fallback when resumes_uploaded column is not yet in the DB
+                cur.execute("""
+                    SELECT u.id, u.username, u.role, u.is_active, u.total_logins,
+                           u.last_login, 0 AS resumes_uploaded, u.email, u.created_at
+                    FROM users u
+                    ORDER BY u.total_logins DESC NULLS LAST
+                """)
+                user_performance = [dict(u) for u in cur.fetchall()]
 
             # Per-user rich stats (daily/weekly/monthly uploads + frequency metrics)
             cur.execute("""

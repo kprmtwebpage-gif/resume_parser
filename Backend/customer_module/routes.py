@@ -34,6 +34,8 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, desc, asc
 from fastapi.responses import FileResponse
 
+from pydantic import BaseModel
+
 from .database import get_db
 from .models import Customer, ContactPerson, CustomerDocument, CustomerActivityLog
 from .schemas import (
@@ -41,6 +43,10 @@ from .schemas import (
     ContactPersonCreate, ContactPersonRead,
     CustomerDocumentRead, ActivityLogRead,
 )
+
+
+class _StatusPayload(BaseModel):
+    status: str  # "active" | "inactive"
 
 # Absolute base path
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -88,6 +94,7 @@ def create_customer(payload: CustomerCreate, request: Request, db: Session = Dep
 
     customer = Customer(
         customer_type=payload.customer_type,
+        entity_type=payload.entity_type,
         salutation=payload.salutation,
         first_name=payload.first_name,
         last_name=payload.last_name,
@@ -129,6 +136,7 @@ def create_customer(payload: CustomerCreate, request: Request, db: Session = Dep
 def list_customers(
     search: Optional[str] = Query(None, description="Search in name, company, email, phone"),
     filter_status: Optional[str] = Query(None, alias="status", description="all, active, inactive"),
+    entity_type: Optional[str] = Query(None, description="client | vendor | own_company | candidate"),
     sort_by: Optional[str] = Query("created_at", description="name, created_at, company_name"),
     sort_order: Optional[str] = Query("desc", description="asc or desc"),
     limit: int = Query(100, ge=1, le=500),
@@ -136,6 +144,10 @@ def list_customers(
     db: Session = Depends(get_db),
 ):
     query = db.query(Customer)
+
+    # Filter by entity_type
+    if entity_type:
+        query = query.filter(Customer.entity_type == entity_type.lower())
 
     # Filter by status
     if filter_status == "active":
@@ -463,3 +475,27 @@ def get_activities(customer_id: str, db: Session = Depends(get_db)):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     return customer.activities
+
+
+# ── STATUS TOGGLE ────────────────────────────────────────────────────────────
+
+@router.patch("/{customer_id}/status", response_model=CustomerRead)
+def update_customer_status(customer_id: str, payload: _StatusPayload, request: Request, db: Session = Depends(get_db)):
+    """Toggle active / inactive status for a customer or vendor."""
+    customer = _find_customer(customer_id, db)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    username = _get_username_from_request(request)
+    is_active = payload.status.lower() in ("active", "true", "1")
+    customer.is_active = is_active
+
+    action_label = "Customer activated" if is_active else "Customer deactivated"
+    _log_activity(
+        db, customer.id, action_label,
+        f"Customer '{customer.display_name}' has been {'activated' if is_active else 'deactivated'}",
+        username,
+    )
+    db.commit()
+    db.refresh(customer)
+    return customer

@@ -69,6 +69,18 @@ export async function sendEmailWithAttachments({ candidateId, recipientEmail, su
   return res.data
 }
 
+export async function sendWorkflowEmail({ recipientType, candidateId, companyId, hrId, templateId, provider }) {
+  const res = await api.post('/api/send-email', {
+    recipientType,
+    candidateId,
+    companyId: companyId || null,
+    hrId: hrId || null,
+    templateId,
+    provider: provider || 'gmail',
+  })
+  return res.data
+}
+
 /* ── Log externally-sent email (Outlook web compose) ────────── */
 
 /**
@@ -134,13 +146,41 @@ export async function getEmailAttachments(emailId) {
 /* ── Email Templates ─────────────────────────────────────────── */
 
 export async function createEmailTemplate(payload) {
-  const res = await api.post('/email/templates', payload)
-  return res.data
+  const body = {
+    ...payload,
+    type: 'COMMON',
+    template_type: 'COMMON',
+  }
+  try {
+    const res = await api.post('/email/templates', body)
+    return res.data
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      const res = await api.post('/api/templates', body)
+      return res.data
+    }
+    throw err
+  }
 }
 
-export async function listEmailTemplates() {
-  const res = await api.get('/email/templates')
-  return res.data
+/**
+ * List email templates, optionally filtered by type.
+ * @param {Object} opts
+ * @param {'COMMON'} [opts.type] - filter by template type (common only)
+ */
+export async function listEmailTemplates({ type } = {}) {
+  const params = {}
+  if (type) params.type = type
+  try {
+    const res = await api.get('/email/templates', { params })
+    return res.data
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      const res = await api.get('/api/templates', { params })
+      return res.data
+    }
+    throw err
+  }
 }
 
 export async function getEmailTemplate(templateId) {
@@ -160,6 +200,44 @@ export async function deleteEmailTemplate(templateId) {
 
 export async function previewEmailTemplate(templateId, candidateData) {
   const res = await api.post(`/email/templates/${templateId}/preview`, {
+    candidate_data: candidateData,
+  })
+  return res.data
+}
+
+/* ── Candidate Email Templates ─────────────────────────────── */
+
+export async function createCandidateEmailTemplate(payload) {
+  const res = await api.post('/api/candidate-templates', {
+    name: payload?.name,
+    subject: payload?.subject,
+    body: payload?.body,
+  })
+  return res.data
+}
+
+export async function listCandidateEmailTemplates() {
+  const res = await api.get('/api/candidate-templates')
+  return res.data
+}
+
+export async function getCandidateEmailTemplate(templateId) {
+  const res = await api.get(`/api/candidate-templates/${templateId}`)
+  return res.data
+}
+
+export async function updateCandidateEmailTemplate(templateId, payload) {
+  const res = await api.put(`/api/candidate-templates/${templateId}`, payload)
+  return res.data
+}
+
+export async function deleteCandidateEmailTemplate(templateId) {
+  const res = await api.delete(`/api/candidate-templates/${templateId}`)
+  return res.data
+}
+
+export async function previewCandidateEmailTemplate(templateId, candidateData) {
+  const res = await api.post(`/api/candidate-templates/${templateId}/preview`, {
     candidate_data: candidateData,
   })
   return res.data

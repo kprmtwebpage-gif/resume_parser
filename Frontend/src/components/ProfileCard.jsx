@@ -344,7 +344,7 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  Send Mail
+                  Send Email
                 </button>
                 {hasResume ? (
                   <>
