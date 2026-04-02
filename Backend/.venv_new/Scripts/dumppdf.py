@@ -1,4 +1,4 @@
-#!C:\Users\User\Desktop\resume_parser\Backend\.venv_new\Scripts\python.exe
+#!D:\Project\resume_parser\Backend\.venv_new\Scripts\python.exe
 """Extract pdf structure in XML format"""
 
 import logging

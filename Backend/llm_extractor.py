@@ -73,6 +73,8 @@ Resume Text:
 OCR Text:
 {ocr_text}
 
+Filename hint: {filename_hint}
+
 --------------------------------------------------
 EXTRACTION REQUIREMENTS:
 
@@ -241,27 +243,101 @@ Return ONLY JSON.
 # ---------------------------------------------------------------------------
 
 _COMPACT_PROMPT_TEMPLATE = """\
-Extract from the resume below and return ONLY valid JSON with these fields:
+You are an expert resume parser. Extract structured data from the resume text below.
+Return ONLY valid JSON matching this exact schema:
 
 {{
   "first_name": string or null,
   "last_name": string or null,
   "job_title": string or null,
   "job_title_confidence": number or null,
+  "email": string or null,
+  "phone": string or null,
   "linkedin_url": string or null,
   "location": string or null,
+  "skills": [string],
+  "work_history": [
+    {{
+      "company": string,
+      "title": string,
+      "location": string or null,
+      "is_current": boolean,
+      "start_date": string or null,
+      "end_date": string or null
+    }}
+  ],
   "certifications": [{{"name": string, "issuer": string, "normalized_name": string, "confidence": number}}],
-  "education": [{{"degree": string, "normalized_degree": string, "field_of_study": string or null, "university": string or null, "level": string, "confidence": number}}]
+  "education": [{{"degree": string, "normalized_degree": string, "field_of_study": string or null, "university": string or null, "grad_year": string or null, "level": string, "confidence": number}}]
 }}
 
-Rules:
-- first_name/last_name: candidate's actual name from the resume header. Do NOT use company names, addresses, or email prefixes.
-- job_title: normalize (Sr->Senior, no company prefix). Confidence: 0.95 explicit, 0.90 headline, 0.85 experience, 0.70 inferred.
-- linkedin_url: full https://www.linkedin.com/in/username format, null if absent.
-- location: candidate's current city/location as "City, State/Province, Country". Use full names (Texas not TX, India not IN). Examples: "Hyderabad, Telangana, India", "Austin, Texas, United States". Null if not present.
-- certifications: professional certs only (AWS, PMP, CFA, etc.), empty array if none.
-- education: normalize degree names (B.Tech->Bachelor of Technology). Include university/institution name. Levels: High School, Associate, Bachelor, Master, Doctoral, Other.
-- Only extract what is explicitly present. No hallucination.
+=== EXTRACTION RULES (follow strictly) ===
+
+NAME:
+- The candidate's full legal name is almost always the FIRST prominent text at the very top of the resume, before any contact info or section headers.
+- Split into first_name and last_name. For multi-part names (e.g., "Arbaz Shareef Mohammed"), first_name = first word, last_name = remaining words joined.
+- For single-word names, set first_name = that word, last_name = null.
+- Do NOT use company names, email usernames, addresses, job titles, or section headers as name.
+- The filename may contain the candidate's name as a hint: "{filename_hint}"
+- If the resume text is garbled or unreadable at the top, use the filename hint to identify the name.
+
+JOB TITLE:
+- Extract the candidate's PRIMARY current/most recent job title. Priority order:
+  1. Resume headline, objective line, or professional title displayed prominently at the top (confidence: 0.95)
+  2. Most recent/current position title from work experience section (confidence: 0.90)
+  3. If candidate lists a target role or "seeking" title, use that (confidence: 0.80)
+- Do NOT use: section headers ("Experience", "Summary"), industry labels ("Public Sector"), department names, or skill categories as job title.
+- Normalize abbreviations only: Sr->Senior, Jr->Junior, Mgr->Manager, Dept->Department.
+- Keep the specific title as-is. Do NOT generalize ("Document Controller" stays "Document Controller", NOT "Manager").
+- Do NOT combine multiple titles. Pick the single most prominent one.
+
+CONTACT:
+- email: Extract email address. Normalize to lowercase.
+- phone: Extract phone number including country code if present. Format: +CountryCode(AreaCode)-Number.
+- linkedin_url: Normalize to https://www.linkedin.com/in/username format. Strip trailing slashes or query params.
+
+LOCATION:
+- Extract the candidate's CURRENT residential/personal location.
+- Priority order:
+  1. Explicit location/address near the candidate's name at the top of the resume (highest priority)
+  2. Address line with city/state/zip
+  3. "Location:", "Address:", "City:" labels
+  4. If no personal location found, use the location of the MOST RECENT/CURRENT employer as proxy
+- Format as: "City, State/Province, Country"
+- MANDATORY state/country expansion rules:
+  - ALWAYS expand US state abbreviations: TX->Texas, CA->California, NY->New York, FL->Florida, OH->Ohio, IL->Illinois, GA->Georgia, NC->North Carolina, PA->Pennsylvania, NJ->New Jersey, VA->Virginia, WA->Washington, MA->Massachusetts, MD->Maryland, MN->Minnesota, CO->Colorado, AZ->Arizona, IN->Indiana, MI->Michigan, MO->Missouri, TN->Tennessee, WI->Wisconsin, CT->Connecticut, OR->Oregon, SC->South Carolina, KY->Kentucky, AL->Alabama, LA->Louisiana, OK->Oklahoma, UT->Utah, NV->Nevada, etc.
+  - ALWAYS use "United States" not "US", "USA", or "U.S.A."
+  - ALWAYS use "United Kingdom" not "UK"
+  - ALWAYS use "United Arab Emirates" not "UAE"
+- Do NOT include zip codes, street addresses, apartment numbers, or company names in location.
+- If genuinely unknown and no employer location available, return null.
+
+SKILLS:
+- Extract ALL technical skills, tools, frameworks, programming languages, platforms, methodologies mentioned anywhere in the resume.
+- Return as a flat array of lowercase strings.
+- Include: programming languages (python, java), frameworks (react, spring boot), tools (docker, jenkins), cloud (aws, azure, gcp), databases (postgresql, mongodb), methodologies (agile, scrum).
+- Exclude: soft skills (leadership, communication), generic terms (computer, internet).
+
+WORK HISTORY:
+- Extract ALL job positions listed, ordered from most recent to oldest.
+- For each: company name, job title held there, location of that role (if mentioned), whether it's the current role, start/end dates.
+- is_current=true for the most recent role or roles marked "Present"/"Current".
+- Dates as "MM/YYYY" or "YYYY" format. null if not specified.
+
+CERTIFICATIONS:
+- Professional certifications only (AWS, Azure, PMP, CFA, CISSP, etc.).
+- NOT online course completions (Udemy, Coursera completion certs).
+- Normalize: "AZ-104" -> "Microsoft Certified: Azure Administrator Associate".
+
+EDUCATION:
+- Extract all degrees with institution names.
+- Normalize: B.Tech->Bachelor of Technology, MBA->Master of Business Administration, B.Sc->Bachelor of Science, M.Sc->Master of Science, B.E->Bachelor of Engineering, M.E->Master of Engineering, B.Com->Bachelor of Commerce, BCA->Bachelor of Computer Applications, MCA->Master of Computer Applications.
+- Levels: High School, Associate, Bachelor, Master, Doctoral, Other.
+- Include grad_year if mentioned.
+
+=== STRICT RULES ===
+- Only extract what is EXPLICITLY written in the resume. Do NOT hallucinate or infer.
+- Return ONLY valid JSON. No explanations, no markdown fences, no comments, no trailing commas.
+- Return null for missing single fields. Return empty arrays [] for missing lists.
 
 Resume Text:
 {resume_text}
@@ -341,14 +417,28 @@ def _rate_delay() -> None:
     _last_call_time = time.perf_counter()
 
 
-def _build_prompt(resume_text: str, ocr_text: str) -> str:
+def _build_prompt(resume_text: str, ocr_text: str, filename: str = "") -> str:
     use_compact = os.getenv("LLM_COMPACT_PROMPT", "true").strip().casefold() in {
         "1", "true", "yes", "on"
     }
     template = _COMPACT_PROMPT_TEMPLATE if use_compact else _EXTRACTION_PROMPT_TEMPLATE
+    # Clean problematic unicode chars that confuse LLMs
+    import re
+    clean_text = resume_text
+    clean_text = re.sub(r'[\u200b\u200c\u200d\u200e\u200f\ufeff]', '', clean_text)  # zero-width chars
+    clean_text = re.sub(r'[^\x20-\x7e\n\r\t\u00a0-\u024f\u0370-\u03ff\u0400-\u04ff\u2000-\u206f\u2190-\u21ff]', ' ', clean_text)  # non-printable
+    clean_text = re.sub(r' {3,}', '  ', clean_text)  # collapse excess spaces
+    # Extract a clean name hint from filename (remove extensions, IDs, timestamps)
+    fname_hint = ""
+    if filename:
+        fname_hint = re.sub(r'\.(pdf|docx?|txt|rtf)$', '', filename, flags=re.IGNORECASE)
+        fname_hint = re.sub(r'_?\d{5,}', '', fname_hint)  # remove long numeric IDs
+        fname_hint = re.sub(r'\s*\(\d+\)\s*', '', fname_hint)  # remove (1), (2) etc
+        fname_hint = fname_hint.strip(' _-')
     return template.format(
-        resume_text=_truncate(resume_text, 10_000),
+        resume_text=_truncate(clean_text, 8_000),
         ocr_text=_truncate(ocr_text, 3_000),
+        filename_hint=fname_hint or "(not available)",
     )
 
 
@@ -488,6 +578,7 @@ def _call_anthropic(prompt: str) -> str | None:
 def llm_extract(
     resume_text: str,
     ocr_text: str = "",
+    filename: str = "",
 ) -> dict[str, Any] | None:
     """
     Run LLM-powered extraction on resume text + optional OCR text.
@@ -509,29 +600,29 @@ def llm_extract(
     if not resume_text or not resume_text.strip():
         return None
 
-    prompt = _build_prompt(resume_text, ocr_text or "")
-    provider = _provider()
+    prompt = _build_prompt(resume_text, ocr_text or "", filename=filename)
 
-    # Check if we should route through the provider chain (Ollama support)
+    # ── Route through the provider chain (handles Groq → Ollama fallback) ──
     _providers = os.getenv("LLM_PROVIDERS", "").strip()
-    if _providers and "ollama" in _providers.lower():
+    if _providers and _providers.lower() not in {"none", "off", "false", "0", ""}:
         try:
-            from llm_provider_chain import _call_ollama
+            from llm_provider_chain import call_llm_chain
             _rate_delay()
-            raw = _call_ollama(prompt)
+            result = call_llm_chain(prompt, source_file="llm_extractor")
         except Exception as _chain_err:
-            logger.warning("LLM extractor: Ollama error: %s", _chain_err)
-            raw = None
-    elif provider == "anthropic":
-        raw = _call_anthropic(prompt)
+            logger.warning("LLM extractor: provider chain error: %s", _chain_err)
+            result = None
     else:
-        # "openai" and "openai-compatible" both use the openai SDK
-        raw = _call_openai(prompt)
+        # Legacy single-provider path (no LLM_PROVIDERS set)
+        provider = _provider()
+        if provider == "anthropic":
+            raw = _call_anthropic(prompt)
+        else:
+            raw = _call_openai(prompt)
+        if not raw:
+            return None
+        result = _parse_json_response(raw)
 
-    if not raw:
-        return None
-
-    result = _parse_json_response(raw)
     if not isinstance(result, dict):
         return None
 
@@ -545,15 +636,42 @@ def llm_extract(
         except (TypeError, ValueError):
             return None
 
+    def _list_of_strings(v: Any) -> list[str]:
+        if isinstance(v, list):
+            return [str(s).strip().lower() for s in v if s and str(s).strip()]
+        return []
+
     def _list_of_dicts(v: Any) -> list[dict]:
         if isinstance(v, list):
             return [d for d in v if isinstance(d, dict)]
         return []
 
+    # If no explicit location, infer from current employer's location
+    raw_location = _str_or_none(result.get("location"))
+    if not raw_location or raw_location.lower() in {"null", "none", "n/a", "unknown", ""}:
+        work_hist = _list_of_dicts(result.get("work_history", []))
+        for wh in work_hist:
+            if wh.get("is_current") and wh.get("location"):
+                raw_location = str(wh["location"]).strip()
+                break
+        # fallback: first entry's location
+        if (not raw_location or raw_location.lower() in {"null", "none", ""}) and work_hist:
+            for wh in work_hist:
+                if wh.get("location"):
+                    raw_location = str(wh["location"]).strip()
+                    break
+
     return {
+        "first_name":           _str_or_none(result.get("first_name")),
+        "last_name":            _str_or_none(result.get("last_name")),
         "job_title":            _str_or_none(result.get("job_title")),
         "job_title_confidence": _float_or_none(result.get("job_title_confidence")),
+        "email":                _str_or_none(result.get("email")),
+        "phone":                _str_or_none(result.get("phone")),
         "linkedin_url":         _str_or_none(result.get("linkedin_url")),
+        "location":             _str_or_none(raw_location),
+        "skills":               _list_of_strings(result.get("skills", [])),
+        "work_history":         _list_of_dicts(result.get("work_history", [])),
         "certifications":       _list_of_dicts(result.get("certifications", [])),
         "education":            _list_of_dicts(result.get("education", [])),
     }

@@ -76,10 +76,31 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
-# Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
-_parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "12")))
+# ── Persistent worker pool for resume parsing ────────────────────────────────
+# Workers pre-load Python modules + ML models once (~30s startup per worker),
+# then each resume parse takes ~5-7s instead of 35-50s with subprocess spawning.
+from concurrent.futures import ProcessPoolExecutor as _ParsePoolExecutor
+_PARSE_CONCURRENCY = max(1, int(os.getenv("PARSE_CONCURRENCY", "2")))
+_parse_semaphore = asyncio.Semaphore(_PARSE_CONCURRENCY)
 _parse_waiting = 0   # tasks queued, waiting for a semaphore slot
 _parse_active  = 0   # tasks currently holding the semaphore (actively parsing)
+_parse_pool: _ParsePoolExecutor | None = None
+
+def _get_parse_pool() -> _ParsePoolExecutor:
+    """Lazy-init the process pool. Workers load all models on first call."""
+    global _parse_pool
+    if _parse_pool is None:
+        try:
+            from parser_worker import worker_init as _worker_init
+            _parse_pool = _ParsePoolExecutor(
+                max_workers=_PARSE_CONCURRENCY,
+                initializer=_worker_init,
+            )
+            print(f"[OK] Parse worker pool initialised ({_PARSE_CONCURRENCY} workers) — models will pre-load in background", flush=True)
+        except Exception as _pe:
+            print(f"[WARN] Could not create parse pool: {_pe} — falling back to subprocess", flush=True)
+            _parse_pool = None
+    return _parse_pool
 
 # ── Resume Download Quota Tracking ────────────────────────────────────────────
 DAILY_DOWNLOAD_LIMIT = 10
@@ -428,7 +449,7 @@ def _build_pool() -> psycopg2.pool.ThreadedConnectionPool:
     """Create a connection pool with TCP keepalives to prevent stale connections."""
     return psycopg2.pool.ThreadedConnectionPool(
         minconn=2,
-        maxconn=50,
+        maxconn=15,
         dbname=os.getenv("DB_NAME"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
@@ -743,6 +764,39 @@ async def _create_indexes():
         print("[OK] Parser warmup subprocess launched")
     except Exception as _we:
         print(f"[WARN] Parser warmup failed: {_we}")
+
+    # ── Pre-warm the process pool so workers are ready before first upload ───
+    # Workers load Python modules + ML models in background (~30s).
+    # After this one-time cost, every resume parses in ~5-7s instead of 35-50s.
+    try:
+        def _init_pool_in_background():
+            pool = _get_parse_pool()
+            if pool is not None:
+                # Submit a no-op task to each worker to trigger model loading now
+                from parser_worker import parse_one as _po
+                futures = [pool.submit(_po, {"RESUME_PROCESS_ONLY": "__warmup__",
+                                             "RESUME_INPUT_DIR": "/tmp",
+                                             "QUIET": "1",
+                                             "PARSE_MODE": "nlp",
+                                             "USE_LLM": "false",
+                                             "GLINER_ENABLED": os.getenv("GLINER_ENABLED", "1"),
+                                             "DB_NAME": os.getenv("DB_NAME", ""),
+                                             "DB_USER": os.getenv("DB_USER", ""),
+                                             "DB_PASSWORD": os.getenv("DB_PASSWORD", ""),
+                                             "DB_HOST": os.getenv("DB_HOST", "localhost"),
+                                             "DB_PORT": os.getenv("DB_PORT", "5432"),
+                                             })
+                           for _ in range(_PARSE_CONCURRENCY)]
+                for f in futures:
+                    try:
+                        f.result(timeout=120)
+                    except Exception:
+                        pass
+                print(f"[OK] Parse worker pool pre-warmed ({_PARSE_CONCURRENCY} workers ready)", flush=True)
+        asyncio.get_event_loop().run_in_executor(None, _init_pool_in_background)
+        print(f"[OK] Parse worker pool warming up in background ({_PARSE_CONCURRENCY} workers)...", flush=True)
+    except Exception as _pe:
+        print(f"[WARN] Parse pool warmup failed: {_pe}", flush=True)
 
     # Ensure the download-quota table exists (the module-level call at import
     # time was a no-op because get_db() wasn't defined yet).
@@ -1918,14 +1972,32 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             env["PARSE_MODE"] = "nlp"
             env["GLINER_ENABLED"] = "0"
 
-        def _run_parser():
+        def _run_parser_subprocess():
+            """Fallback: spawn a fresh parser.py subprocess (slow but always works)."""
             return _sp.run(
                 [sys.executable, str(backend_dir / "parser.py")],
                 env=env,
                 capture_output=True,
                 cwd=str(backend_dir),
-                timeout=600,  # 10 min — allows LLM-powered parsing to complete
+                timeout=600,
             )
+
+        async def _run_parse_task() -> tuple[int, str, str]:
+            """Run the parse either via the process pool (fast) or subprocess (fallback)."""
+            pool = _get_parse_pool()
+            loop = asyncio.get_event_loop()
+            if pool is not None:
+                try:
+                    from parser_worker import parse_one as _parse_one
+                    return await loop.run_in_executor(pool, _parse_one, dict(env))
+                except Exception as _pool_err:
+                    print(f"[POOL FALLBACK] pool error: {_pool_err} — using subprocess", flush=True)
+            # Fallback to subprocess
+            proc = await loop.run_in_executor(None, _run_parser_subprocess)
+            rc = proc.returncode
+            out = (proc.stdout or b"").decode("utf-8", errors="replace")
+            err = (proc.stderr or b"").decode("utf-8", errors="replace")
+            return (rc, out, err)
 
         _parse_waiting += 1
         try:
@@ -1934,15 +2006,15 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                 _parse_active += 1
                 try:
                     loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(None, _run_parser)
-                    returncode = result.returncode
-                    stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
+                    _parse_result = await _run_parse_task()
+                    returncode = _parse_result[0]
+                    stderr_text = _parse_result[2]
                 finally:
                     _parse_active -= 1
 
             if returncode != 0:
                 # Extract a concise reason from stderr (or stdout for parse errors)
-                stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
+                stdout_text = _parse_result[1]
                 _reason_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.startswith(' ')]
                 if not _reason_lines:
                     _reason_lines = [l.strip() for l in stdout_text.splitlines() if l.strip() and ("error" in l.lower() or "skip" in l.lower() or "password" in l.lower() or "encrypt" in l.lower())]
@@ -2098,11 +2170,11 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                     _parse_waiting -= 1
                                     _parse_active += 1
                                     try:
-                                        retry_result = await loop.run_in_executor(None, _run_parser)
+                                        _retry_result = await _run_parse_task()
                                     finally:
                                         _parse_active -= 1
-                                retry_rc = retry_result.returncode
-                                retry_stderr = (retry_result.stderr or b"").decode("utf-8", errors="replace")
+                                retry_rc = _retry_result[0]
+                                retry_stderr = _retry_result[2]
                                 if retry_rc != 0:
                                     print(f"[PARSE RETRY FAILED] file={save_name} rc={retry_rc}\nSTDERR: {retry_stderr[:500]}", flush=True)
                             except Exception as retry_err:

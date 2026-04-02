@@ -14,7 +14,7 @@ DATABASE_URL = (
     f"/{os.getenv('DB_NAME', 'resume_dev')}"
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=3, max_overflow=5)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

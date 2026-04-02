@@ -1,26 +1,26 @@
 {
   "daily_stats": {
-    "2026-03-28": {
-      "llm_calls": 0,
-      "high_confidence_skips": 4,
-      "total_resumes": 4,
+    "2026-04-01": {
+      "llm_calls": 16,
+      "high_confidence_skips": 262,
+      "total_resumes": 278,
       "extraction_methods": {
-        "regex": 2,
+        "regex": 146,
         "hybrid": 0,
         "llm": 0
       }
     },
-    "2026-03-29": {
-      "llm_calls": 0,
-      "high_confidence_skips": 2,
-      "total_resumes": 2,
+    "2026-04-02": {
+      "llm_calls": 110,
+      "high_confidence_skips": 287,
+      "total_resumes": 397,
       "extraction_methods": {
-        "regex": 1,
+        "regex": 118,
         "hybrid": 0,
         "llm": 0
       }
     }
   },
-  "total_lifetime_calls": 0,
-  "last_reset": "2026-03-28T23:56:06.449084"
+  "total_lifetime_calls": 126,
+  "last_reset": "2026-04-01T16:44:41.473196"
 }

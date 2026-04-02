@@ -26,6 +26,8 @@ Environment Variables:
     OPENAI_API_KEY        Groq API key  (free tier: 6K req/day)
     LLM_BASE_URL          Groq base URL (default: https://api.groq.com/openai/v1)
     LLM_MODEL             Groq model    (default: llama-3.1-8b-instant)
+    OPENROUTER_API_KEY    OpenRouter API key (free models available)
+    OPENROUTER_MODEL      OpenRouter model   (default: meta-llama/llama-3.1-8b-instruct:free)
 """
 
 from __future__ import annotations
@@ -124,7 +126,7 @@ def _call_hf(prompt: str) -> str | None:
                 {"role": "user",   "content": prompt},
             ],
             model=model,
-            max_tokens=512,
+            max_tokens=1500,
             temperature=0,
         )
         return (response.choices[0].message.content or "").strip()
@@ -141,7 +143,7 @@ def _call_groq(prompt: str) -> str | None:
     model = os.getenv("LLM_MODEL", "llama-3.1-8b-instant").strip()
     try:
         import openai
-        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=30.0)
+        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=30.0, max_retries=1)
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -149,12 +151,49 @@ def _call_groq(prompt: str) -> str | None:
                 {"role": "user",   "content": prompt},
             ],
             temperature=0,
-            max_tokens=512,
+            max_tokens=1500,
             timeout=30.0,
         )
         return (response.choices[0].message.content or "").strip()
     except Exception as e:
         raise RuntimeError(f"Groq error: {type(e).__name__}: {e}") from e
+
+
+def _call_openrouter(prompt: str) -> str | None:
+    """Call OpenRouter (OpenAI-compatible aggregator with many free/paid models).
+
+    Environment variables:
+        OPENROUTER_API_KEY   OpenRouter API key (required)
+        OPENROUTER_MODEL     Model slug (default: meta-llama/llama-3.1-8b-instruct:free)
+
+    Free models on OpenRouter: meta-llama/llama-3.1-8b-instruct:free,
+    meta-llama/llama-3.3-70b-instruct:free, google/gemma-3-27b-it:free, etc.
+    """
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return None             # Not configured — skip silently
+    model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free").strip()
+    try:
+        import openai
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            timeout=30.0,
+            max_retries=1,
+            default_headers={"HTTP-Referer": "https://github.com/resume-parser", "X-Title": "ResumeParser"},
+        )
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a resume parser. Return ONLY valid JSON."},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=1500,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        raise RuntimeError(f"OpenRouter error: {type(e).__name__}: {e}") from e
 
 
 def _call_ollama(prompt: str) -> str | None:
@@ -170,7 +209,7 @@ def _call_ollama(prompt: str) -> str | None:
     model = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
     try:
         import openai
-        client = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=60.0)
+        client = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=15.0)
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -178,18 +217,55 @@ def _call_ollama(prompt: str) -> str | None:
                 {"role": "user",   "content": prompt},
             ],
             temperature=0,
-            max_tokens=512,
+            max_tokens=1500,
         )
         return (response.choices[0].message.content or "").strip()
     except Exception as e:
         raise RuntimeError(f"Ollama error: {type(e).__name__}: {e}") from e
 
 
+def _call_cerebras(prompt: str) -> str | None:
+    """Call Cerebras Cloud API (OpenAI-compatible, very fast inference).
+
+    Environment variables:
+        CEREBRAS_API_KEY   Cerebras API key (required)
+        CEREBRAS_MODEL     Model slug (default: llama-3.3-70b)
+
+    Free tier: generous TPM limits, ~900 tokens/sec inference speed.
+    """
+    api_key = os.getenv("CEREBRAS_API_KEY", "").strip()
+    if not api_key:
+        return None             # Not configured — skip silently
+    model = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
+    try:
+        import openai
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://api.cerebras.ai/v1",
+            timeout=30.0,
+            max_retries=1,
+        )
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a resume parser. Return ONLY valid JSON."},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=1500,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        raise RuntimeError(f"Cerebras error: {type(e).__name__}: {e}") from e
+
+
 # Registry: name → callable
 _PROVIDER_REGISTRY: dict[str, Any] = {
-    "hf":     _call_hf,
-    "groq":   _call_groq,
-    "ollama": _call_ollama,
+    "hf":           _call_hf,
+    "groq":         _call_groq,
+    "openrouter":   _call_openrouter,
+    "cerebras":     _call_cerebras,
+    "ollama":       _call_ollama,
 }
 
 
@@ -208,12 +284,22 @@ def _parse_json_response(raw: str) -> dict | None:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1:
-            try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
-                pass
+        pass
+    # Extract JSON object from surrounding text
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end != -1:
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        # Fix trailing commas before } or ]
+        import re
+        cleaned = re.sub(r',\s*([}\]])', r'\1', candidate)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
     return None
 
 
@@ -285,8 +371,8 @@ def call_llm_chain(prompt: str, source_file: str = "") -> dict | None:
             else:
                 # Got a response but couldn't parse JSON — treat as soft failure
                 state.record_failure(max_fails, reset_secs)
-                logger.warning("llm_chain [%s]: provider '%s' returned unparsable response",
-                               source_file, provider_name)
+                logger.warning("llm_chain [%s]: provider '%s' returned unparsable response: %.300s",
+                               source_file, provider_name, raw)
 
         except Exception as e:
             state.record_failure(max_fails, reset_secs)

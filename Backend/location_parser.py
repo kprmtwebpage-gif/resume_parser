@@ -311,7 +311,7 @@ def _is_plausible_city(raw: str) -> bool:
     if len(s) > 45:
         return False
     tokens = [t for t in s.split() if t]
-    if not (1 <= len(tokens) <= 6):
+    if not (1 <= len(tokens) <= 4):
         return False
     normed = {_norm_tok(t) for t in tokens}
     if normed & _BAD_CITY_TOKENS:
@@ -394,10 +394,11 @@ _SECTION_HEADING_RE = re.compile(
     r"(?i)^\s*(?:"
     r"technical\s+skills?|skills?\s*(?:summary|profile)?|core\s+(?:skills?|competencies)|"
     r"key\s+skills?|expertise(?:\s+snapshot)?|competencies|technologies|"
+    r"(?:professional\s+)?summary|overview|profile|"
     r"(?:professional\s+)?(?:work\s+)?experience|work\s+history|employment(?:\s+history)?|"
     r"education(?:\s+background)?|academic\s+background|academics?|"
     r"certifications?|licenses?|projects?|training|courses?|awards?"
-    r")\s*$",
+    r")\s*:?\s*$",
     re.IGNORECASE,
 )
 
@@ -477,6 +478,9 @@ def _try_parse_line(line: str) -> LocationResult | None:
         return None
 
     # Split on separator glyphs and try each segment (some headers use | ◇ •)
+    # Normalise non-standard separator glyphs (PDF bullet characters rendered as
+    # Unicode letters, e.g. U+00F2 ò used in place of • or |) before splitting.
+    ln = re.sub(r"[\u00f2\u00f3\u00e2\u00e3\u25a0\u25cf\u2022]", "|", ln)
     if any(sep in ln for sep in ["|", "◇", "·", "•", "∙"]):
         segments = [s.strip() for s in re.split(r"[|◇·•∙]", ln) if s.strip()]
         for seg in reversed(segments):
@@ -488,8 +492,24 @@ def _try_parse_line(line: str) -> LocationResult | None:
     return _parse_fragment(ln)
 
 
+# Matches: "Washington D.C.", "Washington, D.C.", "Washington DC", "Washington, DC"
+_WASHINGTON_DC_RE = re.compile(
+    r"(?i)\bwashington\s*,?\s*d\.?c\.?\b"
+)
+
+
 def _parse_fragment(frag: str) -> LocationResult | None:
     """Run all regex patterns against a single text fragment."""
+    # ── Special case: Washington D.C. ─────────────────────────────────────────
+    if _WASHINGTON_DC_RE.search(frag):
+        return LocationResult(
+            city="Washington",
+            state="District of Columbia",
+            country="United States",
+            confidence="high",
+            source="header_regex",
+        )
+
     # ── City, ST ZIP ─────────────────────────────────────────────────────────
     m = re.search(
         r"\b([A-Za-z][A-Za-z .'\-]{1,}),?\s*(?:" + "|".join(sorted(_US_STATE_ABBR_SET)) + r")\b\s*\d{5}",
