@@ -285,15 +285,21 @@ except Exception as e:
 try:
     from email_module.routes import router as email_router            # noqa: E402
     from email_module.template_routes import router as template_router  # noqa: E402
+    from email_module.workflow_routes import router as workflow_email_router  # noqa: E402
+    from email_module.candidate_template_routes import router as candidate_template_router  # noqa: E402
     from email_module.settings_routes import router as email_settings_router  # noqa: E402
     from email_module.oauth2_routes import router as oauth2_router    # noqa: E402
+    from email_module.admin_routes import router as email_admin_router  # noqa: E402
     from email_module.database import init_db as init_email_db
     app.include_router(email_router)
     app.include_router(template_router)
+    app.include_router(workflow_email_router)
+    app.include_router(candidate_template_router)
     app.include_router(email_settings_router)
     app.include_router(oauth2_router)
+    app.include_router(email_admin_router)
     init_email_db()
-    print("[OK] Email module loaded (incl. settings + OAuth2)")
+    print("[OK] Email module loaded (incl. settings + OAuth2 + admin stats)")
 except Exception as e:
     print(f"[WARN] Email module not available: {e}")
 

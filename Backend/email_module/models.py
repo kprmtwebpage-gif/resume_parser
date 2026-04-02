@@ -73,6 +73,21 @@ class EmailTemplate(Base):
     name = Column(String(255), nullable=False)
     subject = Column(String(500), nullable=False)
     body = Column(Text, nullable=False)
+    template_type = Column(String(20), nullable=False, default="COMMON")  # COMMON | CANDIDATE
+    created_by = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class CandidateEmailTemplate(Base):
+    """Candidate-only email templates (separate from common templates)."""
+    __tablename__ = "candidate_email_templates"
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    subject = Column(String(500), nullable=False)
+    body = Column(Text, nullable=False)
     created_by = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)

@@ -33,6 +33,7 @@ class Customer(Base):
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     customer_id = Column(String(50), unique=True, nullable=False, default=generate_customer_id)
     customer_type = Column(String(20), nullable=False, default="Business")
+    entity_type = Column(String(20), nullable=False, default="client")  # client | vendor | own_company | candidate
     salutation = Column(String(10), nullable=True)
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)

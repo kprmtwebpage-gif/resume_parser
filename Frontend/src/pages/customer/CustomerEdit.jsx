@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { createCustomer, uploadDocuments } from '../../services/customerApi'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { fetchCustomer, updateCustomer, addContactPerson, updateContactPerson as apiUpdateCP, deleteContactPerson } from '../../services/customerApi'
 import { listEmailTemplates } from '../../services/emailApi'
 import CreateTemplateModal from '../../components/email/CreateTemplateModal'
 import TemplatePreviewModal from '../../components/email/TemplatePreviewModal'
@@ -10,14 +10,17 @@ import countryCodes from './countryCodes'
 
 const SALUTATIONS = ['Mr.', 'Mrs.', 'Ms.', 'Miss', 'Dr.']
 
-export default function CustomerCreate() {
+export default function CustomerEdit() {
+  const { id } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  // Basic details
+  // Basic details (pre-filled from existing customer)
   const [customerType, setCustomerType] = useState('Business')
-  const [entityType, setEntityType] = useState(searchParams.get('type') || 'client')  // client | vendor | own_company | candidate
+  const [entityType, setEntityType] = useState(searchParams.get('type') || 'client')
   const [salutation, setSalutation] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -33,18 +36,14 @@ export default function CustomerCreate() {
   const [ccDropOpen, setCcDropOpen] = useState(false)
   const [ccSearch, setCcSearch] = useState('')
 
-  // Tabs (only Templates + Other Details now)
+  // Tabs
   const [activeTab, setActiveTab] = useState('templates')
 
-  // Files (Other Details tab)
-  const [files, setFiles] = useState([])
-  const [uploadProgress, setUploadProgress] = useState({})
-  const fileInputRef = useRef(null)
-
-  // Contact Persons (inline section, not tab)
+  // Contact Persons
   const [contactPersons, setContactPersons] = useState([
     { salutation: '', firstName: '', lastName: '', email: '', workPhone: '', mobile: '', ccWork: '+91', ccMobile: '+91' },
   ])
+  const [originalContactPersonIds, setOriginalContactPersonIds] = useState([])
 
   // Templates tab
   const [availableTemplates, setAvailableTemplates] = useState([])
@@ -53,10 +52,77 @@ export default function CustomerCreate() {
   const [previewTemplate, setPreviewTemplate] = useState(null)
   const [showCreateTemplate, setShowCreateTemplate] = useState(false)
 
-  // Refs for dropdowns
+  // Refs
   const salRef = useRef(null)
   const dnRef = useRef(null)
   const ccRef = useRef(null)
+
+  // Load existing customer data
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      try {
+        const data = await fetchCustomer(id)
+
+        if (searchParams.get('type') && data?.entity_type && data.entity_type !== searchParams.get('type')) {
+          navigate(`/customer?type=${searchParams.get('type')}`, { replace: true })
+          return
+        }
+
+        setCustomerType(data.customer_type || 'Business')
+        setEntityType(data.entity_type || searchParams.get('type') || 'client')
+        setSalutation(data.salutation || '')
+        setFirstName(data.first_name || '')
+        setLastName(data.last_name || '')
+        setCompanyName(data.company_name || '')
+        setDisplayName(data.display_name || '')
+        setEmail(data.email || '')
+
+        // Try to extract country code and phone number
+        const rawPhone = data.phone || ''
+        const rawCC = data.country_code || '+91'
+        setCountryCode(rawCC)
+        setPhone(rawPhone)
+
+        // Pre-fill contact persons
+        if (data.contact_persons && data.contact_persons.length > 0) {
+          const cps = data.contact_persons.map(cp => {
+            // Try to split work_phone into code + number
+            let cpCCWork = '+91'
+            let cpWorkPhone = cp.work_phone || ''
+            let cpCCMobile = '+91'
+            let cpMobile = cp.mobile || ''
+            // If phone starts with a known code, split it
+            const matchWork = cpWorkPhone.match(/^(\+\d{1,3})(.*)$/)
+            if (matchWork) { cpCCWork = matchWork[1]; cpWorkPhone = matchWork[2] }
+            const matchMobile = cpMobile.match(/^(\+\d{1,3})(.*)$/)
+            if (matchMobile) { cpCCMobile = matchMobile[1]; cpMobile = matchMobile[2] }
+            return {
+              _id: cp.id,   // track existing CP id for updates
+              salutation: cp.salutation || '',
+              firstName: cp.first_name || '',
+              lastName: cp.last_name || '',
+              email: cp.email || '',
+              workPhone: cpWorkPhone,
+              mobile: cpMobile,
+              ccWork: cpCCWork,
+              ccMobile: cpCCMobile,
+            }
+          })
+          setContactPersons(cps)
+          setOriginalContactPersonIds(cps.map(cp => cp._id).filter(Boolean))
+        } else {
+          setOriginalContactPersonIds([])
+        }
+      } catch (err) {
+        console.error('Failed to load customer:', err)
+        alert('Failed to load customer data')
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [id, navigate, searchParams])
 
   // Build display name suggestions
   const buildSuggestions = () => {
@@ -65,21 +131,12 @@ export default function CustomerCreate() {
     const fn = firstName || ''
     const ln = lastName || ''
     const cn = companyName || ''
-
     if (sal && fn && ln) suggestions.push(`${sal} ${fn} ${ln}`)
     if (fn && ln) suggestions.push(`${fn} ${ln}`)
     if (ln && fn) suggestions.push(`${ln}, ${fn}`)
     if (cn) suggestions.push(cn)
-
     return [...new Set(suggestions)]
   }
-
-  // Auto-set display name to company name if empty
-  useEffect(() => {
-    if (!displayName && companyName) {
-      setDisplayName(companyName)
-    }
-  }, [companyName])
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -92,7 +149,6 @@ export default function CustomerCreate() {
     return () => document.removeEventListener('mousedown', handle)
   }, [])
 
-  // Load templates when Templates tab is activated
   const loadTemplates = useCallback(async () => {
     setTemplatesLoading(true)
     try {
@@ -117,65 +173,19 @@ export default function CustomerCreate() {
       )
     : countryCodes
 
-  const entityLabel = entityType === 'vendor'
-    ? 'Vendor'
-    : entityType === 'own_company' || entityType === 'own'
-    ? 'Own Company'
-    : entityType === 'candidate'
-    ? 'Candidate'
-    : 'Client'
-
-  const handleFileSelect = (e) => {
-    const newFiles = Array.from(e.target.files)
-    const total = files.length + newFiles.length
-    if (total > 5) {
-      alert('Maximum 5 files allowed')
-      return
-    }
-    for (const f of newFiles) {
-      if (f.size > 10 * 1024 * 1024) {
-        alert(`File "${f.name}" exceeds 10MB limit`)
-        return
-      }
-    }
-    setFiles(prev => [...prev, ...newFiles])
-    e.target.value = ''
-  }
-
-  const removeFile = (index) => {
-    setFiles(prev => prev.filter((_, i) => i !== index))
-  }
-
-  const handleDrop = (e) => {
-    e.preventDefault()
-    const newFiles = Array.from(e.dataTransfer.files)
-    const total = files.length + newFiles.length
-    if (total > 5) {
-      alert('Maximum 5 files allowed')
-      return
-    }
-    for (const f of newFiles) {
-      if (f.size > 10 * 1024 * 1024) {
-        alert(`File "${f.name}" exceeds 10MB limit`)
-        return
-      }
-    }
-    setFiles(prev => [...prev, ...newFiles])
-  }
-
-  const addContactPerson = () => {
+  const addContactPersonRow = () => {
     setContactPersons(prev => [
       ...prev,
       { salutation: '', firstName: '', lastName: '', email: '', workPhone: '', mobile: '', ccWork: '+91', ccMobile: '+91' },
     ])
   }
 
-  const updateContactPerson = (index, field, value) => {
+  const updateContactPersonLocal = (index, field, value) => {
     setContactPersons(prev => prev.map((cp, i) => i === index ? { ...cp, [field]: value } : cp))
   }
 
-  const removeContactPerson = (index) => {
-    if (index === 0) return
+  const removeContactPersonLocal = (index) => {
+    if (index === 0 && contactPersons.length === 1) return
     setContactPersons(prev => prev.filter((_, i) => i !== index))
   }
 
@@ -193,34 +203,8 @@ export default function CustomerCreate() {
 
     setSaving(true)
     try {
-      const cps = contactPersons
-        .filter(cp => cp.firstName || cp.lastName || cp.email)
-        .map(cp => ({
-          salutation: cp.salutation || null,
-          first_name: cp.firstName || null,
-          last_name: cp.lastName || null,
-          email: cp.email || null,
-          work_phone: cp.workPhone ? `${cp.ccWork}${cp.workPhone}` : null,
-          mobile: cp.mobile ? `${cp.ccMobile}${cp.mobile}` : null,
-        }))
-
-      if ((firstName || lastName) && email) {
-        const alreadyInList = cps.some(
-          cp => cp.email && cp.email.toLowerCase() === email.toLowerCase()
-        )
-        if (!alreadyInList) {
-          cps.unshift({
-            salutation: salutation || null,
-            first_name: firstName || null,
-            last_name: lastName || null,
-            email: email,
-            work_phone: phone ? `${countryCode}${phone}` : null,
-            mobile: null,
-          })
-        }
-      }
-
-      const customer = await createCustomer({
+      // Update basic customer fields
+      await updateCustomer(id, {
         customer_type: customerType,
         entity_type: entityType,
         salutation: salutation || null,
@@ -231,23 +215,69 @@ export default function CustomerCreate() {
         email: email || null,
         phone: phone || null,
         country_code: countryCode,
-        contact_persons: cps,
       })
 
-      if (files.length > 0) {
-        await uploadDocuments(customer.id, files, (pct) => {
-          setUploadProgress({ total: pct })
-        })
+      const hasContactData = (cp) => Boolean(
+        (cp.firstName && cp.firstName.trim()) ||
+        (cp.lastName && cp.lastName.trim()) ||
+        (cp.email && cp.email.trim()) ||
+        (cp.workPhone && cp.workPhone.trim()) ||
+        (cp.mobile && cp.mobile.trim())
+      )
+
+      const cpRowsToKeep = contactPersons.filter(hasContactData)
+      const currentExistingIds = new Set(cpRowsToKeep.filter(cp => cp._id).map(cp => cp._id))
+      const cpIdsToDelete = originalContactPersonIds.filter(cpId => !currentExistingIds.has(cpId))
+
+      for (const cpId of cpIdsToDelete) {
+        await deleteContactPerson(id, cpId)
       }
 
-      navigate('/customer')
+      for (const cp of cpRowsToKeep) {
+        const cpPayload = {
+          salutation: cp.salutation || null,
+          first_name: cp.firstName || null,
+          last_name: cp.lastName || null,
+          email: cp.email || null,
+          work_phone: cp.workPhone ? `${cp.ccWork}${cp.workPhone}` : null,
+          mobile: cp.mobile ? `${cp.ccMobile}${cp.mobile}` : null,
+        }
+
+        if (cp._id) {
+          await apiUpdateCP(id, cp._id, cpPayload)
+        } else {
+          await addContactPerson(id, cpPayload)
+        }
+      }
+
+      navigate(`/customer/${id}?type=${entityType}`)
     } catch (err) {
       console.error('Save failed:', err)
-      alert(err?.response?.data?.detail || 'Failed to save customer')
+      alert(err?.response?.data?.detail || 'Failed to save')
     } finally {
       setSaving(false)
     }
   }
+
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: 'calc(100vh - 56px)', color: '#9ca3af', fontSize: '16px',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      }}>
+        Loading...
+      </div>
+    )
+  }
+
+  const entityLabel = entityType === 'vendor'
+    ? 'Vendor'
+    : entityType === 'own_company' || entityType === 'own'
+    ? 'Own Company'
+    : entityType === 'candidate'
+    ? 'Candidate'
+    : 'Client'
 
   return (
     <div style={{
@@ -267,14 +297,21 @@ export default function CustomerCreate() {
               {entityLabel}
             </span>
             <span style={{ color: '#94a3b8' }}>/</span>
-            <span style={{ color: '#64748b' }}>{`New ${entityLabel}`}</span>
+            <span
+              onClick={() => navigate(`/customer/${id}?type=${entityType}`)}
+              style={{ color: '#2563eb', cursor: 'pointer', fontWeight: 500 }}
+            >
+              {displayName}
+            </span>
+            <span style={{ color: '#94a3b8' }}>/</span>
+            <span style={{ color: '#64748b' }}>Edit</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
-              {`New ${entityLabel}`}
+              Edit {entityLabel}
             </h1>
             <button
-              onClick={() => { if (window.history.length > 1) navigate(-1); else navigate('/customer'); }}
+              onClick={() => navigate(`/customer/${id}?type=${entityType}`)}
               style={{
                 backgroundColor: '#f1f5f9', color: '#374151',
                 border: '1px solid #e2e8f0', borderRadius: '8px',
@@ -295,7 +332,7 @@ export default function CustomerCreate() {
 
         {/* ── Section: Customer Details ── */}
         <div style={sectionCardStyle}>
-          <h2 style={sectionTitleStyle}>Customer Details</h2>
+          <h2 style={sectionTitleStyle}>{entityLabel} Details</h2>
 
           {/* Customer Type */}
           <FormRow label="Customer Type">
@@ -345,7 +382,7 @@ export default function CustomerCreate() {
             </div>
           </FormRow>
 
-          {/* Two-column grid for Company + Display, Email + Phone */}
+          {/* Two-column: Company + Display, Email + Phone */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 32px' }}>
             <FormRow label="Company Name">
               <input type="text" value={companyName} onChange={(e) => setCompanyName(e.target.value)}
@@ -367,7 +404,7 @@ export default function CustomerCreate() {
                       position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
                       background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '10px',
                     }}>
-                    {dnDropOpen ? '&#9650;' : '&#9660;'}
+                    {dnDropOpen ? '▲' : '▼'}
                   </button>
                 </div>
                 {dnDropOpen && buildSuggestions().length > 0 && (
@@ -381,8 +418,8 @@ export default function CustomerCreate() {
                           color: displayName === s ? '#fff' : '#374151',
                           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         }}
-                        onMouseEnter={(e) => { if (displayName !== s) e.target.style.backgroundColor = '#f1f5f9' }}
-                        onMouseLeave={(e) => { if (displayName !== s) e.target.style.backgroundColor = '#fff' }}>
+                        onMouseEnter={(e) => { if (displayName !== s) e.currentTarget.style.backgroundColor = '#f1f5f9' }}
+                        onMouseLeave={(e) => { if (displayName !== s) e.currentTarget.style.backgroundColor = '#fff' }}>
                         <span>{s}</span>
                         {displayName === s && <span>&#10003;</span>}
                       </button>
@@ -440,9 +477,9 @@ export default function CustomerCreate() {
         <div style={sectionCardStyle}>
           <ContactPersonSection
             contactPersons={contactPersons}
-            onChange={updateContactPerson}
-            onAdd={addContactPerson}
-            onRemove={removeContactPerson}
+            onChange={updateContactPersonLocal}
+            onAdd={addContactPersonRow}
+            onRemove={removeContactPersonLocal}
           />
         </div>
 
@@ -471,73 +508,22 @@ export default function CustomerCreate() {
             </div>
           </div>
 
-          {/* Tab Content */}
           <div style={{ minHeight: '120px' }}>
             {activeTab === 'other' && (
-              <div>
-                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#374151', marginBottom: '16px', marginTop: 0 }}>Documents</h3>
-                <div
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={handleDrop}
-                  onClick={() => files.length < 5 && fileInputRef.current.click()}
-                  style={{
-                    border: '2px dashed #d1d5db', borderRadius: '10px', padding: '36px',
-                    textAlign: 'center', cursor: files.length < 5 ? 'pointer' : 'default',
-                    backgroundColor: '#fafbfc', transition: 'border-color 0.2s',
-                  }}
-                  onMouseEnter={(e) => { if (files.length < 5) e.currentTarget.style.borderColor = '#2563eb' }}
-                  onMouseLeave={(e) => e.currentTarget.style.borderColor = '#d1d5db'}
-                >
-                  <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect}
-                    style={{ display: 'none' }} />
-                  <div style={{ fontSize: '28px', color: '#9ca3af', marginBottom: '8px' }}>&#8682;</div>
-                  <div style={{ fontSize: '14px', color: '#6b7280' }}>
-                    Upload files (Max: {5 - files.length} more files)
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
-                    You can upload a maximum of 5 files, 10MB each
-                  </div>
-                </div>
-
-                {files.length > 0 && (
-                  <div style={{ marginTop: '16px' }}>
-                    <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px' }}>
-                      {files.length} / 5 files selected
-                    </div>
-                    {files.map((f, i) => (
-                      <div key={i} style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '10px 14px', borderRadius: '8px', marginBottom: '6px',
-                        border: '1px solid #e5e7eb', backgroundColor: '#fff',
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ fontSize: '16px' }}>&#128196;</span>
-                          <div>
-                            <div style={{ fontSize: '13px', color: '#374151', fontWeight: 500 }}>{f.name}</div>
-                            <div style={{ fontSize: '11px', color: '#9ca3af' }}>{formatFileSize(f.size)}</div>
-                          </div>
-                        </div>
-                        <button onClick={(e) => { e.stopPropagation(); removeFile(i) }}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '16px' }}>
-                          &#10005;
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <div style={{ fontSize: '14px', color: '#6b7280', padding: '16px 0' }}>
+                To manage documents, go back to the detail view.
               </div>
             )}
-
             {activeTab === 'templates' && (
               <TemplatesTabContent
                 templates={availableTemplates}
                 loading={templatesLoading}
                 previewId={previewTemplateId}
-                onTogglePreview={(id) => setPreviewTemplateId(prev => prev === id ? null : id)}
+                onTogglePreview={(tid) => setPreviewTemplateId(prev => prev === tid ? null : tid)}
                 onPreviewClick={(t) => setPreviewTemplate(t)}
                 onCreateClick={() => setShowCreateTemplate(true)}
                 onDeleted={loadTemplates}
-                />
+              />
             )}
           </div>
         </div>
@@ -550,7 +536,7 @@ export default function CustomerCreate() {
         onCreated={loadTemplates}
       />
 
-      {/* Template Preview + Edit Modal */}
+      {/* Template Preview Modal */}
       <TemplatePreviewModal
         isOpen={!!previewTemplate}
         template={previewTemplate}
@@ -581,7 +567,7 @@ export default function CustomerCreate() {
             {saving ? 'Saving...' : 'Save'}
           </button>
           <button
-            onClick={() => navigate('/customer')}
+            onClick={() => navigate(`/customer/${id}?type=${entityType}`)}
             style={{
               backgroundColor: '#fff', color: '#374151',
               border: '1px solid #d1d5db', borderRadius: '8px', padding: '11px 32px',
@@ -599,9 +585,6 @@ export default function CustomerCreate() {
   )
 }
 
-
-/* ── Shared sub-components & styles ──────────────────────────── */
-
 function FormRow({ label, children }) {
   return (
     <div style={{ marginBottom: '18px' }}>
@@ -612,9 +595,6 @@ function FormRow({ label, children }) {
     </div>
   )
 }
-
-
-// ── Styles ──
 
 const sectionCardStyle = {
   backgroundColor: '#fff',
@@ -654,6 +634,4 @@ const dropdownItemStyle = {
   backgroundColor: '#fff', color: '#374151', fontSize: '14px',
 }
 
-
-// TemplatesTabContent is now imported from the reusable TemplatesList component
 const TemplatesTabContent = TemplatesList

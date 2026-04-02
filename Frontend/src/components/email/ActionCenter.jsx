@@ -30,15 +30,23 @@ const providerTheme = {
 
 /**
  * Replace {{variable}} placeholders in a string with candidate data.
+ * Handles both snake_case ({{candidate_name}}) and space-separated ({{Candidate Name}}) formats.
+ * @param {string} html
+ * @param {object} candidate
+ * @param {string} fallbackName
+ * @param {object} extraData - { clientName, jobTitle, yourName }
  */
-function replaceTemplateVars(html, candidate, fallbackName) {
+function replaceTemplateVars(html, candidate, fallbackName, extraData = {}) {
   if (!html) return ''
+
   const c = candidate || {}
   const expYears = c.experience?.years_of_experience
     ? `${c.experience.years_of_experience} years` : ''
   const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || fallbackName || ''
+  const jobTitle = c.job_title || c.title || c.current_title || extraData.jobTitle || ''
 
   const vars = {
+    // snake_case variants
     candidate_name: name,
     phone: c.phone || (c.phones && c.phones[0]) || '',
     email: c.email || (c.emails && c.emails[0]) || '',
@@ -59,15 +67,66 @@ function replaceTemplateVars(html, candidate, fallbackName) {
     submittal_type: c.submittal_type || '',
     willingness_to_relocate: c.willingness_to_relocate || '',
     ssn_last4: c.ssn_last4 || '',
+    // Human-readable / space-separated variants (title case templates)
+    'candidate name': name,
+    'client name': extraData.clientName || '',
+    'job title': jobTitle,
+    'your name': extraData.yourName || '',
   }
 
-  let result = html
+  // Build a lookup map keyed by normalized variable name (lowercase, trimmed)
+  const varLookup = {}
   for (const [key, val] of Object.entries(vars)) {
-    const re = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi')
-    result = result.replace(re, val)
+    if (!val) continue
+    varLookup[key.toLowerCase().trim()] = val
+    // Also map underscore variant to the same value
+    varLookup[key.toLowerCase().trim().replace(/\s+/g, '_')] = val
+    // Also map space variant
+    varLookup[key.toLowerCase().trim().replace(/_/g, ' ')] = val
   }
-  // Strip any remaining unresolved {{...}} placeholders
-  result = result.replace(/\{\{\s*\w+\s*\}\}/g, '')
+
+  // Helper: resolve a placeholder key to its value
+  function resolveVar(rawKey) {
+    const k = rawKey.toLowerCase().replace(/[\s\u00a0]+/g, ' ').trim()
+    return varLookup[k] || varLookup[k.replace(/\s+/g, '_')] || null
+  }
+
+  // STEP 1: Normalize HTML-fragmented placeholders
+  // Strip HTML tags + &nbsp; from inside {{ }} so editor artifacts are cleaned
+  let result = html
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
+  result = result.replace(/\{\{((?:[^{}]|<[^>]*>)*?)\}\}/g, (_m, inner) => {
+    const cleaned = inner.replace(/<[^>]*>/g, '').replace(/[\s\u00a0]+/g, ' ').trim()
+    return `{{${cleaned}}}`
+  })
+
+  // STEP 2: Regex-based replacement on the HTML string
+  result = result.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_m, rawKey) => {
+    const val = resolveVar(rawKey)
+    return val != null ? val : _m // keep original if no value
+  })
+
+  // STEP 3: DOMParser fallback — replace within individual text nodes
+  // This handles cases where the regex on raw HTML missed placeholders
+  if (/\{\{[^}]+\}\}/.test(result)) {
+    try {
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(`<div>${result}</div>`, 'text/html')
+      const walker = doc.createTreeWalker(doc.body.firstChild, NodeFilter.SHOW_TEXT)
+      let node
+      while ((node = walker.nextNode())) {
+        let text = node.nodeValue
+        text = text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_m, rawKey) => {
+          const val = resolveVar(rawKey)
+          return val != null ? val : _m
+        })
+        node.nodeValue = text
+      }
+      result = doc.body.firstChild.innerHTML
+    } catch (_e) { /* keep regex result on DOMParser failure */ }
+  }
+
   return result
 }
 
@@ -90,6 +149,9 @@ export default function ActionCenter({
   provider,
   initialSubject,
   initialBody,
+  templateType,
+  recipientType,
+  clientName,
   onBack,
   onSent,
   onToast,
@@ -98,6 +160,7 @@ export default function ActionCenter({
   const fileInputRef = useRef(null)
   const [subject, setSubject] = useState(initialSubject || '')
   const [body, setBody] = useState(initialBody || '')
+  const [bodyKey, setBodyKey] = useState(0)   // incremented to force EmailBodyField remount on programmatic content set
   const [files, setFiles] = useState([])
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [candidate, setCandidate] = useState(null)
@@ -118,6 +181,28 @@ export default function ActionCenter({
       .catch(err => console.warn('Could not fetch candidate for variable replacement:', err))
     return () => { cancelled = true }
   }, [candidateId])
+
+  // Apply variable replacement to initial body/subject once when candidate data loads
+  const hasAppliedInitialRef = useRef(false)
+  useEffect(() => {
+    if (!candidate || hasAppliedInitialRef.current) return
+    if (!initialBody && !initialSubject) return
+    hasAppliedInitialRef.current = true
+    const rp_user = JSON.parse(localStorage.getItem('rp_user') || '{}')
+    const extra = { clientName: clientName || '', yourName: rp_user.username || '' }
+    console.log('[ActionCenter] Applying template vars — candidate:', candidate, 'candidateName:', candidateName, 'extra:', extra)
+    if (initialSubject) {
+      const newSubject = replaceTemplateVars(initialSubject, candidate, candidateName, extra)
+      console.log('[ActionCenter] Subject before:', initialSubject, '→ after:', newSubject)
+      setSubject(newSubject)
+    }
+    if (initialBody) {
+      const newBody = replaceTemplateVars(initialBody, candidate, candidateName, extra)
+      console.log('[ActionCenter] Body replaced, placeholders remaining:', (newBody.match(/\{\{[^}]+\}\}/g) || []))
+      setBody(newBody)
+      setBodyKey(k => k + 1)
+    }
+  }, [candidate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch sender info (configured "from" emails) on mount
   useEffect(() => {
@@ -590,6 +675,7 @@ export default function ActionCenter({
             </button>
           </div>
           <EmailBodyField
+            key={bodyKey}
             value={body}
             onChange={setBody}
             placeholder="Compose your email..."
@@ -716,10 +802,15 @@ export default function ActionCenter({
       <TemplatePickerModal
         isOpen={showTemplateModal}
         onClose={() => setShowTemplateModal(false)}
+        templateType={templateType || (candidateId ? 'candidate' : null)}
         onSelect={(tpl) => {
+          const rp_user = JSON.parse(localStorage.getItem('rp_user') || '{}')
+          const extra = { clientName: clientName || '', yourName: rp_user.username || '' }
           // Replace {{variables}} with actual candidate data
-          setSubject(replaceTemplateVars(tpl.subject, candidate, candidateName))
-          setBody(replaceTemplateVars(tpl.body, candidate, candidateName))
+          setSubject(replaceTemplateVars(tpl.subject, candidate, candidateName, extra))
+          const newBody = replaceTemplateVars(tpl.body, candidate, candidateName, extra)
+          setBody(newBody)
+          setBodyKey(k => k + 1)  // force editor remount with new content
           setShowTemplateModal(false)
         }}
       />
