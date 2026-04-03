@@ -740,6 +740,13 @@ async def _create_indexes():
                     EXCEPTION WHEN duplicate_column THEN NULL;
                     END $$
                 """)
+                # Add uploaded_by column if missing (used by upload-log and upload-metrics)
+                cur.execute(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$
+                """)
                 # Now create indexes (resume_parse_status column guaranteed to exist)
                 cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_first_name ON {CANDIDATES_TABLE}(LOWER(first_name))")
                 cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_last_name ON {CANDIDATES_TABLE}(LOWER(last_name))")
@@ -1204,41 +1211,6 @@ async def get_candidate(candidate_id: int):
                     certifications=_split_csv(row.get("certifications")),
                 ),
             )
-
-
-@app.delete("/candidates/{candidate_id}")
-async def delete_candidate(
-    candidate_id: int,
-    _: dict = Depends(get_current_admin),
-):
-    """Delete a candidate, their skills, and their resume file from disk. Superuser/admin only."""
-    from pathlib import Path
-    resume_filename = None
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                f"SELECT id, resume_filename FROM {CANDIDATES_TABLE} WHERE id = %s",
-                (candidate_id,),
-            )
-            row = cursor.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Candidate not found")
-            resume_filename = row.get("resume_filename")
-            cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (candidate_id,))
-            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (candidate_id,))
-        conn.commit()
-
-    # Remove the physical resume file so the ingestion service doesn't re-index it.
-    if resume_filename:
-        backend_dir = Path(__file__).resolve().parent
-        candidate_file = backend_dir / resume_filename
-        try:
-            if candidate_file.exists():
-                candidate_file.unlink()
-        except Exception:
-            pass  # Non-fatal — DB record is already deleted
-
-    return {"success": True, "deleted_id": candidate_id}
 
 
 @app.get("/stats")
@@ -3108,54 +3080,6 @@ async def admin_get_users(request: Request):
             "last_ip":          r["last_ip"],
             "created_at":       r["created_at"].isoformat() if r["created_at"] else None,
             "resumes_uploaded": r["resumes_uploaded"],
-        }
-        for r in rows
-    ]
-
-
-@app.get("/api/admin/upload-log")
-async def admin_upload_log(request: Request):
-    """Return every uploaded resume with candidate name, file, uploader, date, and status.
-
-    Duplicate events are now stored as DB rows (resume_parse_status='duplicate') so
-    they are visible across all uvicorn workers.  The in-memory ring buffer is no
-    longer used for the response.
-    """
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT
-                    cp.id,
-                    cp.first_name,
-                    cp.last_name,
-                    cp.resume_filename,
-                    cp.resume_parse_status  AS status,
-                    cp.parsed_at,
-                    cp.parse_failure_reason,
-                    cp.uploaded_by          AS uploader_id,
-                    u.username              AS uploader_username,
-                    u.email                 AS uploader_email,
-                    csp.job_title
-                FROM candidate_profile cp
-                LEFT JOIN users u   ON u.id  = cp.uploaded_by
-                LEFT JOIN candidate_skills_profile csp ON csp.candidate_id = cp.id
-                ORDER BY cp.parsed_at DESC NULLS LAST
-            """)
-            rows = cursor.fetchall()
-
-    return [
-        {
-            "id":                   r["id"],
-            "first_name":           r["first_name"],
-            "last_name":            r["last_name"],
-            "resume_filename":      r["resume_filename"],
-            "status":               r["status"],
-            "parsed_at":            r["parsed_at"].isoformat() if r["parsed_at"] else None,
-            "parse_failure_reason": r["parse_failure_reason"],
-            "uploader_id":          r["uploader_id"],
-            "uploader_username":    r["uploader_username"],
-            "uploader_email":       r["uploader_email"],
-            "job_title":            r["job_title"],
         }
         for r in rows
     ]

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ChevronDownIcon, ChevronUpIcon, XMarkIcon, ArchiveBoxIcon, ArrowPathIcon, TrashIcon, MagnifyingGlassIcon, ArrowDownTrayIcon, FunnelIcon } from '@heroicons/react/24/outline'
 import { api } from '../services/api'
 import CreateJobModal from '../components/CreateJobModal'
+import ReviewJobModal from '../components/ReviewJobModal'
 import JobCard from '../components/JobCard'
 import FloatingInput from '../components/FloatingInput'
 import TagInput from '../components/TagInput'
@@ -1081,15 +1082,22 @@ export default function Jobs() {
         </div>
       </main>
 
-      {/* Create / Edit / Review Job Modal */}
+      {/* Create / Edit Modal */}
       <CreateJobModal
-        isOpen={isCreateModalOpen}
+        isOpen={isCreateModalOpen && modalMode !== 'review'}
         onClose={closeModal}
         mode={modalMode}
         initialData={modalJob}
         onSave={handleSaveJob}
         onDelete={handleArchiveJob}
         onDuplicate={handleDuplicateJob}
+      />
+
+      {/* Review Job Details Popup */}
+      <ReviewJobModal
+        isOpen={isCreateModalOpen && modalMode === 'review'}
+        onClose={closeModal}
+        job={modalJob}
       />
     </div>
   )

@@ -168,52 +168,6 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     setIsSendFlowOpen(true)
   }, [])
 
-  const handleEmailProvider = useCallback((provider) => {
-    // Generate email subject and body from candidate data
-    const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
-    const primarySkill = row.job_title || row.primary_skill || 'N/A'
-    
-    const subject = `Profile Submission – ${fullName} – ${primarySkill}`
-    
-    const body = `PERSONAL DETAILS:
-Full Name: ${fullName}
-Current Location: ${row.location || row.address || 'N/A'}
-Phone: ${row.phone || 'N/A'}
-Email: ${row.email || 'N/A'}
-LinkedIn: ${linkedinUrl || 'N/A'}
-
-EDUCATIONAL DETAILS:
-Degree: ${row.degree || row.education || 'N/A'}
-University: ${row.university || 'N/A'}
-Year of Completion: ${row.graduation_year || 'N/A'}
-
-SUBMITTAL DETAILS:
-Work Authorization: ${row.work_authorization || row.visa_status || 'N/A'}
-Submittal Type: ${row.submittal_type || 'N/A'}
-Rate: $${row.rate || row.hourly_rate || 'N/A'}
-Availability: ${row.availability || 'N/A'}`
-
-    // Encode subject and body for URL
-    const encodedSubject = encodeURIComponent(subject)
-    const encodedBody = encodeURIComponent(body)
-
-    // Build email URL based on provider
-    let emailUrl = ''
-    if (provider === 'gmail') {
-      emailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=&su=${encodedSubject}&body=${encodedBody}`
-    } else if (provider === 'outlook') {
-      emailUrl = `https://outlook.office.com/mail/deeplink/compose?to=&subject=${encodedSubject}&body=${encodedBody}`
-    }
-
-    // Open in new tab
-    if (emailUrl) {
-      window.open(emailUrl, '_blank', 'noopener,noreferrer')
-    }
-
-    // Close modal
-    setIsEmailModalOpen(false)
-  }, [row])
-
   const handleEditClick = useCallback((e) => {
     e.stopPropagation()
     setIsDropdownOpen(false)

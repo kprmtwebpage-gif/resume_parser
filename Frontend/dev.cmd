@@ -16,4 +16,8 @@ echo.
 echo Starting Vite dev server...
 echo Frontend will be available at: http://127.0.0.1:5173/
 echo.
+if "%VITE_API_PROXY_TARGET%"=="" (
+    set "VITE_API_PROXY_TARGET=http://127.0.0.1:8000"
+)
+echo Using API proxy target: %VITE_API_PROXY_TARGET%
 "C:\Program Files\nodejs\npm.cmd" run dev

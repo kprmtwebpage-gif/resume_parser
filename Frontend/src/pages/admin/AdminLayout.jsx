@@ -5,7 +5,7 @@ import { useTheme } from '../../contexts/ThemeContext'
 import {
   Users, Clock, FileText,
   Menu, Home, ChevronLeft, ChevronDown, ArrowLeft, RefreshCw, Bell,
-  LayoutDashboard, Upload, BarChart3, Mail, FileText,
+  LayoutDashboard, Upload, BarChart3, Mail,
 } from 'lucide-react'
 import { api } from '../../services/api'
 import companyLogo from '../../assets/company-logo.png'
