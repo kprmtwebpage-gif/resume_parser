@@ -24,7 +24,11 @@ import UploadLog from './pages/admin/UploadLog.jsx'
 =======
 import EmailTrackingDashboard from './pages/admin/EmailTrackingDashboard.jsx'
 import CandidateTemplates from './pages/admin/CandidateTemplates.jsx'
+<<<<<<< HEAD
 >>>>>>> 8121510 ( Email_update)
+=======
+import UploadLog from './pages/admin/UploadLog.jsx'
+>>>>>>> 090177f (merge: integrate dev changes + local modules (comments, jobs, user pages))
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
@@ -36,7 +40,10 @@ import CustomerEdit from './pages/customer/CustomerEdit.jsx'
 import SendMail from './pages/SendMail.jsx'
 import TemplatesPage from './pages/TemplatesPage.jsx'
 import EmailSettingsPage from './pages/EmailSettingsPage.jsx'
-import UserEmailModule from './pages/UserEmailModule.jsx'
+// User panel
+import UserLayout from './pages/user/UserLayout.jsx'
+import UserUploadLogs from './pages/user/UserUploadLogs.jsx'
+import EmailHistorySection from './components/email/EmailHistorySection.jsx'
 
 function AdminGuard({ children }) {
   try {
@@ -130,10 +137,16 @@ function AppContent() {
         <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
         {/* Send Mail page */}
         <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
-        {/* User section */}
-        <Route path="/user/email" element={<DashboardLayout><UserEmailModule /></DashboardLayout>} />
-        <Route path="/user" element={<DashboardLayout><EmailSettingsPage /></DashboardLayout>} />
-        <Route path="/user/email-settings" element={<DashboardLayout><EmailSettingsPage /></DashboardLayout>} />
+        {/* User section (user panel only) */}
+        <Route path="/user" element={<DashboardLayout><UserLayout /></DashboardLayout>}>
+          <Route index element={<Navigate to="email/settings" replace />} />
+          <Route path="upload-log" element={<UserUploadLogs />} />
+          <Route path="email" element={<Navigate to="settings" replace />} />
+          <Route path="email/history" element={<EmailHistorySection />} />
+          <Route path="email/settings" element={<EmailSettingsPage />} />
+          {/* Back-compat routes */}
+          <Route path="email-settings" element={<Navigate to="email/settings" replace />} />
+        </Route>
         {/* Templates page (part of Customer module) */}
         <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
         {/* Admin routes — protected by role check */}
@@ -142,6 +155,7 @@ function AppContent() {
           <Route path="upload-metrics" element={<UploadMetrics />} />
           <Route path="upload-log" element={<UploadLog />} />
           <Route path="email-tracking" element={<EmailTrackingDashboard />} />
+          <Route path="upload-log" element={<UploadLog />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
           <Route path="candidate-templates" element={<CandidateTemplates />} />

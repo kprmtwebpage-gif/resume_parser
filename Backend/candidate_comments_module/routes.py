@@ -42,7 +42,7 @@ async def create_candidate_comment(
     summary="Get all comments for a candidate",
 )
 async def get_candidate_comments(
-    candidate_id: uuid.UUID,
+    candidate_id: int,
     db: Session = Depends(get_db),
 ):
     return service.get_comments_by_candidate(db, candidate_id)

@@ -68,7 +68,7 @@ echo.
 echo Waiting for backend to start^...
 timeout /t 8 /nobreak >nul
 
-start /D "%~dp0Frontend" "KPRMT Frontend - Vite" cmd /k "npm run dev"
+start /D "%~dp0Frontend" "KPRMT Frontend - Vite" cmd /k "set VITE_API_PROXY_TARGET=http://127.0.0.1:8000 & npm run dev"
 echo Frontend window opened  (Vite on http://localhost:5173)
 echo.
 

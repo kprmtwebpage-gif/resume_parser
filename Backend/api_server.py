@@ -740,6 +740,13 @@ async def _create_indexes():
                     EXCEPTION WHEN duplicate_column THEN NULL;
                     END $$
                 """)
+                # Add uploaded_by column if missing (used by upload-log and upload-metrics)
+                cur.execute(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {CANDIDATES_TABLE} ADD COLUMN uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$
+                """)
                 # Now create indexes (resume_parse_status column guaranteed to exist)
                 cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_first_name ON {CANDIDATES_TABLE}(LOWER(first_name))")
                 cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{CANDIDATES_TABLE}_last_name ON {CANDIDATES_TABLE}(LOWER(last_name))")
@@ -1239,6 +1246,74 @@ async def delete_candidate(
             pass  # Non-fatal — DB record is already deleted
 
     return {"success": True, "deleted_id": candidate_id}
+
+
+class BulkDeleteCandidatesRequest(BaseModel):
+    ids: List[int]
+
+
+@app.post("/candidates/bulk-delete")
+async def bulk_delete_candidates(
+    body: BulkDeleteCandidatesRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Bulk delete candidates. Superuser-only (NOT admin)."""
+    if current_user.get("role") != "superuser":
+        raise HTTPException(status_code=403, detail="Super Admin access required")
+
+    ids = [int(x) for x in (body.ids or []) if int(x) > 0]
+    # De-dupe while preserving order
+    seen = set()
+    ids = [x for x in ids if not (x in seen or seen.add(x))]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No candidate IDs provided")
+    if len(ids) > 500:
+        raise HTTPException(status_code=400, detail="Maximum 500 candidates per delete")
+
+    from pathlib import Path
+
+    resume_filenames: List[str] = []
+    deleted_ids: List[int] = []
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            placeholders = ",".join(["%s"] * len(ids))
+            cursor.execute(
+                f"SELECT id, resume_filename FROM {CANDIDATES_TABLE} WHERE id IN ({placeholders})",
+                ids,
+            )
+            rows = cursor.fetchall() or []
+            if not rows:
+                raise HTTPException(status_code=404, detail="No candidates found")
+
+            deleted_ids = [int(r["id"]) for r in rows if r.get("id") is not None]
+            resume_filenames = [r.get("resume_filename") for r in rows if r.get("resume_filename")]
+
+            del_placeholders = ",".join(["%s"] * len(deleted_ids))
+            cursor.execute(
+                f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id IN ({del_placeholders})",
+                deleted_ids,
+            )
+            cursor.execute(
+                f"DELETE FROM {CANDIDATES_TABLE} WHERE id IN ({del_placeholders})",
+                deleted_ids,
+            )
+        conn.commit()
+
+    # Remove the physical resume files so the ingestion service doesn't re-index them.
+    backend_dir = Path(__file__).resolve().parent
+    for resume_filename in resume_filenames:
+        try:
+            candidate_file = backend_dir / resume_filename
+            if candidate_file.exists():
+                candidate_file.unlink()
+        except Exception:
+            pass  # Non-fatal — DB record is already deleted
+
+    return {
+        "success": True,
+        "deleted_ids": deleted_ids,
+    }
 
 
 @app.get("/stats")
@@ -3115,6 +3190,10 @@ async def admin_get_users(request: Request):
 
 @app.get("/api/admin/upload-log")
 async def admin_upload_log(request: Request):
+async def admin_upload_log(
+    request: Request,
+    _: dict = Depends(get_current_admin),
+):
     """Return every uploaded resume with candidate name, file, uploader, date, and status.
 
     Duplicate events are now stored as DB rows (resume_parse_status='duplicate') so
@@ -3141,6 +3220,63 @@ async def admin_upload_log(request: Request):
                 LEFT JOIN candidate_skills_profile csp ON csp.candidate_id = cp.id
                 ORDER BY cp.parsed_at DESC NULLS LAST
             """)
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "id":                   r["id"],
+            "first_name":           r["first_name"],
+            "last_name":            r["last_name"],
+            "resume_filename":      r["resume_filename"],
+            "status":               r["status"],
+            "parsed_at":            r["parsed_at"].isoformat() if r["parsed_at"] else None,
+            "parse_failure_reason": r["parse_failure_reason"],
+            "uploader_id":          r["uploader_id"],
+            "uploader_username":    r["uploader_username"],
+            "uploader_email":       r["uploader_email"],
+            "job_title":            r["job_title"],
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/user/upload-log")
+async def user_upload_log(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return uploaded resumes for the currently logged-in user only.
+
+    Security: filtering is enforced server-side by the authenticated user.
+    """
+    user_id = current_user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    cp.id,
+                    cp.first_name,
+                    cp.last_name,
+                    cp.resume_filename,
+                    cp.resume_parse_status  AS status,
+                    cp.parsed_at,
+                    cp.parse_failure_reason,
+                    cp.uploaded_by          AS uploader_id,
+                    u.username              AS uploader_username,
+                    u.email                 AS uploader_email,
+                    csp.job_title
+                FROM candidate_profile cp
+                LEFT JOIN users u   ON u.id  = cp.uploaded_by
+                LEFT JOIN candidate_skills_profile csp ON csp.candidate_id = cp.id
+                WHERE cp.uploaded_by = %s
+                ORDER BY cp.parsed_at DESC NULLS LAST
+                """,
+                (user_id,),
+            )
             rows = cursor.fetchall()
 
     return [
