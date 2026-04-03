@@ -1159,6 +1159,43 @@ async def bulk_download_resumes(
     )
 
 
+# ── Bulk candidate delete (superuser only) ──────────────────────────────────
+class BulkDeleteRequest(BaseModel):
+    ids: List[int]
+
+@app.post("/candidates/bulk-delete")
+async def bulk_delete_candidates(
+    body: BulkDeleteRequest,
+    current_user: Optional[dict] = Depends(_get_optional_user),
+):
+    """
+    Delete multiple candidates by ID. Superuser only.
+    Accepts JSON body: { "ids": [1, 2, 3, ...] }
+    """
+    if not current_user or current_user.get("role") != "superuser":
+        raise HTTPException(status_code=403, detail="Superuser access required")
+    if not body.ids:
+        raise HTTPException(status_code=400, detail="No candidate IDs provided")
+    if len(body.ids) > 500:
+        raise HTTPException(status_code=400, detail="Maximum 500 candidates per delete")
+
+    deleted_ids = []
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            for cid in body.ids:
+                try:
+                    cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (cid,))
+                    cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s RETURNING id", (cid,))
+                    row = cursor.fetchone()
+                    if row:
+                        deleted_ids.append(row["id"])
+                except Exception:
+                    pass
+        conn.commit()
+
+    return {"deleted_ids": deleted_ids, "deleted_count": len(deleted_ids)}
+
+
 @app.get("/candidates/{candidate_id}", response_model=Candidate)
 async def get_candidate(candidate_id: int):
     """

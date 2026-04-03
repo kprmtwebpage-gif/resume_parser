@@ -32,10 +32,10 @@
     },
     "2026-04-03": {
       "llm_calls": 0,
-      "high_confidence_skips": 192,
-      "total_resumes": 192,
+      "high_confidence_skips": 294,
+      "total_resumes": 294,
       "extraction_methods": {
-        "regex": 96,
+        "regex": 148,
         "hybrid": 0,
         "llm": 0
       }

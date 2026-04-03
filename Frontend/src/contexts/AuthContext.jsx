@@ -75,12 +75,22 @@ export function AuthProvider({ children }) {
     setSessionExpired(false) // clear expiry flag on fresh login attempt
     try {
       const body = new URLSearchParams({ username, password })
-      const res  = await fetch(apiUrl('/api/auth/login'), {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body,
-      })
-      const data = await res.json()
+      let res
+      try {
+        res = await fetch(apiUrl('/api/auth/login'), {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        })
+      } catch {
+        throw new Error('Cannot reach the server. Please ensure the backend is running.')
+      }
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        throw new Error('Invalid response from server')
+      }
       if (!res.ok) throw new Error(data.detail || 'Login failed')
 
       localStorage.setItem('rp_token', data.access_token)

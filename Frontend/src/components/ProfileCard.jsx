@@ -107,6 +107,10 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
   const actionsButtonRef = useRef(null)
 
+  const handleDeleteClick = () => {
+    if (onDelete) onDelete(row)
+  }
+
   const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
   const isParseFailedOrStuck = row.parse_status === 'failed' || row.parse_status === 'processing'
   const location = row.location || row.address || '—'
