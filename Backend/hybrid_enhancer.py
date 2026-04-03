@@ -57,6 +57,16 @@ _BAD_FIRST_NAMES = {
     "senior", "junior", "lead", "principal", "staff",
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
+    # ── Phase-14: marketing / business section-heading tokens ──
+    "promotional", "channels", "marketing", "campaign", "campaigns",
+    "brand", "branding", "digital", "media", "social", "advertising",
+    "analytics", "insights", "metrics", "roi", "revenue", "sales",
+    "growth", "acquisition", "retention", "funnel", "conversion",
+    "engagement", "content", "seo", "sem", "ppc", "crm", "erp",
+    "overview", "highlights", "introduction", "vision", "mission",
+    "scope", "approach", "methodology", "deliverable", "deliverables",
+    "outcome", "outcomes", "impact", "contribution", "contributions",
+    "accomplishment", "accomplishments", "recommendation", "background",
 }
 
 # Characters that indicate garbled text (OCR artifacts)
@@ -682,107 +692,112 @@ def enhance_extraction(
     
     # ── Step 2: Targeted LLM call (only if needed) ────────────────────────
     
+    _use_llm = (os.getenv("USE_LLM", "false").strip().lower() in ("1", "true", "yes"))
+
     if weak_fields:
         logger.info("%s weak fields detected: %s", log_prefix, weak_fields)
-        
-        # Check daily limit
-        llm_allowed, llm_status = check_llm_limit()
-        if not llm_allowed:
-            logger.warning("%s LLM limit reached: %s", log_prefix, llm_status)
+
+        if not _use_llm:
+            logger.info("%s USE_LLM=false — skipping LLM enhancement for: %s", log_prefix, weak_fields)
         else:
-            # Rate delay
-            import time
-            try:
-                delay = float(os.getenv("LLM_RATE_DELAY", "2"))
-            except ValueError:
-                delay = 2.0
-            if delay > 0:
-                time.sleep(delay)
-            
-            # Make targeted LLM call
-            llm_result = _call_targeted_llm(resume_text, weak_fields, source_file=source_file)
-            llm_called = True
-            
-            if llm_result:
-                logger.info("%s LLM response for %s: %s", log_prefix, weak_fields,
-                           {k: v for k, v in llm_result.items() if v is not None})
-                
-                # Merge LLM results (with null-rejection)
-                if "name" in weak_fields:
-                    llm_fn = (llm_result.get("first_name") or "").strip().rstrip(".")
-                    llm_ln = (llm_result.get("last_name") or "").strip().rstrip(".")
-                    # Reject null-like LLM responses
-                    if _is_null_like(llm_fn):
-                        llm_fn = ""
-                    if _is_null_like(llm_ln):
-                        llm_ln = ""
-                    # Also reject if LLM returned something that looks garbled
-                    if llm_fn and _is_garbled_name(llm_fn):
-                        llm_fn = ""
-                    if llm_ln and _is_garbled_name(llm_ln, allow_single_char=True):
-                        llm_ln = ""
-                    if llm_fn and llm_ln:
-                        old_name = f"{first_name} {last_name}"
-                        first_name = _fix_name_casing(llm_fn)
-                        last_name = _fix_name_casing(llm_ln)
-                        enhancements.append(f"name:llm:{old_name}->{first_name} {last_name}")
-                        logger.info("%s LLM name: %s %s", log_prefix, first_name, last_name)
-                    elif llm_fn:
-                        first_name = _fix_name_casing(llm_fn)
-                        enhancements.append(f"name:llm_partial:{first_name}")
-                
-                if "location" in weak_fields:
-                    llm_loc = (llm_result.get("location") or "").strip()
-                    # Reject null-like or too-short locations
-                    if _is_null_like(llm_loc):
-                        llm_loc = ""
-                    if llm_loc and len(llm_loc) >= 3:
-                        old_addr = address
-                        address = llm_loc
-                        enhancements.append(f"location:llm:{old_addr}->{address}")
-                        logger.info("%s LLM location: %s", log_prefix, address)
-                
-                if "linkedin" in weak_fields:
-                    llm_li = (llm_result.get("linkedin_url") or "").strip()
-                    if llm_li and "linkedin.com/in/" in llm_li.lower():
-                        # Normalize
-                        slug_m = re.search(r'linkedin\.com/in/([a-zA-Z0-9\-_%]+)', llm_li, re.IGNORECASE)
-                        if slug_m:
-                            normalized = f"https://www.linkedin.com/in/{slug_m.group(1)}"
-                            old_li = linkedin
-                            linkedin = normalized
-                            enhancements.append(f"linkedin:llm:{old_li}->{linkedin}")
-                            logger.info("%s LLM linkedin: %s", log_prefix, linkedin)
-                
-                if "job_title" in weak_fields:
-                    llm_jt = (llm_result.get("job_title") or "").strip()
-                    if _is_null_like(llm_jt):
-                        llm_jt = ""
-                    if llm_jt and 3 <= len(llm_jt) <= 60:
-                        old_title = job_title
-                        job_title = llm_jt
-                        enhancements.append(f"title:llm:{old_title}->{job_title}")
-                        logger.info("%s LLM title: %s", log_prefix, job_title)
-                
-                if "email" in weak_fields:
-                    llm_email = (llm_result.get("email") or "").strip()
-                    if _is_null_like(llm_email):
-                        llm_email = ""
-                    if llm_email and "@" in llm_email:
-                        old_email = email
-                        email = llm_email
-                        enhancements.append(f"email:llm:{old_email}->{email}")
-                
-                if "phone" in weak_fields:
-                    llm_phone = (llm_result.get("phone") or "").strip()
-                    if _is_null_like(llm_phone):
-                        llm_phone = ""
-                    if llm_phone:
-                        old_phone = phone
-                        phone = llm_phone
-                        enhancements.append(f"phone:llm:{old_phone}->{phone}")
+            # Check daily limit
+            llm_allowed, llm_status = check_llm_limit()
+            if not llm_allowed:
+                logger.warning("%s LLM limit reached: %s", log_prefix, llm_status)
             else:
-                logger.warning("%s LLM returned no results for: %s", log_prefix, weak_fields)
+                # Rate delay — only when actually calling LLM
+                import time
+                try:
+                    delay = float(os.getenv("LLM_RATE_DELAY", "2"))
+                except ValueError:
+                    delay = 2.0
+                if delay > 0:
+                    time.sleep(delay)
+
+                # Make targeted LLM call
+                llm_result = _call_targeted_llm(resume_text, weak_fields, source_file=source_file)
+                llm_called = True
+                
+                if llm_result:
+                    logger.info("%s LLM response for %s: %s", log_prefix, weak_fields,
+                               {k: v for k, v in llm_result.items() if v is not None})
+                    
+                    # Merge LLM results (with null-rejection)
+                    if "name" in weak_fields:
+                        llm_fn = (llm_result.get("first_name") or "").strip().rstrip(".")
+                        llm_ln = (llm_result.get("last_name") or "").strip().rstrip(".")
+                        # Reject null-like LLM responses
+                        if _is_null_like(llm_fn):
+                            llm_fn = ""
+                        if _is_null_like(llm_ln):
+                            llm_ln = ""
+                        # Also reject if LLM returned something that looks garbled
+                        if llm_fn and _is_garbled_name(llm_fn):
+                            llm_fn = ""
+                        if llm_ln and _is_garbled_name(llm_ln, allow_single_char=True):
+                            llm_ln = ""
+                        if llm_fn and llm_ln:
+                            old_name = f"{first_name} {last_name}"
+                            first_name = _fix_name_casing(llm_fn)
+                            last_name = _fix_name_casing(llm_ln)
+                            enhancements.append(f"name:llm:{old_name}->{first_name} {last_name}")
+                            logger.info("%s LLM name: %s %s", log_prefix, first_name, last_name)
+                        elif llm_fn:
+                            first_name = _fix_name_casing(llm_fn)
+                            enhancements.append(f"name:llm_partial:{first_name}")
+                    
+                    if "location" in weak_fields:
+                        llm_loc = (llm_result.get("location") or "").strip()
+                        # Reject null-like or too-short locations
+                        if _is_null_like(llm_loc):
+                            llm_loc = ""
+                        if llm_loc and len(llm_loc) >= 3:
+                            old_addr = address
+                            address = llm_loc
+                            enhancements.append(f"location:llm:{old_addr}->{address}")
+                            logger.info("%s LLM location: %s", log_prefix, address)
+                    
+                    if "linkedin" in weak_fields:
+                        llm_li = (llm_result.get("linkedin_url") or "").strip()
+                        if llm_li and "linkedin.com/in/" in llm_li.lower():
+                            # Normalize
+                            slug_m = re.search(r'linkedin\.com/in/([a-zA-Z0-9\-_%]+)', llm_li, re.IGNORECASE)
+                            if slug_m:
+                                normalized = f"https://www.linkedin.com/in/{slug_m.group(1)}"
+                                old_li = linkedin
+                                linkedin = normalized
+                                enhancements.append(f"linkedin:llm:{old_li}->{linkedin}")
+                                logger.info("%s LLM linkedin: %s", log_prefix, linkedin)
+                    
+                    if "job_title" in weak_fields:
+                        llm_jt = (llm_result.get("job_title") or "").strip()
+                        if _is_null_like(llm_jt):
+                            llm_jt = ""
+                        if llm_jt and 3 <= len(llm_jt) <= 60:
+                            old_title = job_title
+                            job_title = llm_jt
+                            enhancements.append(f"title:llm:{old_title}->{job_title}")
+                            logger.info("%s LLM title: %s", log_prefix, job_title)
+                    
+                    if "email" in weak_fields:
+                        llm_email = (llm_result.get("email") or "").strip()
+                        if _is_null_like(llm_email):
+                            llm_email = ""
+                        if llm_email and "@" in llm_email:
+                            old_email = email
+                            email = llm_email
+                            enhancements.append(f"email:llm:{old_email}->{email}")
+                    
+                    if "phone" in weak_fields:
+                        llm_phone = (llm_result.get("phone") or "").strip()
+                        if _is_null_like(llm_phone):
+                            llm_phone = ""
+                        if llm_phone:
+                            old_phone = phone
+                            phone = llm_phone
+                            enhancements.append(f"phone:llm:{old_phone}->{phone}")
+                else:
+                    logger.warning("%s LLM returned no results for: %s", log_prefix, weak_fields)
     
     # Record LLM usage
     record_llm_call(

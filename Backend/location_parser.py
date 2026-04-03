@@ -975,7 +975,19 @@ def detect_location_from_phone(phone: str) -> LocationResult | None:
     national = digits
     if len(digits) == 11 and digits.startswith("1"):
         national = digits[1:]
-    if len(national) < 10:
+    # A valid NANP national number is exactly 10 digits.
+    # Numbers with more digits after stripping are international (e.g., +91 India,
+    # +44 UK, +61 Australia) — their leading digits must NOT be treated as US area codes.
+    # e.g., "+91 9176456033" → raw "919176456033" (12 digits) → area "919" = Raleigh, NC (WRONG).
+    if len(national) != 10:
+        return None
+
+    # NANP structural validation: the exchange (digits 4-6, i.e. national[3:6])
+    # must start with 2-9 (never 0 or 1).  This is a strict NANP standard.
+    # Without this guard, Indian 10-digit mobile numbers whose area-code portion
+    # happens to be in _AREA_CODE_MAP are misidentified as US numbers.
+    # e.g. "9360878880": exchange "087" starts with 0 → invalid NANP → return None.
+    if national[3] in "01":
         return None
 
     area = national[:3]

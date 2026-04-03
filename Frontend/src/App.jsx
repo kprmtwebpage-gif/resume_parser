@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -19,6 +19,7 @@ import UsersManagement from './pages/admin/UsersManagement.jsx'
 import ActivityLog from './pages/admin/ActivityLog.jsx'
 import EmailTrackingDashboard from './pages/admin/EmailTrackingDashboard.jsx'
 import CandidateTemplates from './pages/admin/CandidateTemplates.jsx'
+import UploadLog from './pages/admin/UploadLog.jsx'
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
@@ -30,7 +31,10 @@ import CustomerEdit from './pages/customer/CustomerEdit.jsx'
 import SendMail from './pages/SendMail.jsx'
 import TemplatesPage from './pages/TemplatesPage.jsx'
 import EmailSettingsPage from './pages/EmailSettingsPage.jsx'
-import UserEmailModule from './pages/UserEmailModule.jsx'
+// User panel
+import UserLayout from './pages/user/UserLayout.jsx'
+import UserUploadLogs from './pages/user/UserUploadLogs.jsx'
+import EmailHistorySection from './components/email/EmailHistorySection.jsx'
 
 function AdminGuard({ children }) {
   try {
@@ -49,14 +53,41 @@ function SearchPageChatbot() {
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const idleTimer = useRef(null)
+  const IDLE_TIMEOUT_MS = 20 * 60 * 1000 // 20 minutes
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('rp_token')
+    localStorage.removeItem('rp_user')
+    sessionStorage.removeItem('userLoginAuth')
+    setIsAuthenticated(false)
+  }, [])
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current)
+    idleTimer.current = setTimeout(handleLogout, IDLE_TIMEOUT_MS)
+  }, [handleLogout, IDLE_TIMEOUT_MS])
 
   useEffect(() => {
     const auth = sessionStorage.getItem('userLoginAuth')
     setIsAuthenticated(auth === 'true')
   }, [])
 
+  // Start/reset idle timer on user activity when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
+    events.forEach(e => window.addEventListener(e, resetIdleTimer, { passive: true }))
+    resetIdleTimer() // start timer immediately after login
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetIdleTimer))
+      if (idleTimer.current) clearTimeout(idleTimer.current)
+    }
+  }, [isAuthenticated, resetIdleTimer])
+
   const handleLoginSuccess = () => {
     setIsAuthenticated(true)
+    resetIdleTimer()
   }
 
   if (!isAuthenticated) {
@@ -97,10 +128,16 @@ function AppContent() {
         <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
         {/* Send Mail page */}
         <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
-        {/* User section */}
-        <Route path="/user/email" element={<DashboardLayout><UserEmailModule /></DashboardLayout>} />
-        <Route path="/user" element={<DashboardLayout><EmailSettingsPage /></DashboardLayout>} />
-        <Route path="/user/email-settings" element={<DashboardLayout><EmailSettingsPage /></DashboardLayout>} />
+        {/* User section (user panel only) */}
+        <Route path="/user" element={<DashboardLayout><UserLayout /></DashboardLayout>}>
+          <Route index element={<Navigate to="email/settings" replace />} />
+          <Route path="upload-log" element={<UserUploadLogs />} />
+          <Route path="email" element={<Navigate to="settings" replace />} />
+          <Route path="email/history" element={<EmailHistorySection />} />
+          <Route path="email/settings" element={<EmailSettingsPage />} />
+          {/* Back-compat routes */}
+          <Route path="email-settings" element={<Navigate to="email/settings" replace />} />
+        </Route>
         {/* Templates page (part of Customer module) */}
         <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
         {/* Admin routes — protected by role check */}
@@ -108,6 +145,7 @@ function AppContent() {
           <Route index element={<DashboardOverview />} />
           <Route path="upload-metrics" element={<UploadMetrics />} />
           <Route path="email-tracking" element={<EmailTrackingDashboard />} />
+          <Route path="upload-log" element={<UploadLog />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
           <Route path="candidate-templates" element={<CandidateTemplates />} />

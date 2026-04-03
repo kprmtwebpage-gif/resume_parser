@@ -3,9 +3,9 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
 import {
-  Users, Clock,
+  Users, Clock, FileText,
   Menu, Home, ChevronLeft, ChevronDown, ArrowLeft, RefreshCw, Bell,
-  LayoutDashboard, Upload, BarChart3, Mail, FileText,
+  LayoutDashboard, Upload, BarChart3, Mail,
 } from 'lucide-react'
 import { api } from '../../services/api'
 import companyLogo from '../../assets/company-logo.png'
@@ -44,6 +44,7 @@ export default function AdminLayout() {
   const menuItems = [
     { path: '/admin/users', label: 'Users', icon: Users },
     { path: '/admin/activity', label: 'Activity Logs', icon: Clock },
+    { path: '/admin/upload-log', label: 'Upload Log', icon: FileText },
   ]
 
   const isActive = (path) => {

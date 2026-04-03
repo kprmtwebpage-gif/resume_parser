@@ -35,6 +35,7 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -88,7 +89,7 @@ class UserCreate(BaseModel):
     username: str
     email:    Optional[str] = None
     password: str
-    role:     str = "user"
+    role:     str
 
 
 class ChangePassword(BaseModel):
@@ -99,7 +100,7 @@ class ChangePassword(BaseModel):
 # â”€â”€ Connection pool (shared across all auth operations) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _auth_pool = psycopg2.pool.ThreadedConnectionPool(
     minconn=2,
-    maxconn=10,
+    maxconn=20,
     **DB_CONFIG,
     cursor_factory=psycopg2.extras.RealDictCursor,
 )
@@ -154,6 +155,28 @@ def _ensure_login_sessions_table():
 # Ensure table exists at import time
 try:
     _ensure_login_sessions_table()
+except Exception:
+    pass
+
+
+def _migrate_users_columns():
+    """Idempotent: add last_ip and resumes_uploaded columns to users if missing."""
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS resumes_uploaded INT DEFAULT 0")
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        _put_conn(conn)
+
+try:
+    _migrate_users_columns()
 except Exception:
     pass
 
@@ -488,52 +511,173 @@ async def admin_get_users(
         _put_conn(conn)
 
 
-@router.post("/admin/create-user", response_model=UserOut)
+@router.post("/admin/create-user", status_code=201)
 async def admin_create_user(
-    body: UserCreate,
+    request: Request,
     _: dict = Depends(get_current_admin),
 ):
-    """Admin: create a new user account."""
-    # Normalize: trim whitespace, store username as lowercase
-    clean_username = body.username.strip().lower()
-    clean_email = body.email.strip() if body.email else None
-    # Treat empty string as no email
-    if not clean_email:
-        clean_email = None
+    """Admin: create a new user account.
 
-    conn = _get_conn()
+    IMPORTANT: This endpoint must ALWAYS return JSON.
+    - Success: { success: true, user: {...} }
+    - Error:   { success: false, message: "..." }
+    """
+    conn = None
     try:
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "Request body must be valid JSON",
+                    "detail": "Request body must be valid JSON",
+                },
+            )
+
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "Request body must be a JSON object",
+                    "detail": "Request body must be a JSON object",
+                },
+            )
+
+        username_raw = payload.get("username")
+        password_raw = payload.get("password")
+        role_raw = payload.get("role")
+        email_raw = payload.get("email")
+
+        clean_username = (username_raw or "").strip().lower()
+        clean_password = (password_raw or "").strip()
+        clean_role = (role_raw or "").strip()
+        clean_email = (email_raw or "").strip() if email_raw is not None else ""
+        if not clean_email:
+            clean_email = None
+
+        if not clean_username:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": "username is required", "detail": "username is required"},
+            )
+        if not clean_password:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": "password is required", "detail": "password is required"},
+            )
+        if not clean_role:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": "role is required", "detail": "role is required"},
+            )
+
+        conn = _get_conn()
         with conn.cursor() as cur:
             # Check username uniqueness (case-insensitive)
-            cur.execute("SELECT id, username FROM users WHERE LOWER(username) = LOWER(%s)",
-                        (clean_username,))
-            existing = cur.fetchone()
-            if existing:
-                logger.warning("Create user blocked: username '%s' conflicts with existing user id=%s",
-                               clean_username, existing["id"])
-                raise HTTPException(status_code=409, detail=f"Username '{clean_username}' already exists")
+            cur.execute(
+                "SELECT id FROM users WHERE LOWER(username) = LOWER(%s)",
+                (clean_username,),
+            )
+            if cur.fetchone():
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "message": f"Username '{clean_username}' already exists",
+                        "detail": f"Username '{clean_username}' already exists",
+                    },
+                )
 
             # Check email uniqueness only if email is provided
             if clean_email:
-                cur.execute("SELECT id, email FROM users WHERE LOWER(email) = LOWER(%s)",
-                            (clean_email,))
-                existing = cur.fetchone()
-                if existing:
-                    logger.warning("Create user blocked: email '%s' conflicts with existing user id=%s",
-                                   clean_email, existing["id"])
-                    raise HTTPException(status_code=409, detail=f"Email '{clean_email}' already exists")
+                cur.execute(
+                    "SELECT id FROM users WHERE LOWER(email) = LOWER(%s)",
+                    (clean_email,),
+                )
+                if cur.fetchone():
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "success": False,
+                            "message": f"Email '{clean_email}' already exists",
+                            "detail": f"Email '{clean_email}' already exists",
+                        },
+                    )
 
-            cur.execute("""
-                INSERT INTO users (username, email, password_hash, role, provider)
-                VALUES (%s, %s, %s, %s, 'local')
-                RETURNING id, username, email, role, is_active,
-                          total_logins, last_login, created_at
-            """, (clean_username, clean_email, hash_password(body.password), body.role))
+            password_hash = hash_password(clean_password)
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO users (username, email, password_hash, role, provider)
+                    VALUES (%s, %s, %s, %s, 'local')
+                    RETURNING id, username, email, role, is_active,
+                              total_logins, last_login, created_at
+                    """,
+                    (clean_username, clean_email, password_hash, clean_role),
+                )
+            except psycopg2.errors.UndefinedColumn:
+                # Some environments don't have a 'provider' column on users yet.
+                conn.rollback()
+                cur.execute(
+                    """
+                    INSERT INTO users (username, email, password_hash, role)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, username, email, role, is_active,
+                              total_logins, last_login, created_at
+                    """,
+                    (clean_username, clean_email, password_hash, clean_role),
+                )
+
             row = cur.fetchone()
+
         conn.commit()
+        return {"success": True, "user": row}
+    except psycopg2.IntegrityError as e:
+        if conn:
+            conn.rollback()
+        msg = "User already exists or violates a database constraint"
+        # Try to provide a clearer (but still safe) message.
+        try:
+            pgcode = getattr(e, "pgcode", None)
+            # 23505 = unique_violation, 23514 = check_violation
+            if pgcode == "23514":
+                msg = "Request violates a database constraint (check role/required fields)"
+            elif pgcode == "23505":
+                msg = "User already exists"
+        except Exception:
+            pass
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": msg, "detail": msg},
+        )
+    except HTTPException as e:
+        # Ensure even raised HTTPExceptions become the expected JSON shape
+        msg = str(getattr(e, "detail", "Request failed"))
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"success": False, "message": msg, "detail": msg},
+        )
+    except Exception:
+        logger.exception("Unhandled error while creating user")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": "Internal server error",
+                "detail": "Internal server error",
+            },
+        )
     finally:
-        _put_conn(conn)
-    return row
+        if conn:
+            _put_conn(conn)
 
 
 @router.patch("/admin/toggle-user/{user_id}")
@@ -918,9 +1062,9 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
             cur.execute("SELECT COUNT(*) AS total_users FROM users")
             total_users = cur.fetchone()["total_users"]
 
-            # Total resumes uploaded (from candidate_profile table)
+            # Total successfully parsed resumes
             try:
-                cur.execute(f"SELECT COUNT(*) AS total_resumes FROM {CANDIDATES_TABLE}")
+                cur.execute(f"SELECT COUNT(*) AS total_resumes FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'completed'")
                 total_resumes = cur.fetchone()["total_resumes"]
             except Exception:
                 conn.rollback()
@@ -937,13 +1081,14 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
             # Average resumes per user
             avg_resumes = round(total_resumes / total_users, 1) if total_users > 0 else 0
 
-            # Parse success rate (resumes with at least a name parsed)
+            # Parse success rate (among completed resumes, how many have a name)
             try:
                 cur.execute(f"""
                     SELECT 
                         COUNT(*) AS total,
                         COUNT(*) FILTER (WHERE first_name IS NOT NULL AND first_name != '') AS parsed
                     FROM {CANDIDATES_TABLE}
+                    WHERE resume_parse_status = 'completed'
                 """)
                 row = cur.fetchone()
                 success_rate = round((row["parsed"] / row["total"] * 100), 1) if row["total"] > 0 else 0
@@ -968,12 +1113,14 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
             try:
                 cur.execute(f"""
                     SELECT COUNT(*) AS cnt FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= date_trunc('week', CURRENT_DATE)
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= date_trunc('week', CURRENT_DATE)
                 """)
                 resumes_this_week = cur.fetchone()["cnt"]
                 cur.execute(f"""
                     SELECT COUNT(*) AS cnt FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
                       AND parsed_at < date_trunc('week', CURRENT_DATE)
                 """)
                 resumes_last_week = cur.fetchone()["cnt"]
@@ -1021,12 +1168,13 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 for r in cur.fetchall()
             ]
 
-            # Resume upload trend (daily for last 90 days)
+            # Resume upload trend (daily for last 90 days — completed only)
             try:
                 cur.execute(f"""
                     SELECT DATE(parsed_at) AS date, COUNT(*) AS uploads
                     FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= NOW() - INTERVAL '90 days'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= NOW() - INTERVAL '90 days'
                     GROUP BY DATE(parsed_at)
                     ORDER BY date ASC
                 """)
@@ -1043,7 +1191,8 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 cur.execute(f"""
                     SELECT date_trunc('week', parsed_at)::date AS week, COUNT(*) AS uploads
                     FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= NOW() - INTERVAL '12 weeks'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= NOW() - INTERVAL '12 weeks'
                     GROUP BY date_trunc('week', parsed_at)
                     ORDER BY week ASC
                 """)
@@ -1060,7 +1209,8 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 cur.execute(f"""
                     SELECT date_trunc('month', parsed_at)::date AS month, COUNT(*) AS uploads
                     FROM {CANDIDATES_TABLE}
-                    WHERE parsed_at >= NOW() - INTERVAL '12 months'
+                    WHERE resume_parse_status = 'completed'
+                      AND parsed_at >= NOW() - INTERVAL '12 months'
                     GROUP BY date_trunc('month', parsed_at)
                     ORDER BY month ASC
                 """)

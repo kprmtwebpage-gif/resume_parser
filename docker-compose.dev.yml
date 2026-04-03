@@ -13,6 +13,8 @@ services:
   ingestion:
     container_name: resume-ingestion-dev
     restart: unless-stopped
+    depends_on:
+      - ollama
 
   api:
     container_name: resume-api-dev
@@ -23,3 +25,18 @@ services:
     ports:
       - "8002:8000"
     restart: unless-stopped
+    depends_on:
+      - ollama
+
+  # ── Ollama local LLM (dev only) ───────────────────────────
+  ollama:
+    image: ollama/ollama
+    container_name: ollama-dev
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - resume-network
+
+volumes:
+  ollama_data:

@@ -29,6 +29,16 @@
         "hybrid": 0,
         "llm": 0
       }
+    },
+    "2026-04-03": {
+      "llm_calls": 0,
+      "high_confidence_skips": 192,
+      "total_resumes": 192,
+      "extraction_methods": {
+        "regex": 96,
+        "hybrid": 0,
+        "llm": 0
+      }
     }
   },
   "total_lifetime_calls": 280,
