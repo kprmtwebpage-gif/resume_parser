@@ -3189,7 +3189,6 @@ async def admin_get_users(request: Request):
 
 
 @app.get("/api/admin/upload-log")
-async def admin_upload_log(request: Request):
 async def admin_upload_log(
     request: Request,
     _: dict = Depends(get_current_admin),

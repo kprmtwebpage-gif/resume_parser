@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { UploadProvider } from './contexts/UploadContext'
@@ -14,21 +12,14 @@ import AppliedCandidatesPage from './pages/AppliedCandidatesPage.jsx'
 import AdminDashboard from './pages/AdminDashboard.jsx'
 import AdminResumes from './pages/AdminResumes.jsx'
 import AdminLayout from './pages/admin/AdminLayout.jsx'
-import { Navigate } from 'react-router-dom'
 import DashboardOverview from './pages/admin/DashboardOverview.jsx'
 import UploadMetrics from './pages/admin/UploadMetrics.jsx'
-import UsersManagement from './pages/admin/UsersManagement.jsx'
-import ActivityLog from './pages/admin/ActivityLog.jsx'
-<<<<<<< HEAD
 import UploadLog from './pages/admin/UploadLog.jsx'
-=======
 import EmailTrackingDashboard from './pages/admin/EmailTrackingDashboard.jsx'
 import CandidateTemplates from './pages/admin/CandidateTemplates.jsx'
-<<<<<<< HEAD
->>>>>>> 8121510 ( Email_update)
-=======
-import UploadLog from './pages/admin/UploadLog.jsx'
->>>>>>> 090177f (merge: integrate dev changes + local modules (comments, jobs, user pages))
+import TemplateManager from './pages/admin/TemplateManager.jsx'
+import UsersManagement from './pages/admin/UsersManagement.jsx'
+import ActivityLog from './pages/admin/ActivityLog.jsx'
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
@@ -44,6 +35,7 @@ import EmailSettingsPage from './pages/EmailSettingsPage.jsx'
 import UserLayout from './pages/user/UserLayout.jsx'
 import UserUploadLogs from './pages/user/UserUploadLogs.jsx'
 import EmailHistorySection from './components/email/EmailHistorySection.jsx'
+
 
 function AdminGuard({ children }) {
   try {
@@ -155,10 +147,10 @@ function AppContent() {
           <Route path="upload-metrics" element={<UploadMetrics />} />
           <Route path="upload-log" element={<UploadLog />} />
           <Route path="email-tracking" element={<EmailTrackingDashboard />} />
-          <Route path="upload-log" element={<UploadLog />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
           <Route path="candidate-templates" element={<CandidateTemplates />} />
+          <Route path="email-templates" element={<TemplateManager />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
         {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}
