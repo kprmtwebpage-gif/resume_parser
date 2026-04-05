@@ -767,11 +767,11 @@ async def _create_indexes():
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE resume_parse_status IN ('processing', 'not_a_resume')")
+                cur.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE resume_parse_status = 'processing'")
                 stuck = cur.rowcount
             conn.commit()
         if stuck:
-            print(f"[OK] Deleted {stuck} stuck/non-resume placeholder(s) on startup")
+            print(f"[OK] Deleted {stuck} stuck processing placeholder(s) on startup")
     except Exception as e:
         print(f"[WARN] Could not clean up stuck processing records: {e}")
 
@@ -2113,10 +2113,13 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                     _reason_lines = [l.strip() for l in stdout_text.splitlines() if l.strip() and ("error" in l.lower() or "skip" in l.lower() or "password" in l.lower() or "encrypt" in l.lower())]
                 _reason = _reason_lines[0][:300] if _reason_lines else f"Parser exited with code {returncode}"
                 print(f"[PARSER FAILED] file={save_name} rc={returncode} reason={_reason}\nSTDERR: {stderr_text[:500]}", flush=True)
-                # Delete the placeholder — failed parses are not stored in DB so user can re-upload
+                # Keep the placeholder as 'failed' so it appears in the Upload Log
                 with get_db() as conn:
                     with conn.cursor() as cursor:
-                        cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
+                        cursor.execute(
+                            f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = %s WHERE id = %s",
+                            (_reason, placeholder_id),
+                        )
                     conn.commit()
                 return
 
@@ -2222,10 +2225,12 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                             _nar_lines = [l for l in stderr_text.splitlines() if "NotAResume:" in l]
                             if _nar_lines:
                                 _nar_reason = _nar_lines[0].split("NotAResume:", 1)[-1].strip()[:300]
-                                print(f"[NOT-A-RESUME] file={save_name} reason={_nar_reason} — deleting placeholder", flush=True)
-                                # Delete the placeholder so not-a-resume files are never stored in DB
-                                cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
-                                cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
+                                print(f"[NOT-A-RESUME] file={save_name} reason={_nar_reason} — marking placeholder as not_a_resume", flush=True)
+                                # Keep as 'not_a_resume' so it appears in the Upload Log
+                                cursor.execute(
+                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'not_a_resume', parse_failure_reason = %s WHERE id = %s",
+                                    (_nar_reason, placeholder_id),
+                                )
                                 conn.commit()
                                 return
                             # Parser returned rc=0 but didn't populate placeholder.
@@ -2329,10 +2334,10 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                                 (placeholder_id,),
                                             )
                                         else:
-                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — deleting placeholder after retry", flush=True)
-                                            # Delete the placeholder — failed parses are not stored so user can re-upload
+                                            print(f"[PARSE RETRY EXHAUSTED] file={save_name} — marking placeholder as failed after retry", flush=True)
+                                            # Keep as 'failed' so it appears in the Upload Log
                                             cur2.execute(
-                                                f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
+                                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'failed', parse_failure_reason = 'Text extraction failed after retry' WHERE id = %s",
                                                 (placeholder_id,),
                                             )
                                 conn2.commit()
