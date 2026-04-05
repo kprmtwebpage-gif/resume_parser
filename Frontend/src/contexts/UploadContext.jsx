@@ -57,9 +57,6 @@ export function UploadProvider({ children }) {
                 : u
             )
           )
-          setTimeout(() => {
-            setUploads(prev => prev.filter(u => u.id !== upload.id))
-          }, 5000)
           return
         } else if (status.status === 'failed') {
           setUploads(prev =>
@@ -69,9 +66,6 @@ export function UploadProvider({ children }) {
                 : u
             )
           )
-          setTimeout(() => {
-            setUploads(prev => prev.filter(u => u.id !== upload.id))
-          }, 5000)
           return
         }
 
@@ -110,9 +104,6 @@ export function UploadProvider({ children }) {
                 : u
             )
           )
-          setTimeout(() => {
-            setUploads(prev => prev.filter(u => u.id !== upload.id))
-          }, 5000)
           return
         }
         // Network / 500 errors — keep retrying
@@ -216,9 +207,6 @@ export function UploadProvider({ children }) {
               : u
           )
         )
-        setTimeout(() => {
-          setUploads(prev => prev.filter(u => u.id !== upload.id))
-        }, 5000)
       }
     } catch (error) {
       const errorMsg =
@@ -233,9 +221,6 @@ export function UploadProvider({ children }) {
             : u
         )
       )
-      setTimeout(() => {
-        setUploads(prev => prev.filter(u => u.id !== upload.id))
-      }, 5000)
     }
   }, [pollParseStatus])
 
