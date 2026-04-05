@@ -15,16 +15,17 @@ export function UploadProvider({ children }) {
 
   // ---- poll for background parse completion ----
   const pollParseStatus = useCallback(async (upload, candidateId) => {
-    // Phase 1: wait in queue — no timeout, just keep polling every 2s until
-    // the file leaves the queue (queue_ahead drops to 0 or status changes)
-    // Phase 2: once parsing has started, allow max 90 attempts (3 min) to complete
-    const MAX_PARSE_ATTEMPTS = 360 // 360 * 1s = 6 min — covers OCR-heavy PDFs (tesseract on scanned docs)
+    // Exact same logic as dev server:
+    // Phase 1: wait in queue — no timeout, poll every 500ms until queueAhead===0
+    // Phase 2: once queueAhead hits 0, allow max 360 attempts (6 min) to complete
+    // Progress: 30%→49% while queued, 60%→95% while parsing
+    const MAX_PARSE_ATTEMPTS = 360 // 360 * 1s = 6 min — covers OCR-heavy PDFs
     let parseAttempts = 0
     let parsingStarted = false
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      await new Promise(r => setTimeout(r, 1000))
+      await new Promise(r => setTimeout(r, 500))
       try {
         const status = await checkUploadStatus(candidateId)
         if (status.status === 'completed') {
@@ -46,7 +47,7 @@ export function UploadProvider({ children }) {
           )
           setTimeout(() => {
             setUploads(prev => prev.filter(u => u.id !== upload.id))
-          }, 5000)
+          }, 8000)
           return
         } else if (status.status === 'not_a_resume') {
           setUploads(prev =>
@@ -84,12 +85,11 @@ export function UploadProvider({ children }) {
         if (parsingStarted) {
           parseAttempts++
           if (parseAttempts >= MAX_PARSE_ATTEMPTS) {
-            // Parsing took too long after actually starting — mark background
             break
           }
         }
 
-        // Update progress indicator
+        // Progress: 30→49% while queued, 60→95% while actively parsing
         const progressVal = parsingStarted
           ? Math.min(60 + parseAttempts, 95)
           : Math.min(30 + Math.floor(parseAttempts / 2), 49)
@@ -102,8 +102,6 @@ export function UploadProvider({ children }) {
         )
       } catch (err) {
         const httpStatus = err?.response?.status
-        // 404 means the placeholder was deleted (parse failed or not-a-resume)
-        // Stop polling and surface it as a failure so the user can re-upload
         if (httpStatus === 404) {
           setUploads(prev =>
             prev.map(u =>
@@ -117,13 +115,10 @@ export function UploadProvider({ children }) {
           }, 5000)
           return
         }
-        // 500 errors (e.g. pool exhaustion under heavy load) — keep retrying,
-        // the server will recover once connections free up.
-        // Other network errors — also keep trying
+        // Network / 500 errors — keep retrying
       }
     }
-    // Polling window elapsed — parsing is still running in the background.
-    // Mark as 'background' so the UI shows a helpful message instead of an error.
+    // Polling window elapsed — server still finishes in background
     setUploads(prev =>
       prev.map(u =>
         u.id === upload.id
@@ -171,9 +166,11 @@ export function UploadProvider({ children }) {
         }, 5000)
 
       } else if (result.status === 'processing') {
-        // Backend accepted file — parsing in background. Poll for result.
-        // Fire-and-forget: worker moves to next file immediately; polling
-        // updates this card's status in the background.
+        // Backend accepted file — fire-and-forget the poll.
+        // Worker moves to next upload immediately; each file's poll loop
+        // runs independently and updates its own card as the backend
+        // semaphore frees up slots (8 at a time). This matches dev server
+        // behaviour: all files submitted quickly, backend queues the rest.
         setUploads(prev =>
           prev.map(u =>
             u.id === upload.id

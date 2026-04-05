@@ -2084,6 +2084,19 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             async with _parse_semaphore:
                 _parse_waiting -= 1
                 _parse_active += 1
+                # Semaphore slot acquired — mark row as actively parsing so
+                # /upload-status can distinguish "queued" from "parsing".
+                try:
+                    with get_db() as _upd_conn:
+                        with _upd_conn.cursor() as _upd_cur:
+                            _upd_cur.execute(
+                                f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'parsing'"
+                                f" WHERE id = %s AND resume_parse_status = 'processing'",
+                                (placeholder_id,),
+                            )
+                        _upd_conn.commit()
+                except Exception:
+                    pass
                 try:
                     loop = asyncio.get_event_loop()
                     result = await loop.run_in_executor(None, _run_parser)
@@ -2455,7 +2468,12 @@ async def get_upload_status(candidate_id: int):
     result = {"id": row["id"], "status": status}
 
     if status == "processing":
+        # Still waiting for a semaphore slot — report queue depth
         result["queue_ahead"] = _parse_waiting + _parse_active
+
+    if status == "parsing":
+        # Semaphore slot acquired — actively running parser.py right now
+        result["queue_ahead"] = 0
 
     if status == "completed":
         full_name = " ".join(filter(None, [row.get("first_name"), row.get("last_name")])) or None
