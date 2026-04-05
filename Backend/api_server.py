@@ -2026,10 +2026,10 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         with conn.cursor() as cursor:
             try:
                 cursor.execute(
-                    f"""INSERT INTO {CANDIDATES_TABLE} (resume_filename, resume_sha256, resume_parse_status)
-                        VALUES (%s, %s, 'processing')
+                    f"""INSERT INTO {CANDIDATES_TABLE} (resume_filename, resume_sha256, resume_parse_status, uploaded_by)
+                        VALUES (%s, %s, 'processing', %s)
                         RETURNING id""",
-                    (relative_filename, file_sha256),
+                    (relative_filename, file_sha256, _uploader_id),
                 )
                 placeholder_row = cursor.fetchone()
                 conn.commit()
