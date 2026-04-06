@@ -8236,6 +8236,19 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
     if filename:
         # Strip ALL non-alphanumeric characters → plain word tokens
         fname = re.sub(r'[^a-z0-9]+', ' ', Path(filename).stem.lower()).strip()
+        # Reject filenames that are unmistakably non-resume documents.
+        # Escape hatch: if the filename ALSO contains 'resume'/'cv'/'biodata',
+        # the document is always accepted regardless (e.g. "John Resume Affidavit.pdf"
+        # is an edge case we don't want to block).
+        if not re.search(r'\b(resume|cv|biodata)\b', fname) and re.search(
+            r'\b(affidavit|invoice|petition|payslip|pay slip|salary slip|'
+            r'divorce|deposition|subpoena|cost memo|office memo|office memorandum|'
+            r'appointment letter|offer letter|relieving letter|experience letter|'
+            r'termination letter|bank statement|court order|legal notice|'
+            r'demand notice|proof affidavit|memo no|show cause|charge sheet)\b',
+            fname,
+        ):
+            return False, "Corrupt Format / Not a Resume. Please check and upload."
         if re.search(r'\b(resume|cv|curriculum vitae|biodata)\b', fname):
             return True, ""
         # Also trust files whose names contain job-title indicators (developer,
@@ -8319,6 +8332,16 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         # Textbooks / study notes / academic papers
         (r'\b(table\s+of\s+contents|chapter\s+\d|unit\s+\d[\s\:\-]|preface|foreword|bibliography|references\s+cited|further\s+reading|index\s+of|appendix\s+[a-z])\b', -5),
         (r'\b(abstract[\s\:\-]|keywords[\s\:\-]|introduction[\s\:\-]|methodology|conclusion[\s\:\-]|literature\s+review|research\s+(paper|study|findings)|doi\s*:\s*10\.|issn|isbn)\b', -4),
+        # Salary slips / payslips — never appear in a genuine resume
+        (r'\b(salary\s+slip|pay\s+slip|payslip|gross\s+salary|net\s+pay\b|total\s+deductions|tds\s+deduction|take\s+home\s+(?:salary|pay)|earnings\s+and\s+deductions)\b', -6),
+        # Appointment / offer letters
+        (r'\b(appointment\s+letter|offer\s+of\s+employment|terms\s+of\s+employment|effective\s+date\s+of\s+joining|date\s+of\s+joining\s+is|you\s+are\s+(?:hereby\s+)?appointed|you\s+are\s+(?:hereby\s+)?offered)\b', -6),
+        # Relieving / experience letters
+        (r'\b(relieving\s+letter|last\s+working\s+day|resignation\s+(?:has\s+been\s+)?accepted|has\s+been\s+(?:working|employed)\s+with\s+(?:us|our)|experience\s+letter)\b', -5),
+        # Office memos / cost memos / circulars / government orders
+        (r'\b(office\s+memorandum|cost\s+memo|internal\s+memo|govt\.?\s*circular|circular\s+no\.?\s*\d|ref(?:erence)?\s+no\.?\s*[a-z0-9]+\/|sub(?:ject)?\s*:\s*(?:reg|regarding|re)\b)\b', -6),
+        # Legal petitions — petition/petitioner/respondent not covered by existing court pattern
+        (r'\b(petitioner|respondent|writ\s+petition|divorce\s+petition|civil\s+(?:suit|petition)|criminal\s+(?:complaint|petition)|op\s+no\.?\s*\d|w\.?p\.?\s*no\.?\s*\d)\b', -5),
     ]
 
     has_non_resume_signal = False
