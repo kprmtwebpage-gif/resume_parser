@@ -9,7 +9,7 @@ export default function ServerStatus() {
   const checkBackend = async () => {
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 5000)
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
       
       const response = await fetch(apiUrl('/health'), { 
         method: 'GET',
@@ -24,13 +24,13 @@ export default function ServerStatus() {
         consecutiveFailures.current = 0
       } else {
         consecutiveFailures.current += 1
-        if (consecutiveFailures.current >= 3) {
+        if (consecutiveFailures.current >= 6) {
           setBackendStatus('error')
         }
       }
     } catch (error) {
       consecutiveFailures.current += 1
-      if (consecutiveFailures.current >= 3) {
+      if (consecutiveFailures.current >= 6) {
         console.error('Backend check failed:', error)
         setBackendStatus('offline')
       }
@@ -50,8 +50,10 @@ export default function ServerStatus() {
     }
   }, [])
 
-  // Don't show until we've confirmed backend is truly down (3 consecutive failures)
+  // Don't show until we've confirmed backend is truly down (6 consecutive failures = ~90s)
   if (backendStatus === 'running' || backendStatus === 'checking') return null
+
+  const isHosted = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/90">
@@ -62,11 +64,11 @@ export default function ServerStatus() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-neutral-900">Backend Server Not Running</h3>
+          <h3 className="text-lg font-semibold text-neutral-900">Backend Temporarily Unavailable</h3>
         </div>
 
         <div className="space-y-3 text-sm text-neutral-600">
-          <p>The frontend UI is running, but the backend API server is not accessible.</p>
+          <p>The backend API server is not responding. This may be due to a scheduled update or temporary maintenance.</p>
           
           <div className="rounded-lg bg-neutral-50 p-3 font-mono text-xs border border-neutral-200">
             <div className="mb-1 font-semibold text-neutral-700">Status:</div>
@@ -78,13 +80,21 @@ export default function ServerStatus() {
             </div>
           </div>
 
-          <div className="rounded-lg bg-blue-50 p-3 border border-blue-200">
-            <div className="mb-2 font-semibold text-blue-900">To start the backend:</div>
-            <ol className="list-inside list-decimal space-y-1 text-blue-800">
-              <li>Open a terminal in the <code className="rounded bg-blue-100 px-1">Backend</code> folder</li>
-              <li>Run: <code className="rounded bg-blue-100 px-1">python api_server.py</code></li>
-            </ol>
-          </div>
+          {!isHosted && (
+            <div className="rounded-lg bg-blue-50 p-3 border border-blue-200">
+              <div className="mb-2 font-semibold text-blue-900">To start the backend:</div>
+              <ol className="list-inside list-decimal space-y-1 text-blue-800">
+                <li>Open a terminal in the <code className="rounded bg-blue-100 px-1">Backend</code> folder</li>
+                <li>Run: <code className="rounded bg-blue-100 px-1">python api_server.py</code></li>
+              </ol>
+            </div>
+          )}
+
+          {isHosted && (
+            <div className="rounded-lg bg-blue-50 p-3 border border-blue-200">
+              <p className="text-blue-800">Please wait a moment and click <strong>Retry Connection</strong>. If the issue persists, contact your system administrator.</p>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex gap-2">
