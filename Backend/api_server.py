@@ -1823,10 +1823,15 @@ async def update_candidate(candidate_id: int, data: CandidateUpdate):
 
 
 async def _dedup_candidate(candidate_id: int, label: str = ""):
-    """Remove duplicate candidate records (same email), keeping the newest.
+    """Deduplicate candidate records (same email), keeping the newest completed row.
 
-    Waits briefly so concurrent parsers have time to commit their data,
-    then uses FOR UPDATE locking to safely deduplicate.
+    Only considers rows with resume_parse_status='completed'.  Rows that are
+    still 'processing', 'failed', 'not_a_resume', or 'duplicate' are left
+    untouched so they remain visible in the Upload Log and won't cause 404s
+    on active polling.
+
+    Surplus completed rows are marked 'duplicate' (not deleted) so every
+    upload attempt is recorded in the Upload Log.
     """
     await asyncio.sleep(3)
     try:
@@ -1851,6 +1856,7 @@ async def _dedup_candidate(candidate_id: int, label: str = ""):
                     cursor.execute(
                         f"""SELECT id FROM {CANDIDATES_TABLE}
                             WHERE LOWER(email) = LOWER(%s)
+                              AND resume_parse_status = 'completed'
                             ORDER BY id DESC
                             FOR UPDATE""",
                         (_email,),
@@ -1865,6 +1871,7 @@ async def _dedup_candidate(candidate_id: int, label: str = ""):
                         f"""SELECT id FROM {CANDIDATES_TABLE}
                             WHERE LOWER(first_name) = LOWER(%s)
                               AND LOWER(last_name) = LOWER(%s)
+                              AND resume_parse_status = 'completed'
                             ORDER BY id DESC
                             FOR UPDATE""",
                         (_fn, _ln),
@@ -1881,10 +1888,13 @@ async def _dedup_candidate(candidate_id: int, label: str = ""):
                             (keep_id, did),
                         )
                         cursor.execute(
-                            f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
-                            (did,),
+                            f"""UPDATE {CANDIDATES_TABLE}
+                                SET resume_parse_status = 'duplicate',
+                                    parse_failure_reason = %s
+                                WHERE id = %s""",
+                            (f"duplicate_of:{keep_id}", did),
                         )
-                    print(f"[DEDUP] {label} — kept id={keep_id}, removed {len(dup_ids)} duplicate(s) for {_fn} {_ln} <{_email}>", flush=True)
+                    print(f"[DEDUP] {label} — kept id={keep_id}, marked {len(dup_ids)} duplicate(s) for {_fn} {_ln} <{_email}>", flush=True)
             conn.commit()
     except Exception:
         import traceback
@@ -2160,6 +2170,7 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                 f"""SELECT id FROM {CANDIDATES_TABLE}
                                     WHERE LOWER(email) = LOWER(%s)
                                       AND id NOT IN (%s, %s)
+                                      AND resume_parse_status = 'completed'
                                     LIMIT 1""",
                                 (_parsed_email.strip(), parser_id, placeholder_id),
                             )
