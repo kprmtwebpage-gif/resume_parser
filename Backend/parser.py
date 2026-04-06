@@ -8245,7 +8245,9 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
             r'divorce|deposition|subpoena|cost memo|office memo|office memorandum|'
             r'appointment letter|offer letter|relieving letter|experience letter|'
             r'termination letter|bank statement|court order|legal notice|'
-            r'demand notice|proof affidavit|memo no|show cause|charge sheet)\b',
+            r'demand notice|proof affidavit|memo no|show cause|charge sheet|'
+            r'health insurance|insurance policy|insurance card|medical insurance|'
+            r'life insurance|vehicle insurance|insurance certificate)\b',
             fname,
         ):
             return False, "Corrupt Format / Not a Resume. Please check and upload."
