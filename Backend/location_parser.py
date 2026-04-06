@@ -289,6 +289,27 @@ _BAD_CITY_TOKENS: frozenset[str] = frozenset({
     "server", "administration", "central", "support", "alcatel",
     "lucent", "sprint", "comcast", "delivery", "strategy",
     "force", "type", "visit", "enterprise",
+    # ── Phase-14: networking / protocol / infrastructure terms ──
+    "bgp", "ospf", "eigrp", "mpls", "vlan", "vxlan", "stp", "rstp",
+    "hsrp", "vrrp", "glbp", "routing", "switching", "firewall",
+    "vpn", "ipsec", "ssl", "tls", "tcp", "udp", "dns", "dhcp",
+    "snmp", "netflow", "sflow", "ntp", "sip", "voip",
+    "wan", "lan", "wlan", "sdwan", "sd-wan",
+    "cisco", "juniper", "arista", "fortinet", "meraki",
+    "nexus", "catalyst", "panorama", "ngfw",
+    "nac", "radius", "tacacs", "tacacs+",
+    "wireshark", "solarwinds", "nagios", "prtg",
+    "vmware", "esxi", "nsx", "hypervisor",
+    # ── Phase-14: additional tech/process terms ──
+    "workflow", "pipeline", "module", "component", "interface",
+    "integration", "migration", "deployment", "configuration",
+    "optimization", "monitoring", "logging", "alerting",
+    "governance", "compliance", "regulatory", "audit",
+    "encryption", "authentication", "authorization",
+    "frontend", "backend", "fullstack", "full-stack",
+    "database", "datawarehouse", "datalake", "lakehouse",
+    "reporting", "dashboard", "visualization",
+    "batch", "streaming", "processing", "ingestion",
 })
 
 # Single tokens that are valid city *prefixes* (part of multi-word names) but never
@@ -1053,18 +1074,10 @@ def detect_location_with_fallback(
             r["source"] = "fulltext_regex"
             return r
 
-    # ── Tier 3 : phone area code ──────────────────────────────────────────────
-    # Try phone BEFORE accepting a low-confidence header result.  Low-confidence
-    # spaCy results (source="header_spacy") are often false positives — tech
-    # terms like "Maven", "Sqoop", person names, etc.  The phone area-code
-    # lookup is more reliable in those cases.
-    if phone:
-        phone_result = detect_location_from_phone(phone)
-        if phone_result:
-            return phone_result
-
-    # Tier-1 low (header regex found something but just country / state-only):
-    # Only used when phone fallback is unavailable.
+    # ── Tier 3 : low-confidence header result (country/state-only) ──────────
+    # Phone area-code inference removed: it maps only US NANP area codes and is
+    # unreliable (area codes don't reflect where someone currently lives).
+    # Employer location fallback is handled upstream in parser.py instead.
     if result:
         return result
 

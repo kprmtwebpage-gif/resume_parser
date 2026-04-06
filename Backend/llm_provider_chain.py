@@ -319,8 +319,8 @@ def call_llm_chain(prompt: str, source_file: str = "") -> dict | None:
     """
     # ── PARSE_MODE gate ────────────────────────────────────────────────
     parse_mode = os.getenv("PARSE_MODE", "nlp").strip().casefold()
-    if parse_mode not in ("hybrid", "llm_first"):
-        logger.debug("llm_chain: PARSE_MODE=%s (not hybrid/llm_first), skipping LLM", parse_mode)
+    if parse_mode not in ("hybrid", "llm_first", "selective"):
+        logger.debug("llm_chain: PARSE_MODE=%s (not hybrid/llm_first/selective), skipping LLM", parse_mode)
         return None
 
     # ── Provider priority list ────────────────────────────────────────────

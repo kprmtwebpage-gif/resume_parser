@@ -885,11 +885,27 @@ async def get_candidates(
             # but guard here as a safety net in case any slip through.
             where_conditions.append("c.resume_parse_status = 'completed'")
 
-            # Exclude duplicate profiles — show only newest record per email
-            where_conditions.append(f"""(c.email IS NULL OR c.email = '' OR NOT EXISTS (
-                SELECT 1 FROM {CANDIDATES_TABLE} newer
-                WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
-            ))""")
+            # Exclude duplicate profiles — newest wins per email; also deduplicate by name
+            # when email is missing (handles same-person uploaded twice without email parsed).
+            where_conditions.append(f"""(
+                (c.email IS NULL OR c.email = '' OR NOT EXISTS (
+                    SELECT 1 FROM {CANDIDATES_TABLE} newer
+                    WHERE LOWER(newer.email) = LOWER(c.email) AND newer.id > c.id
+                ))
+                AND NOT (
+                    (c.email IS NULL OR c.email = '')
+                    AND TRIM(c.first_name) != '' AND c.first_name IS NOT NULL
+                    AND TRIM(c.last_name)  != '' AND c.last_name  IS NOT NULL
+                    AND LENGTH(TRIM(c.last_name)) > 1
+                    AND EXISTS (
+                        SELECT 1 FROM {CANDIDATES_TABLE} newer
+                        WHERE LOWER(TRIM(newer.first_name)) = LOWER(TRIM(c.first_name))
+                          AND LOWER(TRIM(newer.last_name))  = LOWER(TRIM(c.last_name))
+                          AND newer.id > c.id
+                          AND newer.resume_parse_status = 'completed'
+                    )
+                )
+            )""")
             
             # Name search - supports comma-separated names with OR logic
             if name:
@@ -1968,8 +1984,12 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
         env["HF_HUB_OFFLINE"] = "1"
         if _upload_fast_mode:
             # Fast mode keeps batch uploads predictable on low-memory machines.
-            env["USE_LLM"] = "false"
-            env["PARSE_MODE"] = "nlp"
+            # ONLY disable LLM when PARSE_MODE hasn't been explicitly configured
+            # to a LLM-enabled mode (selective/hybrid/llm_first) in the environment.
+            _configured_mode = os.getenv("PARSE_MODE", "nlp").strip().casefold()
+            if _configured_mode not in ("selective", "hybrid", "llm_first"):
+                env["USE_LLM"] = "false"
+                env["PARSE_MODE"] = "nlp"
             env["GLINER_ENABLED"] = "0"
 
         def _run_parser_subprocess():

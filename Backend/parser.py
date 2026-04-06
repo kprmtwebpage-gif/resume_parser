@@ -1167,6 +1167,10 @@ def extract_text_from_doc(path: str) -> str:
                             i += 1
                     extracted = " ".join(text_chunks)
                     if len(extracted.strip()) > 50:
+                        # Strip HYPERLINK markup left by Word's OLE stream
+                        # (e.g., 'HYPERLINK "https://..."') before returning.
+                        extracted = re.sub(r'HYPERLINK\s+"[^"]+"', " ", extracted)
+                        extracted = re.sub(r'\s{2,}', " ", extracted)
                         return extracted
         except Exception:
             pass
@@ -1179,7 +1183,24 @@ def extract_text_from_doc(path: str) -> str:
         text = printable.decode("ascii", errors="ignore")
         # Filter out short garbage tokens
         words = [w for w in text.split() if len(w) >= 2]
-        return " ".join(words)
+        text = " ".join(words)
+        # Strip HYPERLINK markup (left by Word) before returning
+        text = re.sub(r'HYPERLINK\s+"[^"]+"', " ", text)
+        text = re.sub(r'\s{2,}', " ", text)
+        # Strip binary-garbage prefix: the OLE raw binary often starts with
+        # non-meaningful tokens before the actual resume content begins.
+        # Find the first meaningful anchor: an all-caps name block, email, or
+        # phone number which signals the start of the resume header.
+        _anchor = re.search(
+            r'(?:(?:[A-Z]{2,}\s+){2,}[A-Z]{2,})'   # e.g. "ABDUL HAKKIM NAWAZ"
+            r'|(?:E[\s-]?Mail\s*:)'                  # "E-Mail:"
+            r'|(?:[\w.+%-]+@[\w.-]+\.[A-Za-z]{2,})' # email address
+            r'|(?:\+?1?\s*\(?\d{3}\)?[\s.-]\d{3})',  # phone number
+            text,
+        )
+        if _anchor and _anchor.start() > 20:
+            text = text[_anchor.start():]
+        return text.strip()
     except Exception:
         return ""
 
@@ -2751,6 +2772,35 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         cleaned = re.sub(r"\s+", " ", cleaned)
         cleaned = cleaned.strip(" ,|-/\t")
 
+        # ── Strip comma-separated certifications / suffixes ──
+        # Handles patterns like "Amit Tawari, PMP, ITIL, CSM" → "Amit Tawari"
+        # Keep only the first comma-part if trailing parts are short abbreviations
+        # or well-known certification acronyms.
+        _cert_like = {"pmp", "csm", "itil", "aws", "saa", "sap", "cka",
+                      "ccna", "ccnp", "ccie", "cissp", "cisa", "cism",
+                      "togaf", "safe", "popm", "psm", "pmi", "acp",
+                      "istqb", "ocjp", "ocp", "oca", "scjp", "rhce",
+                      "rhcsa", "mcsa", "mcse", "mcts", "mcp", "ceh",
+                      "comptia", "a+", "n+", "s+", "capm", "prince2",
+                      "six", "sigma", "lean", "ssgb", "ssbb", "lssbb",
+                      "lssgb", "cbap", "ecba", "ccba", "cpim", "cscp"}
+        if "," in cleaned:
+            _comma_parts = [p.strip() for p in cleaned.split(",")]
+            if len(_comma_parts) >= 2:
+                _trailing = _comma_parts[1:]
+                _trailing_tokens = [t.strip().lower().rstrip(".") for t in _trailing]
+                # If most trailing comma-parts are short (≤6 chars) or are known cert abbrevs,
+                # they're credentials, not part of the name.
+                _cert_count = sum(
+                    1 for t in _trailing_tokens
+                    if len(t) <= 6 or t in _cert_like or t.replace("-", "").replace(" ", "") in _cert_like
+                )
+                if _cert_count >= len(_trailing) * 0.5 and looks_like_name_tokens(
+                    [t.strip(",./") for t in _comma_parts[0].split() if t.strip(",./")] 
+                ):
+                    cleaned = _comma_parts[0].strip()
+        # ── end cert stripping ──
+
         # Tokenize and drop common suffixes.
         tokens = [t for t in re.split(r"\s+", cleaned) if t]
         tokens = [t.strip(",./") for t in tokens]
@@ -3058,21 +3108,72 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
     candidates.sort(key=lambda x: x[0], reverse=True)
 
     best_first, best_last = candidates[0][1]
-    if best_first and not best_last and email:
-        # Special case: compact all-caps concatenation like "MOHSINRIAZ".
-        # If the email local part contains a plausible first-name prefix, split it.
-        token = re.sub(r"[^A-Za-z]", "", best_first)
-        if token and token.isalpha() and token.casefold() == best_first.casefold() and 6 <= len(token) <= 24:
+    text_upper = text.upper() if text else ""
+    if best_first and not best_last:
+        # ── Try to recover last name from adjacent lines ──
+        # Some resumes split first/last across lines:
+        #   Line 0: "ABDULAI Senior Business Analyst | ..."  → first="ABDULAI"
+        #   Line 2: "CAULKER"  → standalone last name
+        # Look at nearby lines (within ±3) for a single-token name candidate.
+        _best_idx = None
+        for _ci, (_cs, (_cf, _cl)) in enumerate(candidates):
+            if _cf == best_first:
+                _best_idx = _ci
+                break
+        if _best_idx is not None:
+            # Search other candidates for a single-token name within ±3 index distance
+            # that could be the missing last name.
+            for _ci2, (_cs2, (_cf2, _cl2)) in enumerate(candidates):
+                if _ci2 == _best_idx:
+                    continue
+                # Single-token candidate (first only, no last) close in score
+                if _cf2 and not _cl2 and _cf2.casefold() != best_first.casefold():
+                    # It should look like a name token
+                    _t = re.sub(r"[^A-Za-z'-]", "", _cf2)
+                    if len(_t) >= 2 and re.fullmatch(r"[A-Za-z][A-Za-z'-]*", _t):
+                        # And not be a role/section word
+                        if _t.casefold() not in role_words and _t.casefold() not in section_words:
+                            # Determine document order: the name appearing
+                            # earlier in the original text is the first name.
+                            # (candidates are score-sorted, not document-order)
+                            _pos_best = text_upper.find(best_first.upper())
+                            _pos_other = text_upper.find(_cf2.upper())
+                            if _pos_other >= 0 and _pos_best >= 0 and _pos_other < _pos_best:
+                                best_last = best_first
+                                best_first = _cf2
+                            else:
+                                best_last = _cf2
+                            break
+
+        # ── Try to infer last name from email ──
+        # Example: name="Akshay", email="akshay.rajdev12489@gmail.com" → last="Rajdev"
+        if not best_last and email:
             local = email.split("@", 1)[0]
             local_parts = [p for p in re.split(r"[._\-\s]+", local) if p]
             local_parts = [re.sub(r"\d+", "", p) for p in local_parts]
-            local_parts = [p for p in local_parts if re.fullmatch(r"[A-Za-z]{3,}", p)]
-            token_cf = token.casefold()
+            local_parts = [p for p in local_parts if re.fullmatch(r"[A-Za-z]{2,}", p)]
+            _fn_cf = best_first.casefold()
             for p in local_parts:
                 p_cf = p.casefold()
-                if token_cf.startswith(p_cf) and len(token_cf) - len(p_cf) >= 3:
-                    remainder = token_cf[len(p_cf) :]
-                    return p_cf.title(), remainder.title()
+                if p_cf != _fn_cf and len(p_cf) >= 2:
+                    # This part is different from the first name — likely the last name
+                    best_last = p_cf.title()
+                    break
+
+        # ── Compact all-caps concatenation like "MOHSINRIAZ" ──
+        if not best_last and email:
+            token = re.sub(r"[^A-Za-z]", "", best_first)
+            if token and token.isalpha() and token.casefold() == best_first.casefold() and 6 <= len(token) <= 24:
+                local = email.split("@", 1)[0]
+                local_parts = [p for p in re.split(r"[._\-\s]+", local) if p]
+                local_parts = [re.sub(r"\d+", "", p) for p in local_parts]
+                local_parts = [p for p in local_parts if re.fullmatch(r"[A-Za-z]{3,}", p)]
+                token_cf = token.casefold()
+                for p in local_parts:
+                    p_cf = p.casefold()
+                    if token_cf.startswith(p_cf) and len(token_cf) - len(p_cf) >= 3:
+                        remainder = token_cf[len(p_cf) :]
+                        return p_cf.title(), remainder.title()
     return best_first, best_last
 
 
@@ -3905,6 +4006,14 @@ def _pick_best_name_pair(
                     s += 12
                 else:
                     s -= 3
+            elif ' ' in fn:
+                # Space-separated compound first name (e.g. "Ankita Kiran", "Mary Jane"):
+                # check if the first word is a known first name.
+                _first_word = fn.split()[0].casefold()
+                if _first_word in _known:
+                    s += 12
+                else:
+                    s -= 3
             else:
                 s -= 3   # mild penalty for unknown first names
         # ── end first-name signal ─────────────────────────────────────────
@@ -3916,7 +4025,9 @@ def _pick_best_name_pair(
                 s -= 30
         # Prefer matches to email inference when available
         fn_e, ln_e = email_guess
-        if fn_e and fn and fn.casefold() == fn_e.casefold():
+        # Also match when fn is "FirstName MiddleName" and email-derived name is "FirstName"
+        if fn_e and fn and (fn.casefold() == fn_e.casefold()
+                            or fn.casefold().startswith(fn_e.casefold() + " ")):
             s += 10
         if ln_e and ln and ln.casefold() == ln_e.casefold():
             s += 10
@@ -3956,6 +4067,13 @@ def _pick_best_name_pair(
         if _fn_parts:
             for _fp in _fn_parts:
                 if has_word(_fp):
+                    bonus += 15
+                    break
+        elif fn and ' ' in fn:
+            # Space-separated compound first name (e.g. "Ankita Kiran"):
+            # confirm if any space-split part appears in the resume text.
+            for _fsp in fn.split():
+                if has_word(_fsp):
                     bonus += 15
                     break
         elif fn and has_word(fn):
@@ -4055,6 +4173,99 @@ def _pick_best_name_pair(
     if best_ln and not re.search(r"[A-Za-z]", best_ln):
         best_ln = ""
     return best_fn, best_ln
+
+
+def _extract_current_employer_location(text: str) -> str:
+    """Infer candidate location from the most recent (current) employer.
+
+    Scans the experience section for lines containing "Present" or "Current"
+    date markers, then extracts the closest City/State or City/Country pattern.
+    Used as a fallback when no personal location is found in the header.
+    """
+    if not text:
+        return ""
+
+    _present_re = re.compile(
+        r"(?i)\b(?:present|current|till\s+date|to\s+date|now)\b"
+    )
+    # City, ST  (US)
+    _city_state_re = re.compile(
+        r"\b([A-Z][A-Za-z .'-]{1,25}),\s*("
+        + r"AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC"
+        + r")\b"
+    )
+    # City, State/Region, Country  (international)
+    _city_country_re = re.compile(
+        r"\b([A-Z][A-Za-z .'-]{1,25}),\s*([A-Za-z .'-]{2,30})\s*,\s*"
+        r"(India|United States|United Kingdom|Canada|Australia|Germany|France|"
+        r"Singapore|Netherlands|Ireland|UAE|United Arab Emirates|New Zealand|"
+        r"Saudi Arabia|Qatar|Bahrain|Kuwait|Oman|Malaysia|Philippines|Pakistan|"
+        r"Sri Lanka|Bangladesh|Nepal|Egypt|South Africa|Nigeria)\b"
+    )
+    _city_country2_re = re.compile(
+        r"\b([A-Z][A-Za-z .'-]{1,25}),\s*"
+        r"(India|United States|United Kingdom|Canada|Australia|Germany|France|"
+        r"Singapore|Netherlands|Ireland|UAE|United Arab Emirates|New Zealand|"
+        r"Saudi Arabia|Qatar|Bahrain|Kuwait|Oman|Malaysia|Philippines|Pakistan|"
+        r"Sri Lanka|Bangladesh|Nepal|Egypt|South Africa|Nigeria)\b"
+    )
+    _exp_heading_re = re.compile(
+        r"(?i)^\s*(?:work\s+)?(?:experience|employment|career(?:\s+history)?|professional\s+experience)\s*$"
+    )
+    _bad_location_words = {
+        "remote", "worldwide", "global", "various", "multiple", "onsite", "hybrid",
+        # common tech tokens that look like city names
+        "oracle", "java", "python", "linux", "windows", "azure", "aws", "gcp",
+    }
+
+    lines = text.split("\n")
+
+    # Find experience section (rough start index)
+    exp_start = 0
+    for i, line in enumerate(lines[:80]):
+        if _exp_heading_re.match(line.strip()):
+            exp_start = i + 1
+            break
+
+    # Scan for "present/current" lines within experience section
+    for i, line in enumerate(lines[exp_start:exp_start + 120], start=exp_start):
+        if not _present_re.search(line):
+            continue
+        # Found a current-job line. Check this line + 2 lines before/after.
+        window = lines[max(0, i - 2): min(len(lines), i + 3)]
+        for wl in window:
+            wl = wl.strip()
+            if not wl or len(wl) > 200:
+                continue
+            # Reject lines that are entirely a date or too short
+            if len(wl) < 4:
+                continue
+
+            m3 = _city_country_re.search(wl)
+            if m3:
+                city = m3.group(1).strip()
+                state = m3.group(2).strip()
+                country = m3.group(3).strip()
+                if city.lower() not in _bad_location_words:
+                    country = "United Arab Emirates" if country.upper() == "UAE" else country
+                    return f"{city}, {state}, {country}"
+
+            m2 = _city_country2_re.search(wl)
+            if m2:
+                city = m2.group(1).strip()
+                country = m2.group(2).strip()
+                if city.lower() not in _bad_location_words:
+                    country = "United Arab Emirates" if country.upper() == "UAE" else country
+                    return f"{city}, {country}"
+
+            m1 = _city_state_re.search(wl)
+            if m1:
+                city = m1.group(1).strip()
+                state = m1.group(2).strip()
+                if city.lower() not in _bad_location_words:
+                    return f"{city}, {state}, United States"
+
+    return ""
 
 
 def extract_address(
@@ -4558,6 +4769,27 @@ def extract_address(
         "server", "administration", "central", "support", "alcatel",
         "lucent", "sprint", "comcast", "delivery", "strategy",
         "force", "type", "visit", "enterprise",
+        # ── Phase-14: networking / protocol / infrastructure terms ──
+        "bgp", "ospf", "eigrp", "mpls", "vlan", "vxlan", "stp", "rstp",
+        "hsrp", "vrrp", "glbp", "routing", "switching", "firewall",
+        "vpn", "ipsec", "ssl", "tls", "tcp", "udp", "dns", "dhcp",
+        "snmp", "netflow", "sflow", "ntp", "sip", "voip",
+        "wan", "lan", "wlan", "sdwan", "sd-wan",
+        "cisco", "juniper", "arista", "fortinet", "meraki",
+        "nexus", "catalyst", "panorama", "ngfw",
+        "nac", "radius", "tacacs", "tacacs+",
+        "wireshark", "solarwinds", "nagios", "prtg",
+        "vmware", "esxi", "nsx", "hypervisor",
+        # ── Phase-14: additional tech/process terms ──
+        "workflow", "pipeline", "module", "component", "interface",
+        "integration", "migration", "deployment", "configuration",
+        "optimization", "monitoring", "logging", "alerting",
+        "governance", "compliance", "regulatory", "audit",
+        "encryption", "authentication", "authorization",
+        "frontend", "backend", "fullstack", "full-stack",
+        "database", "datawarehouse", "datalake", "lakehouse",
+        "reporting", "dashboard", "visualization",
+        "batch", "streaming", "processing", "ingestion",
     }
 
     def _looks_like_sql_state_suffix(full_line: str, state_match_end: int) -> bool:
@@ -9014,7 +9246,10 @@ def main() -> int:
             }
             def _looks_garbled(tok: str) -> bool:
                 t = (tok or "").strip()
-                if len(t) > 14:
+                # Only flag length > 14 for single-word tokens — a multi-word
+                # compound name like "Abdul Hakkim Khaja Bande" (24 chars) is
+                # not garbled; it's a legitimate South/East Asian compound name.
+                if " " not in t and len(t) > 14:
                     return True
                 # Token contains digits mixed with alpha (e.g., "19Ap12Dec")
                 if re.search(r"\d", t) and re.search(r"[A-Za-z]", t) and len(t) > 4:
@@ -9118,7 +9353,8 @@ def main() -> int:
                     if priority_source_text and priority_source_text != header_text
                     else None
                 )
-                or extract_address(resume_text, first_name=first_name, last_name=last_name, phone=phone)
+                or extract_address(resume_text, first_name=first_name, last_name=last_name, phone=phone,
+                                   allow_phone_fallback=False)
                 or None
             )
 
@@ -9135,6 +9371,16 @@ def main() -> int:
                     )
                     address = _g_loc
             # ── end GLiNER location override ──────────────────────────────────
+
+            # ── Employer location fallback ────────────────────────────────────
+            # When header/contact section has no location, infer from the
+            # candidate's CURRENT employer in the experience section.
+            # This is more reliable than phone area-code inference.
+            if not address:
+                address = _extract_current_employer_location(resume_text) or None
+                if address:
+                    _log.info("EMPLOYER_LOC [%s] inferred from current job: %s", file, address)
+            # ── end employer location fallback ────────────────────────────────
 
             # ── Education: structured parse first, flat fallback ────────────
             education_entries = parse_education_section(resume_text)
@@ -9295,11 +9541,19 @@ def main() -> int:
             # PARSE_MODE=nlp       → Pure NLP/regex only, no LLM calls (fast, free)
             # PARSE_MODE=hybrid    → NLP + LLM fallback when confidence < threshold
             # PARSE_MODE=llm_first → LLM always runs, NLP fills gaps LLM missed
+            # PARSE_MODE=selective → NLP for name/email/phone/location/linkedin/exp_years
+            #                        LLM for job_title/skills/certifications/education
+            #                        Best of both: no hallucination on pattern fields,
+            #                        semantic understanding on fields that need it.
             _parse_mode = os.getenv("PARSE_MODE", "nlp").strip().casefold()
             
             # Determine if we should use LLM based on mode
             use_llm = False
-            if _parse_mode == "hybrid":
+            _use_selective = False
+            if _parse_mode == "selective":
+                _use_selective = True
+                use_llm = False  # skip the old full-LLM path
+            elif _parse_mode == "hybrid":
                 use_llm = should_use_llm_fallback(
                     confidence_score,
                     threshold=float(os.getenv("LLM_CONFIDENCE_THRESHOLD", "0.75")),
@@ -9309,9 +9563,9 @@ def main() -> int:
                 use_llm = True
             
             _log.info(
-                "CONFIDENCE [%s] score=%.2f (%s) missing_critical=%d parse_mode=%s use_llm=%s",
+                "CONFIDENCE [%s] score=%.2f (%s) missing_critical=%d parse_mode=%s use_llm=%s selective=%s",
                 file, confidence_score, get_confidence_category(confidence_score),
-                missing_critical, _parse_mode, use_llm
+                missing_critical, _parse_mode, use_llm, _use_selective
             )
             
             # ── LLM enrichment layer (triggered by low confidence or env flag) ─
@@ -9470,6 +9724,138 @@ def main() -> int:
                             _log.info("LLM_ENRICH [%s] skills: +%d new (total %d)",
                                       file, len(_new_skills), len(_combined))
             
+            # ── SELECTIVE MODE: field-specific LLM extraction ─────────────────
+            # NLP keeps: name, email, phone, location, linkedin, experience_years
+            # LLM handles: job_title, skills, certifications, education
+            _sel = None
+            if _use_selective:
+                llm_allowed, llm_status_msg = check_llm_limit()
+                if not llm_allowed:
+                    _log.warning("LLM_LIMIT [%s] %s — selective skipped", file, llm_status_msg)
+                elif "Warning" in llm_status_msg:
+                    _log.warning("LLM_USAGE [%s] %s", file, llm_status_msg)
+
+                if llm_allowed:
+                    try:
+                        from llm_extractor import llm_extract_selective
+                        _sel = llm_extract_selective(resume_text, ocr_text="", filename=file)
+                    except Exception as _sel_err:
+                        _log.warning("SELECTIVE_LLM [%s] extraction error: %s", file, _sel_err)
+
+                if _sel:
+                    extraction_method = "selective"
+
+                    # Job title: smart merge — LLM wins when it's more specific or NLP is empty
+                    _sel_jt = (_sel.get("job_title") or "").strip()
+                    _sel_jt_conf = _sel.get("job_title_confidence") or 0.0
+                    _nlp_jt = (job_title or "").strip()
+                    if _sel_jt and _sel_jt_conf >= 0.70:
+                        # If NLP title already contains the LLM title, NLP is more specific — keep it
+                        if _nlp_jt and _sel_jt.lower() in _nlp_jt.lower() and len(_nlp_jt) > len(_sel_jt):
+                            _log.info("SELECTIVE [%s] job_title: keeping NLP '%s' (more specific than LLM '%s')",
+                                      file, _nlp_jt, _sel_jt)
+                        else:
+                            _log.info("SELECTIVE [%s] job_title: %s -> %s (conf=%.2f)",
+                                      file, _nlp_jt or "(empty)", _sel_jt, _sel_jt_conf)
+                            job_title = _sel_jt
+                    elif _sel_jt and not _nlp_jt:
+                        # LLM found something, NLP found nothing — use it even at low conf
+                        _log.info("SELECTIVE [%s] job_title (fill): %s (conf=%.2f)",
+                                  file, _sel_jt, _sel_jt_conf)
+                        job_title = _sel_jt
+
+                    # Skills: merge LLM skills into NLP skills (union, deduplicated)
+                    _sel_skills = _sel.get("skills") or []
+                    if _sel_skills and isinstance(_sel_skills, list):
+                        _existing_skills = set(
+                            s.strip().lower() for s in (skills or "").split(",") if s.strip()
+                        )
+                        _new_skills = [s for s in _sel_skills if s.lower() not in _existing_skills]
+                        if _new_skills:
+                            _combined = sorted(_existing_skills | set(s.lower() for s in _new_skills))
+                            skills = ", ".join(_combined)
+                            _log.info("SELECTIVE [%s] skills: +%d new (total %d)",
+                                      file, len(_new_skills), len(_combined))
+
+                    # Certifications: LLM always wins (it normalizes cert names)
+                    _sel_certs = _sel.get("certifications") or []
+                    if _sel_certs:
+                        _llm_cert_str = ", ".join(
+                            c.get("normalized_name") or c.get("name", "")
+                            for c in _sel_certs if c.get("name")
+                        )
+                        if _llm_cert_str:
+                            # Merge with NLP certs (union)
+                            _existing_certs = set(
+                                s.strip().lower() for s in (certifications or "").split(",") if s.strip()
+                            )
+                            _new_certs = [
+                                c.get("normalized_name") or c.get("name", "")
+                                for c in _sel_certs
+                                if (c.get("normalized_name") or c.get("name", "")).strip().lower()
+                                   not in _existing_certs
+                            ]
+                            if _new_certs or not certifications:
+                                _all_certs = sorted(
+                                    _existing_certs | set(c.lower() for c in _new_certs)
+                                )
+                                certifications = ", ".join(_all_certs) if _all_certs else certifications
+                            _log.info("SELECTIVE [%s] certifications: %s",
+                                      file, (certifications or "")[:80])
+
+                    # Education: LLM overrides when NLP found nothing or only weak entries
+                    _sel_edu = _sel.get("education") or []
+                    if _sel_edu and (
+                        not education_entries
+                        or all(not e.get("degree") for e in education_entries)
+                    ):
+                        education_entries = [
+                            {
+                                "degree":         e.get("normalized_degree") or e.get("degree") or "",
+                                "specialization": e.get("field_of_study") or "",
+                                "university":     e.get("university") or "",
+                                "grad_year":      e.get("grad_year") or "",
+                                "level":          e.get("level") or "",
+                                "confidence":     e.get("confidence") or 0.0,
+                            }
+                            for e in _sel_edu if isinstance(e, dict)
+                        ]
+                        import json as _json2
+                        _edu_structured = _json2.dumps(
+                            [{k: v for k, v in e.items() if k != "raw_line"} for e in education_entries]
+                        ) if education_entries else _edu_structured
+                        # Update flat qualification string
+                        _flat = education_to_flat_string(education_entries)
+                        if _flat:
+                            from data_normalization import post_normalize_qualification
+                            qualification = post_normalize_qualification(_flat)
+                        _log.info("SELECTIVE [%s] education: %d entries", file, len(education_entries))
+
+                    # Name: LLM fallback when NLP name looks wrong (truncated/garbled)
+                    _sel_fn = (_sel.get("first_name") or "").strip()
+                    _sel_ln = (_sel.get("last_name") or "").strip()
+                    if _sel_fn:
+                        _nlp_fn = (first_name or "").strip()
+                        _nlp_ln = (last_name or "").strip()
+                        _nlp_name_bad = (
+                            not _nlp_fn
+                            or not _nlp_ln
+                            or len(_nlp_ln) <= 2          # truncated like "kh"
+                            or any(c.isdigit() for c in _nlp_fn + _nlp_ln)
+                            or len(_nlp_fn + _nlp_ln) > 60  # garbled / too long
+                        )
+                        if _nlp_name_bad:
+                            _log.info("SELECTIVE [%s] name (fix): '%s %s' -> '%s %s'",
+                                      file, _nlp_fn, _nlp_ln, _sel_fn, _sel_ln)
+                            first_name = _sel_fn
+                            if _sel_ln:
+                                last_name = _sel_ln
+
+                    _llm = _sel  # so record_llm_call tracks it
+                else:
+                    _log.info("SELECTIVE [%s] LLM returned None — NLP-only for all fields", file)
+            # ── end selective mode ────────────────────────────────────────────
+
             # Record usage statistics
             record_llm_call(
                 used_llm=(_llm is not None),
