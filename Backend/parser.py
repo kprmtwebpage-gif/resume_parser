@@ -8247,7 +8247,9 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
             r'termination letter|bank statement|court order|legal notice|'
             r'demand notice|proof affidavit|memo no|show cause|charge sheet|'
             r'health insurance|insurance policy|insurance card|medical insurance|'
-            r'life insurance|vehicle insurance|insurance certificate)\b',
+            r'life insurance|vehicle insurance|insurance certificate|'
+            r'passport|aadhaar card|pan card|voter id|voter card|driving licence|driving license|'
+            r'id proof|id card|visa copy|visa stamp)\b',
             fname,
         ):
             return False, "Corrupt Format / Not a Resume. Please check and upload."
@@ -8327,7 +8329,8 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
         (r'\b(sum\s+insured|sum\s+assured|policy\s+(?:no|number|holder)|premium\s+(?:amount|due|paid)|maturity\s+(?:date|amount)|insurer|coverage\s+(?:amount|period)|renewal\s+date|policy\s+term|policy\s+benefit|insurance\s+(?:policy|certificate|bond|card)|claim\s+(?:no|number|form|settlement)|hospitalization|cashless\s+(?:claim|treatment))\b', -6),
         (r'\b(nominee|proposer|life\s+assured|policyholder|insured\s+member|beneficiary\s+name|risk\s+commencement|grace\s+period|lapse|surrender\s+value)\b', -5),
         # Passport / government identity documents
-        (r'\b(passport\s+(?:no|number|copy)|place\s+of\s+(?:birth|issue)|date\s+of\s+issue|date\s+of\s+expiry|nationality\s+code|surname\s*\/\s*given\s+name|issuing\s+authority|travel\s+document|visa\s+(?:no|number|type|stamp)|aadhaar|pan\s+(?:no|number|card)|driving\s+licen[sc]e\s+(?:no|number))\b', -6),
+        # Weight -8 so that even with +1 resume signal ("passport" keyword), net = -7 < -5 → rejected.
+        (r'\b(passport\s+(?:no|number|copy)|place\s+of\s+(?:birth|issue)|date\s+of\s+issue|date\s+of\s+expiry|nationality\s+code|surname\s*\/\s*given\s+name|issuing\s+authority|travel\s+document|visa\s+(?:no|number|type|stamp)|aadhaar|pan\s+(?:no|number|card)|driving\s+licen[sc]e\s+(?:no|number))\b', -8),
         # Exam / assignment papers
         (r'\b(question\s+(?:no|number|\d)|answer\s+(?:all|any|the\s+following)|marks?\s*:\s*\d|total\s+marks|maximum\s+marks|time\s+(?:allowed|limit)\s*:\s*\d|section\s+[a-z]\s*[\:\-]|attempt\s+(?:all|any)\s+questions?)\b', -6),
         (r'\b(roll\s+(?:no|number)|exam(?:ination)?\s+(?:paper|code|date)|mid\s*[-\s]?term|end\s*[-\s]?term|semester\s+exam|internal\s+assessment|solved\s+(?:paper|exam|question))\b', -5),
