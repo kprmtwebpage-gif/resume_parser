@@ -155,9 +155,9 @@ export default function JobCard({ job, onEdit, onReview, onPublish, onCopy, onHo
       <div className="jc-actions-col">
         {/* Applied Candidates Button (Feature 11) */}
         {onApplied && (
-          <button
-            type="button"
-            className="jc-action-btn jc-action-btn--applied"
+          <button 
+            type="button" 
+            className="jc-action-btn jc-action-btn--applied" 
             title="View applied candidates"
             onClick={() => onApplied(job)}
           >
@@ -178,7 +178,7 @@ export default function JobCard({ job, onEdit, onReview, onPublish, onCopy, onHo
             <span>Analyze</span>
           </button>
         )}
-        
+
         <button type="button" className="jc-action-btn jc-action-btn--blue" title="Edit" onClick={() => onEdit(job)}>
           <PencilSquareIcon className="w-4 h-4" />
           <span>Edit</span>

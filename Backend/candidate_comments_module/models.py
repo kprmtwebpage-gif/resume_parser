@@ -26,7 +26,7 @@ class CandidateComment(Base):
         Integer,
         nullable=False,
         index=True,
-        comment="References the candidate_profile table id column",
+        comment="References the candidates table id column",
     )
     comment_text = Column(Text, nullable=False)
     created_at = Column(

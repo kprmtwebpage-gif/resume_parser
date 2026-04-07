@@ -35,6 +35,7 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -88,7 +89,7 @@ class UserCreate(BaseModel):
     username: str
     email:    Optional[str] = None
     password: str
-    role:     str = "user"
+    role:     str
 
 
 class ChangePassword(BaseModel):
@@ -221,6 +222,46 @@ except Exception:
     pass
 
 
+def _ensure_users_columns():
+    """Idempotent: add any missing columns to the users table.
+    Each migration runs in its own transaction so one failure cannot
+    prevent the others from committing.
+    """
+    migrations = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS resumes_uploaded INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(50) NULL",
+    ]
+    conn = _get_conn()
+    try:
+        for sql in migrations:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        # Make email nullable separately
+        try:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE users ALTER COLUMN email DROP NOT NULL")
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        _put_conn(conn)
+
+try:
+    _ensure_users_columns()
+except Exception:
+    pass
+
+
 def _generate_otp() -> str:
     """Generate a 6-digit OTP code."""
     return f"{random.randint(100000, 999999)}"
@@ -271,20 +312,35 @@ def record_login(user_id: int, ip: str):
     """Increment total_logins, update last_login / last_ip, and log session."""
     _ensure_login_sessions_table()
     conn = _get_conn()
+    username = ""
     try:
+        # Try update with last_ip; fall back without it if the column is missing
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET total_logins = total_logins + 1,
+                        last_login   = NOW(),
+                        last_ip      = %s
+                    WHERE id = %s
+                    RETURNING username
+                """, (ip, user_id))
+                row = cur.fetchone()
+                username = row["username"] if row else ""
+        except Exception:
+            conn.rollback()
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET total_logins = total_logins + 1,
+                        last_login   = NOW()
+                    WHERE id = %s
+                    RETURNING username
+                """, (user_id,))
+                row = cur.fetchone()
+                username = row["username"] if row else ""
+        # Insert session record
         with conn.cursor() as cur:
-            # Update user stats
-            cur.execute("""
-                UPDATE users
-                SET total_logins = total_logins + 1,
-                    last_login   = NOW(),
-                    last_ip      = %s
-                WHERE id = %s
-                RETURNING username
-            """, (ip, user_id))
-            row = cur.fetchone()
-            username = row["username"] if row else ""
-            # Insert session record
             cur.execute("""
                 INSERT INTO login_sessions (user_id, username, ip_address)
                 VALUES (%s, %s, %s)
@@ -431,34 +487,6 @@ async def change_password(
 
 # â”€â”€ Admin-only routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-@router.get("/roles")
-async def get_available_roles():
-    """Get all available user roles from the user_roles table."""
-    conn = _get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT role_key, role_label, description, permissions, is_active FROM user_roles WHERE is_active = true ORDER BY role_label")
-            rows = cur.fetchall()
-            if rows:
-                return rows
-            # Fallback if table doesn't exist
-            return [
-                {"role_key": "superuser", "role_label": "Super Admin", "description": "Full access"},
-                {"role_key": "admin", "role_label": "Admin", "description": "Admin access"},
-                {"role_key": "user", "role_label": "User", "description": "Standard user"},
-                {"role_key": "upload_user", "role_label": "Upload User", "description": "Upload only"},
-            ]
-    except Exception:
-        return [
-            {"role_key": "superuser", "role_label": "Super Admin"},
-            {"role_key": "admin", "role_label": "Admin"},
-            {"role_key": "user", "role_label": "User"},
-            {"role_key": "upload_user", "role_label": "Upload User"},
-        ]
-    finally:
-        _put_conn(conn)
-
-
 @router.get("/admin/users")
 async def admin_get_users(
     _: dict = Depends(get_current_admin),
@@ -468,11 +496,13 @@ async def admin_get_users(
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, username, email, role, is_active, total_logins, 
-                       last_login AT TIME ZONE 'UTC' AS last_login,
+                SELECT id,
+                       COALESCE(username, email, 'user_' || id::text) AS username,
+                       email, role, is_active, total_logins,
+                       last_login,
                        last_ip,
-                       created_at AT TIME ZONE 'UTC' AS created_at,
-                       resumes_uploaded
+                       created_at,
+                       COALESCE(resumes_uploaded, 0) AS resumes_uploaded
                 FROM users
                 ORDER BY created_at DESC
             """)
@@ -481,52 +511,173 @@ async def admin_get_users(
         _put_conn(conn)
 
 
-@router.post("/admin/create-user", response_model=UserOut)
+@router.post("/admin/create-user", status_code=201)
 async def admin_create_user(
-    body: UserCreate,
+    request: Request,
     _: dict = Depends(get_current_admin),
 ):
-    """Admin: create a new user account."""
-    # Normalize: trim whitespace, store username as lowercase
-    clean_username = body.username.strip().lower()
-    clean_email = body.email.strip() if body.email else None
-    # Treat empty string as no email
-    if not clean_email:
-        clean_email = None
+    """Admin: create a new user account.
 
-    conn = _get_conn()
+    IMPORTANT: This endpoint must ALWAYS return JSON.
+    - Success: { success: true, user: {...} }
+    - Error:   { success: false, message: "..." }
+    """
+    conn = None
     try:
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "Request body must be valid JSON",
+                    "detail": "Request body must be valid JSON",
+                },
+            )
+
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "Request body must be a JSON object",
+                    "detail": "Request body must be a JSON object",
+                },
+            )
+
+        username_raw = payload.get("username")
+        password_raw = payload.get("password")
+        role_raw = payload.get("role")
+        email_raw = payload.get("email")
+
+        clean_username = (username_raw or "").strip().lower()
+        clean_password = (password_raw or "").strip()
+        clean_role = (role_raw or "").strip()
+        clean_email = (email_raw or "").strip() if email_raw is not None else ""
+        if not clean_email:
+            clean_email = None
+
+        if not clean_username:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": "username is required", "detail": "username is required"},
+            )
+        if not clean_password:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": "password is required", "detail": "password is required"},
+            )
+        if not clean_role:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": "role is required", "detail": "role is required"},
+            )
+
+        conn = _get_conn()
         with conn.cursor() as cur:
             # Check username uniqueness (case-insensitive)
-            cur.execute("SELECT id, username FROM users WHERE LOWER(username) = LOWER(%s)",
-                        (clean_username,))
-            existing = cur.fetchone()
-            if existing:
-                logger.warning("Create user blocked: username '%s' conflicts with existing user id=%s",
-                               clean_username, existing["id"])
-                raise HTTPException(status_code=409, detail=f"Username '{clean_username}' already exists")
+            cur.execute(
+                "SELECT id FROM users WHERE LOWER(username) = LOWER(%s)",
+                (clean_username,),
+            )
+            if cur.fetchone():
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "message": f"Username '{clean_username}' already exists",
+                        "detail": f"Username '{clean_username}' already exists",
+                    },
+                )
 
             # Check email uniqueness only if email is provided
             if clean_email:
-                cur.execute("SELECT id, email FROM users WHERE LOWER(email) = LOWER(%s)",
-                            (clean_email,))
-                existing = cur.fetchone()
-                if existing:
-                    logger.warning("Create user blocked: email '%s' conflicts with existing user id=%s",
-                                   clean_email, existing["id"])
-                    raise HTTPException(status_code=409, detail=f"Email '{clean_email}' already exists")
+                cur.execute(
+                    "SELECT id FROM users WHERE LOWER(email) = LOWER(%s)",
+                    (clean_email,),
+                )
+                if cur.fetchone():
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "success": False,
+                            "message": f"Email '{clean_email}' already exists",
+                            "detail": f"Email '{clean_email}' already exists",
+                        },
+                    )
 
-            cur.execute("""
-                INSERT INTO users (username, email, password_hash, role)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id, username, email, role, is_active,
-                          total_logins, last_login, created_at
-            """, (clean_username, clean_email, hash_password(body.password), body.role))
+            password_hash = hash_password(clean_password)
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO users (username, email, password_hash, role, provider)
+                    VALUES (%s, %s, %s, %s, 'local')
+                    RETURNING id, username, email, role, is_active,
+                              total_logins, last_login, created_at
+                    """,
+                    (clean_username, clean_email, password_hash, clean_role),
+                )
+            except psycopg2.errors.UndefinedColumn:
+                # Some environments don't have a 'provider' column on users yet.
+                conn.rollback()
+                cur.execute(
+                    """
+                    INSERT INTO users (username, email, password_hash, role)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, username, email, role, is_active,
+                              total_logins, last_login, created_at
+                    """,
+                    (clean_username, clean_email, password_hash, clean_role),
+                )
+
             row = cur.fetchone()
+
         conn.commit()
+        return {"success": True, "user": row}
+    except psycopg2.IntegrityError as e:
+        if conn:
+            conn.rollback()
+        msg = "User already exists or violates a database constraint"
+        # Try to provide a clearer (but still safe) message.
+        try:
+            pgcode = getattr(e, "pgcode", None)
+            # 23505 = unique_violation, 23514 = check_violation
+            if pgcode == "23514":
+                msg = "Request violates a database constraint (check role/required fields)"
+            elif pgcode == "23505":
+                msg = "User already exists"
+        except Exception:
+            pass
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": msg, "detail": msg},
+        )
+    except HTTPException as e:
+        # Ensure even raised HTTPExceptions become the expected JSON shape
+        msg = str(getattr(e, "detail", "Request failed"))
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"success": False, "message": msg, "detail": msg},
+        )
+    except Exception:
+        logger.exception("Unhandled error while creating user")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": "Internal server error",
+                "detail": "Internal server error",
+            },
+        )
     finally:
-        _put_conn(conn)
-    return row
+        if conn:
+            _put_conn(conn)
 
 
 @router.patch("/admin/toggle-user/{user_id}")
@@ -1072,13 +1223,24 @@ async def admin_dashboard_stats(_: dict = Depends(get_current_admin)):
                 upload_monthly = []
 
             # User performance (all users with stats + daily/weekly/monthly uploads)
-            cur.execute("""
-                SELECT u.id, u.username, u.role, u.is_active, u.total_logins,
-                       u.last_login, u.resumes_uploaded, u.email, u.created_at
-                FROM users u
-                ORDER BY u.resumes_uploaded DESC NULLS LAST
-            """)
-            user_performance = [dict(u) for u in cur.fetchall()]
+            try:
+                cur.execute("""
+                    SELECT u.id, u.username, u.role, u.is_active, u.total_logins,
+                           u.last_login, u.resumes_uploaded, u.email, u.created_at
+                    FROM users u
+                    ORDER BY u.resumes_uploaded DESC NULLS LAST
+                """)
+                user_performance = [dict(u) for u in cur.fetchall()]
+            except Exception:
+                conn.rollback()
+                # Fallback when resumes_uploaded column is not yet in the DB
+                cur.execute("""
+                    SELECT u.id, u.username, u.role, u.is_active, u.total_logins,
+                           u.last_login, 0 AS resumes_uploaded, u.email, u.created_at
+                    FROM users u
+                    ORDER BY u.total_logins DESC NULLS LAST
+                """)
+                user_performance = [dict(u) for u in cur.fetchall()]
 
             # Per-user rich stats (daily/weekly/monthly uploads + frequency metrics)
             cur.execute("""

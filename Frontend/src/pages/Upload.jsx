@@ -302,14 +302,35 @@ export default function Upload() {
                             {getStatusText(upload)}
                           </span>
                           {upload.status === 'failed' ? (
-                            <button 
+                            <div className="flex items-center gap-3">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  retryUpload(upload)
+                                }}
+                                className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                              >
+                                Retry
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  removeUpload(upload.id)
+                                }}
+                                className="text-xs font-medium text-red-400 hover:text-red-600"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          ) : upload.status === 'not_a_resume' ? (
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                retryUpload(upload)
+                                removeUpload(upload.id)
                               }}
-                              className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                              className="text-xs font-medium text-amber-500 hover:text-amber-700"
                             >
-                              Retry
+                              Dismiss
                             </button>
                           ) : (
                             <span className="text-xs font-medium text-neutral-600">

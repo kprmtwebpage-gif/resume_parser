@@ -1,4 +1,4 @@
-"""Service layer for company jobs CRUD."""
+"""Service layer for company_jobs_module."""
 
 import uuid
 from typing import List, Optional
@@ -18,7 +18,13 @@ def create_job(db: Session, payload: CompanyJobCreate) -> CompanyJob:
 
 
 def get_jobs(db: Session, skip: int = 0, limit: int = 100) -> List[CompanyJob]:
-    return db.query(CompanyJob).offset(skip).limit(limit).all()
+    return (
+        db.query(CompanyJob)
+        .order_by(CompanyJob.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_job_by_id(db: Session, job_id: uuid.UUID) -> Optional[CompanyJob]:

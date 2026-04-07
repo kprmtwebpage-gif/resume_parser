@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchCustomers, deleteCustomer } from '../../services/customerApi'
 
-export default function CustomerList() {
+export default function CustomerList({ entityType } = {}) {
   const navigate = useNavigate()
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -16,18 +16,33 @@ export default function CustomerList() {
   const menuRef = useRef(null)
   const filterRef = useRef(null)
 
+  const isCandidateMode = entityType === 'candidate'
+  const entityLabel = entityType === 'vendor'
+    ? 'Vendor'
+    : entityType === 'own_company' || entityType === 'own'
+    ? 'Own Company'
+    : entityType === 'candidate'
+    ? 'Candidate'
+    : 'Client'
+
   const filterLabels = {
-    all: 'All Customers',
-    active: 'Active Customers',
-    inactive: 'Inactive Customers',
+    all: `All ${entityLabel}s`,
+    active: `Active ${entityLabel}s`,
+    inactive: `Inactive ${entityLabel}s`,
   }
 
   const loadCustomers = useCallback(async () => {
     setLoading(true)
+    if (isCandidateMode) {
+      setCustomers([])
+      setLoading(false)
+      return
+    }
     try {
       const data = await fetchCustomers({
         search: search || undefined,
         status: filterStatus === 'all' ? undefined : filterStatus,
+        entityType: entityType || undefined,
         sortBy,
         sortOrder,
       })
@@ -37,7 +52,7 @@ export default function CustomerList() {
     } finally {
       setLoading(false)
     }
-  }, [search, filterStatus, sortBy, sortOrder])
+  }, [search, filterStatus, sortBy, sortOrder, entityType, isCandidateMode])
 
   useEffect(() => { loadCustomers() }, [loadCustomers])
 
@@ -92,7 +107,8 @@ export default function CustomerList() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search in Customers ( / )"
+              placeholder={`Search in ${entityLabel}s ( / )`}
+              disabled={isCandidateMode}
               style={{
                 border: 'none', outline: 'none', fontSize: '14px', color: '#374151',
                 width: '220px', padding: '4px 8px', backgroundColor: 'transparent',
@@ -149,106 +165,116 @@ export default function CustomerList() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Templates Button */}
-          <button
-            onClick={() => navigate('/customer/templates')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              backgroundColor: '#2563eb', color: '#fff', border: 'none',
-              borderRadius: '6px', padding: '8px 18px', cursor: 'pointer',
-              fontSize: '14px', fontWeight: 600, transition: 'background 0.2s',
-            }}
-            onMouseEnter={(e) => e.target.style.backgroundColor = '#1d4ed8'}
-            onMouseLeave={(e) => e.target.style.backgroundColor = '#2563eb'}
-          >
-            Templates
-          </button>
-
-          {/* + New Button */}
-          <button
-            onClick={() => navigate('/customer/new')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              backgroundColor: '#2563eb', color: '#fff', border: 'none',
-              borderRadius: '6px', padding: '8px 18px', cursor: 'pointer',
-              fontSize: '14px', fontWeight: 600, transition: 'background 0.2s',
-            }}
-            onMouseEnter={(e) => e.target.style.backgroundColor = '#1d4ed8'}
-            onMouseLeave={(e) => e.target.style.backgroundColor = '#2563eb'}
-          >
-            + New
-          </button>
-
-          {/* 3-dot menu */}
-          <div ref={menuRef} style={{ position: 'relative' }}>
-            <button
-              onClick={() => { setMenuOpen(!menuOpen); setSortSubmenu(null) }}
-              style={{
-                background: 'none', border: '1px solid #e5e7eb', borderRadius: '6px',
-                cursor: 'pointer', padding: '6px 10px', color: '#6b7280', fontSize: '18px',
-                display: 'flex', alignItems: 'center',
-              }}
-            >
-              &#8943;
-            </button>
-            {menuOpen && (
-              <div style={{
-                position: 'absolute', top: '100%', right: 0, marginTop: '4px',
-                backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 50, minWidth: '220px',
-                overflow: 'visible', animation: 'fadeIn 0.15s ease',
-              }}>
-                {/* Name sort */}
-                <button
-                  onClick={() => handleSort('name', 'asc')}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    width: '100%', padding: '10px 16px', border: 'none', cursor: 'pointer',
-                    backgroundColor: sortBy === 'name' ? '#eff6ff' : '#fff',
-                    color: '#374151', fontSize: '14px', textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f9fafb'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = sortBy === 'name' ? '#eff6ff' : '#fff'}
-                >
-                  Name (A-Z)
-                  {sortBy === 'name' && <span style={{ color: '#2563eb' }}>&#10003;</span>}
-                </button>
-
-                {/* Created Time sort */}
-                <button
-                  onClick={() => handleSort('created_at', 'desc')}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    width: '100%', padding: '10px 16px', border: 'none', cursor: 'pointer',
-                    backgroundColor: sortBy === 'created_at' ? '#eff6ff' : '#fff',
-                    color: '#374151', fontSize: '14px', textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f9fafb'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = sortBy === 'created_at' ? '#eff6ff' : '#fff'}
-                >
-                  Created Time (Latest)
-                  {sortBy === 'created_at' && <span style={{ color: '#2563eb' }}>&#10003;</span>}
-                </button>
-
-                {/* Company Name sort */}
-                <button
-                  onClick={() => handleSort('company_name', 'asc')}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    width: '100%', padding: '10px 16px', border: 'none', cursor: 'pointer',
-                    backgroundColor: sortBy === 'company_name' ? '#eff6ff' : '#fff',
-                    color: '#374151', fontSize: '14px', textAlign: 'left',
-                    borderBottomLeftRadius: '8px', borderBottomRightRadius: '8px',
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f9fafb'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = sortBy === 'company_name' ? '#eff6ff' : '#fff'}
-                >
-                  Company Name
-                  {sortBy === 'company_name' && <span style={{ color: '#2563eb' }}>&#10003;</span>}
-                </button>
+          {isCandidateMode ? (
+            <>
+              <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                No candidates available.
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <>
+              {/* Templates Button */}
+              <button
+                onClick={() => navigate('/customer/templates')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  backgroundColor: '#2563eb', color: '#fff', border: 'none',
+                  borderRadius: '6px', padding: '8px 18px', cursor: 'pointer',
+                  fontSize: '14px', fontWeight: 600, transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => e.target.style.backgroundColor = '#1d4ed8'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = '#2563eb'}
+              >
+                Templates
+              </button>
+
+              {/* + New Button */}
+              <button
+                onClick={() => navigate(`/customer/new${entityType ? `?type=${entityType}` : ''}`)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  backgroundColor: '#2563eb', color: '#fff', border: 'none',
+                  borderRadius: '6px', padding: '8px 18px', cursor: 'pointer',
+                  fontSize: '14px', fontWeight: 600, transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => e.target.style.backgroundColor = '#1d4ed8'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = '#2563eb'}
+              >
+                + New {entityLabel}
+              </button>
+
+              {/* 3-dot menu */}
+              <div ref={menuRef} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => { setMenuOpen(!menuOpen); setSortSubmenu(null) }}
+                  style={{
+                    background: 'none', border: '1px solid #e5e7eb', borderRadius: '6px',
+                    cursor: 'pointer', padding: '6px 10px', color: '#6b7280', fontSize: '18px',
+                    display: 'flex', alignItems: 'center',
+                  }}
+                >
+                  &#8943;
+                </button>
+                {menuOpen && (
+                  <div style={{
+                    position: 'absolute', top: '100%', right: 0, marginTop: '4px',
+                    backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 50, minWidth: '220px',
+                    overflow: 'visible', animation: 'fadeIn 0.15s ease',
+                  }}>
+                    {/* Name sort */}
+                    <button
+                      onClick={() => handleSort('name', 'asc')}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        width: '100%', padding: '10px 16px', border: 'none', cursor: 'pointer',
+                        backgroundColor: sortBy === 'name' ? '#eff6ff' : '#fff',
+                        color: '#374151', fontSize: '14px', textAlign: 'left',
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = '#f9fafb'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = sortBy === 'name' ? '#eff6ff' : '#fff'}
+                    >
+                      Name (A-Z)
+                      {sortBy === 'name' && <span style={{ color: '#2563eb' }}>&#10003;</span>}
+                    </button>
+
+                    {/* Created Time sort */}
+                    <button
+                      onClick={() => handleSort('created_at', 'desc')}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        width: '100%', padding: '10px 16px', border: 'none', cursor: 'pointer',
+                        backgroundColor: sortBy === 'created_at' ? '#eff6ff' : '#fff',
+                        color: '#374151', fontSize: '14px', textAlign: 'left',
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = '#f9fafb'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = sortBy === 'created_at' ? '#eff6ff' : '#fff'}
+                    >
+                      Created Time (Latest)
+                      {sortBy === 'created_at' && <span style={{ color: '#2563eb' }}>&#10003;</span>}
+                    </button>
+
+                    {/* Company Name sort */}
+                    <button
+                      onClick={() => handleSort('company_name', 'asc')}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        width: '100%', padding: '10px 16px', border: 'none', cursor: 'pointer',
+                        backgroundColor: sortBy === 'company_name' ? '#eff6ff' : '#fff',
+                        color: '#374151', fontSize: '14px', textAlign: 'left',
+                        borderBottomLeftRadius: '8px', borderBottomRightRadius: '8px',
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = '#f9fafb'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = sortBy === 'company_name' ? '#eff6ff' : '#fff'}
+                    >
+                      Company Name
+                      {sortBy === 'company_name' && <span style={{ color: '#2563eb' }}>&#10003;</span>}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -273,17 +299,23 @@ export default function CustomerList() {
                   Loading customers...
                 </td>
               </tr>
+            ) : isCandidateMode ? (
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'center', padding: '60px', color: '#9ca3af', fontSize: '14px' }}>
+                  No candidates available.
+                </td>
+              </tr>
             ) : customers.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ textAlign: 'center', padding: '60px', color: '#9ca3af', fontSize: '14px' }}>
-                  No customers found. Click &quot;+ New&quot; to create one.
+                  No {entityLabel}s found. Click &quot;+ New&quot; to create one.
                 </td>
               </tr>
             ) : (
               customers.map((c) => (
                 <tr
                   key={c.id}
-                  onClick={() => navigate(`/customer/${c.id}`)}
+                  onClick={() => navigate(`/customer/${c.id}?type=${entityType}`)}
                   style={{
                     borderBottom: '1px solid #f3f4f6', cursor: 'pointer',
                     transition: 'background 0.15s',

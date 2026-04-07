@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { listEmailTemplates } from '../../services/emailApi'
+import { listEmailTemplates, listCandidateEmailTemplates } from '../../services/emailApi'
 
 /**
  * TemplatePickerModal — centered modal that lists email template names.
@@ -9,8 +9,10 @@ import { listEmailTemplates } from '../../services/emailApi'
  *  - isOpen: boolean
  *  - onClose: () => void
  *  - onSelect: (template: { id, name, subject, body }) => void
+ *  - templateType: 'candidate' | 'common' | null — which templates to load
+ *  - useCandidateTemplates: boolean — legacy alias for templateType='candidate'
  */
-export default function TemplatePickerModal({ isOpen, onClose, onSelect }) {
+export default function TemplatePickerModal({ isOpen, onClose, onSelect, templateType = null, useCandidateTemplates = false }) {
   const [templates, setTemplates] = useState([])
   const [loading, setLoading] = useState(false)
   const [hoveredId, setHoveredId] = useState(null)
@@ -19,11 +21,20 @@ export default function TemplatePickerModal({ isOpen, onClose, onSelect }) {
   useEffect(() => {
     if (!isOpen) return
     setLoading(true)
-    listEmailTemplates()
+    const isCandidateType = templateType === 'candidate' || useCandidateTemplates
+    let loader
+    if (isCandidateType) {
+      loader = listCandidateEmailTemplates()
+    } else if (templateType === 'common') {
+      loader = listEmailTemplates({ type: 'COMMON' })
+    } else {
+      loader = listEmailTemplates()
+    }
+    loader
       .then((data) => setTemplates(data || []))
       .catch(() => setTemplates([]))
       .finally(() => setLoading(false))
-  }, [isOpen])
+  }, [isOpen, templateType, useCandidateTemplates])
 
   useEffect(() => {
     if (!isOpen) return
@@ -61,7 +72,7 @@ export default function TemplatePickerModal({ isOpen, onClose, onSelect }) {
           padding: '16px 20px', borderBottom: '1px solid #e2e8f0',
         }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
-            Email Templates
+            {(templateType === 'candidate' || useCandidateTemplates) ? 'Candidate Email Templates' : 'Email Templates'}
           </h3>
           <button
             onClick={onClose}

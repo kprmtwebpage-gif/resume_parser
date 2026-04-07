@@ -18,7 +18,7 @@ DATABASE_URL = (
     f"/{os.getenv('DB_NAME', 'postgres')}"
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=3, max_overflow=5)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -55,7 +55,11 @@ def _seed_default_templates():
             existing = db.query(EmailTemplate).filter_by(name=name).first()
             if existing is None:
                 db.add(EmailTemplate(
-                    name=name, subject=subject, body=body, created_by="System",
+                name=name,
+                subject=subject,
+                body=body,
+                created_by="System",
+                template_type="COMMON",
                 ))
             elif "<table" not in (existing.body or ""):
                 existing.body = body

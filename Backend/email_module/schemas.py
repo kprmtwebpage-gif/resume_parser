@@ -64,13 +64,44 @@ class EmailTemplateCreate(BaseModel):
     name: str
     subject: str
     body: str
+    type: Optional[str] = None
+    template_type: Optional[str] = "COMMON"  # COMMON | CANDIDATE
 
 class EmailTemplateUpdate(BaseModel):
     name: Optional[str] = None
     subject: Optional[str] = None
     body: Optional[str] = None
+    type: Optional[str] = None
+    template_type: Optional[str] = None
 
 class EmailTemplateRead(BaseModel):
+    id: str
+    name: str
+    subject: str
+    body: str
+    type: Optional[str] = "COMMON"
+    template_type: Optional[str] = "COMMON"
+    created_by: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class CandidateEmailTemplateCreate(BaseModel):
+    name: str
+    subject: str
+    body: str
+
+
+class CandidateEmailTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+
+
+class CandidateEmailTemplateRead(BaseModel):
     id: str
     name: str
     subject: str
@@ -87,3 +118,70 @@ class TemplatePreviewRequest(BaseModel):
 
 class ContactPersonTemplateAssign(BaseModel):
     template_id: str
+
+
+class WorkflowSendEmailRequest(BaseModel):
+    recipientType: str
+    candidateId: int
+    companyId: Optional[str] = None
+    hrId: Optional[str] = None
+    templateId: str
+    provider: Optional[str] = "gmail"
+
+
+# ── User Email Settings schemas ───────────────────────────────
+
+class EmailSettingSave(BaseModel):
+    """Payload to save/update a provider's email settings."""
+    provider: str                                    # "gmail" | "outlook" | "zoho"
+    email: str
+    # IMAP (receiving)
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None                   # plaintext — encrypted on save
+    ssl_enabled: Optional[str] = "Autodetect"
+    auth_method: Optional[str] = "Autodetect"
+    # SMTP (sending)
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None              # plaintext — encrypted on save
+    smtp_ssl_enabled: Optional[str] = "Autodetect"
+    smtp_auth_method: Optional[str] = "Autodetect"
+    is_default: Optional[bool] = False
+
+
+class EmailSettingRead(BaseModel):
+    """Response schema — never exposes passwords."""
+    id: str
+    provider: str
+    email: str
+    # IMAP
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    username: Optional[str] = None
+    ssl_enabled: Optional[str] = None
+    auth_method: Optional[str] = None
+    # SMTP
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_ssl_enabled: Optional[str] = None
+    smtp_auth_method: Optional[str] = None
+    is_default: bool
+    is_connected: bool
+    oauth2_connected: Optional[bool] = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class EmailSettingTestRequest(BaseModel):
+    """Payload to test SMTP connection without saving."""
+    smtp_host: str
+    smtp_port: int
+    username: str
+    password: str
+    ssl_enabled: Optional[str] = "Autodetect"

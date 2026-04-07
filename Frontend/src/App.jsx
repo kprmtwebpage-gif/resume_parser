@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { UploadProvider } from './contexts/UploadContext'
@@ -12,24 +12,33 @@ import AppliedCandidatesPage from './pages/AppliedCandidatesPage.jsx'
 import AdminDashboard from './pages/AdminDashboard.jsx'
 import AdminResumes from './pages/AdminResumes.jsx'
 import AdminLayout from './pages/admin/AdminLayout.jsx'
-import { Navigate } from 'react-router-dom'
 import DashboardOverview from './pages/admin/DashboardOverview.jsx'
 import UploadMetrics from './pages/admin/UploadMetrics.jsx'
+import UploadLog from './pages/admin/UploadLog.jsx'
+import EmailTrackingDashboard from './pages/admin/EmailTrackingDashboard.jsx'
+import CandidateTemplates from './pages/admin/CandidateTemplates.jsx'
+import TemplateManager from './pages/admin/TemplateManager.jsx'
 import UsersManagement from './pages/admin/UsersManagement.jsx'
 import ActivityLog from './pages/admin/ActivityLog.jsx'
-import UploadLog from './pages/admin/UploadLog.jsx'
 import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
 import LoginPage from './login/LoginPage.jsx'
-import CustomerList from './pages/customer/CustomerList.jsx'
+import CustomerPage from './pages/customer/CustomerPage.jsx'
 import CustomerCreate from './pages/customer/CustomerCreate.jsx'
 import CustomerDetail from './pages/customer/CustomerDetail.jsx'
+import CustomerEdit from './pages/customer/CustomerEdit.jsx'
 import SendMail from './pages/SendMail.jsx'
 import TemplatesPage from './pages/TemplatesPage.jsx'
+import EmailSettingsPage from './pages/EmailSettingsPage.jsx'
+// User panel
+import UserLayout from './pages/user/UserLayout.jsx'
+import UserUploadLogs from './pages/user/UserUploadLogs.jsx'
+import EmailHistorySection from './components/email/EmailHistorySection.jsx'
 import Interviews from './pages/Interviews.jsx'
 import PipelineBoard from './pages/pipeline/PipelineBoard.jsx'
 import PipelineSettings from './pages/pipeline/PipelineSettings.jsx'
+
 
 function AdminGuard({ children }) {
   try {
@@ -117,25 +126,39 @@ function AppContent() {
         <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
         <Route path="/jobs/:jobId/applied" element={<DashboardLayout><AppliedCandidatesPage /></DashboardLayout>} />
         {/* Customer routes */}
-        <Route path="/customer" element={<DashboardLayout><CustomerList /></DashboardLayout>} />
+        <Route path="/customer" element={<DashboardLayout><CustomerPage /></DashboardLayout>} />
         <Route path="/customer/new" element={<DashboardLayout><CustomerCreate /></DashboardLayout>} />
+        <Route path="/customer/:id/edit" element={<DashboardLayout><CustomerEdit /></DashboardLayout>} />
         <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
-        {/* Interview Scheduling */}
-        <Route path="/interviews" element={<DashboardLayout><Interviews /></DashboardLayout>} />
-        {/* Interview Pipeline Kanban */}
-        <Route path="/pipeline" element={<DashboardLayout><PipelineBoard /></DashboardLayout>} />
-        <Route path="/pipeline/settings" element={<AdminGuard><DashboardLayout><PipelineSettings /></DashboardLayout></AdminGuard>} />
         {/* Send Mail page */}
         <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
+        {/* User section (user panel only) */}
+        <Route path="/user" element={<DashboardLayout><UserLayout /></DashboardLayout>}>
+          <Route index element={<Navigate to="email/settings" replace />} />
+          <Route path="upload-log" element={<UserUploadLogs />} />
+          <Route path="email" element={<Navigate to="settings" replace />} />
+          <Route path="email/history" element={<EmailHistorySection />} />
+          <Route path="email/settings" element={<EmailSettingsPage />} />
+          {/* Back-compat routes */}
+          <Route path="email-settings" element={<Navigate to="email/settings" replace />} />
+        </Route>
         {/* Templates page (part of Customer module) */}
         <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
+        {/* Interview Scheduling */}
+        <Route path="/interviews" element={<DashboardLayout><Interviews /></DashboardLayout>} />
+        {/* Pipeline Kanban */}
+        <Route path="/pipeline" element={<DashboardLayout><PipelineBoard /></DashboardLayout>} />
+        <Route path="/pipeline/settings" element={<AdminGuard><DashboardLayout><PipelineSettings /></DashboardLayout></AdminGuard>} />
         {/* Admin routes — protected by role check */}
         <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
           <Route index element={<DashboardOverview />} />
           <Route path="upload-metrics" element={<UploadMetrics />} />
+          <Route path="upload-log" element={<UploadLog />} />
+          <Route path="email-tracking" element={<EmailTrackingDashboard />} />
           <Route path="users" element={<UsersManagement />} />
           <Route path="activity" element={<ActivityLog />} />
-          <Route path="upload-log" element={<UploadLog />} />
+          <Route path="candidate-templates" element={<CandidateTemplates />} />
+          <Route path="email-templates" element={<TemplateManager />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
         {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}

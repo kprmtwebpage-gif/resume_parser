@@ -171,6 +171,65 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     setIsSendFlowOpen(true)
   }, [])
 
+  const handleEmailProvider = useCallback((provider) => {
+    // Generate email subject and body from candidate data
+    const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
+    const primarySkill = row.job_title || row.primary_skill || 'N/A'
+    
+    const subject = `Profile Submission – ${fullName} – ${primarySkill}`
+    
+    const body = `PERSONAL DETAILS:
+Full Name: ${fullName}
+Current Location: ${row.location || row.address || 'N/A'}
+Phone: ${row.phone || 'N/A'}
+Email: ${row.email || 'N/A'}
+LinkedIn: ${linkedinUrl || 'N/A'}
+
+EDUCATIONAL DETAILS:
+Degree: ${row.degree || row.education || 'N/A'}
+University: ${row.university || 'N/A'}
+Year of Completion: ${row.graduation_year || 'N/A'}
+
+SUBMITTAL DETAILS:
+Work Authorization: ${row.work_authorization || row.visa_status || 'N/A'}
+Submittal Type: ${row.submittal_type || 'N/A'}
+Rate: $${row.rate || row.hourly_rate || 'N/A'}
+Availability: ${row.availability || 'N/A'}`
+
+    // Encode subject and body for URL
+    const encodedSubject = encodeURIComponent(subject)
+    const encodedBody = encodeURIComponent(body)
+
+    // Build email URL based on provider
+    let emailUrl = ''
+    if (provider === 'gmail') {
+      emailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=&su=${encodedSubject}&body=${encodedBody}`
+    } else if (provider === 'outlook') {
+      emailUrl = `https://outlook.office.com/mail/deeplink/compose?to=&subject=${encodedSubject}&body=${encodedBody}`
+    }
+
+    // Open in new tab
+    if (emailUrl) {
+      window.open(emailUrl, '_blank', 'noopener,noreferrer')
+    }
+
+    // Close modal
+    setIsEmailModalOpen(false)
+  }, [row])
+
+  const handleDeleteClick = useCallback(async (e) => {
+    e.stopPropagation()
+    setIsDropdownOpen(false)
+    const fullLabel = [row.first_name, row.last_name].filter(Boolean).join(' ') || `Candidate #${row.id}`
+    if (!window.confirm(`Permanently delete "${fullLabel}"? This cannot be undone.`)) return
+    try {
+      await api.delete(`/candidates/${row.id}`)
+      if (onDelete) onDelete(row.id)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to delete candidate.')
+    }
+  }, [row.id, row.first_name, row.last_name, onDelete])
+
   const handleEditClick = useCallback((e) => {
     e.stopPropagation()
     setIsDropdownOpen(false)
@@ -182,12 +241,6 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
     setIsDropdownOpen(false)
     setIsCommentModalOpen(true)
   }, [])
-
-  const handleDeleteClick = useCallback((e) => {
-    e.stopPropagation()
-    setIsDropdownOpen(false)
-    if (onDelete) onDelete()
-  }, [onDelete])
 
   return (
     <div 
@@ -241,66 +294,6 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
                     title={row.parse_failure_reason || 'Resume could not be parsed'}
                   >
                     Parse Failed
-                  </span>
-                )}
-                {/* Market availability status indicator */}
-                {row.market_status && row.market_status !== 'open_to_work' && (
-                  <span
-                    className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded cursor-pointer"
-                    style={{
-                      backgroundColor: row.market_status === 'not_available' ? '#fee2e2'
-                        : row.market_status === 'available_higher_rate' ? '#fef3c7'
-                        : row.market_status === 'passive' ? '#e0e7ff'
-                        : '#dcfce7',
-                      color: row.market_status === 'not_available' ? '#991b1b'
-                        : row.market_status === 'available_higher_rate' ? '#92400e'
-                        : row.market_status === 'passive' ? '#4338ca'
-                        : '#166534',
-                    }}
-                    title={row.market_status_note || row.market_status.replace(/_/g, ' ')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      const newStatus = prompt(
-                        'Set market status:\n- open_to_work\n- not_available\n- available_higher_rate\n- passive\n- actively_looking',
-                        row.market_status
-                      )
-                      if (newStatus) {
-                        import('../services/api').then(({ api }) => {
-                          api.patch(`/candidates/${row.id}`, { market_status: newStatus })
-                            .then(() => window.location.reload())
-                            .catch(err => alert('Failed: ' + err.message))
-                        })
-                      }
-                    }}
-                  >
-                    {row.market_status === 'not_available' ? '⊘ Unavailable'
-                      : row.market_status === 'available_higher_rate' ? '$ Higher Rate'
-                      : row.market_status === 'passive' ? '◑ Passive'
-                      : row.market_status === 'actively_looking' ? '★ Active'
-                      : row.market_status.replace(/_/g, ' ')}
-                  </span>
-                )}
-                {(!row.market_status || row.market_status === 'open_to_work') && (
-                  <span
-                    className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded cursor-pointer"
-                    style={{ backgroundColor: '#dcfce7', color: '#166534' }}
-                    title="Open to work — click to change status"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      const newStatus = prompt(
-                        'Set market status:\n- open_to_work\n- not_available\n- available_higher_rate\n- passive\n- actively_looking',
-                        'open_to_work'
-                      )
-                      if (newStatus && newStatus !== 'open_to_work') {
-                        import('../services/api').then(({ api }) => {
-                          api.patch(`/candidates/${row.id}`, { market_status: newStatus })
-                            .then(() => window.location.reload())
-                            .catch(err => alert('Failed: ' + err.message))
-                        })
-                      }
-                    }}
-                  >
-                    ✓ Open
                   </span>
                 )}
               </div>
@@ -422,7 +415,7 @@ export default function ProfileCard({ row, checked, downloaded, onToggle, onOpen
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? colors.card : '#f9fafb'}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  Send Mail
+                  Send Email
                 </button>
                 {hasResume ? (
                   <>

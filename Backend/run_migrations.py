@@ -130,6 +130,22 @@ def migrate():
             add_column(conn, "job_applications", "application_status", "VARCHAR(50)", "'applied'")
             add_column(conn, "job_applications", "applied_at", "TIMESTAMPTZ", "NOW()")
             add_column(conn, "job_applications", "updated_at", "TIMESTAMPTZ", "NOW()")
+            # Legacy alias columns used by the admin /job-applications endpoint
+            add_column(conn, "job_applications", "email", "VARCHAR(255)")
+            add_column(conn, "job_applications", "phone", "VARCHAR(50)")
+            add_column(conn, "job_applications", "status", "VARCHAR(50)")
+            add_column(conn, "job_applications", "submitted_at", "TIMESTAMPTZ")
+            add_column(conn, "job_applications", "qualification", "TEXT")
+            add_column(conn, "job_applications", "work_authorization", "VARCHAR(100)")
+            add_column(conn, "job_applications", "tech_experience", "TEXT")
+            add_column(conn, "job_applications", "domain_expert", "TEXT")
+            add_column(conn, "job_applications", "first_name", "VARCHAR(255)")
+            add_column(conn, "job_applications", "last_name", "VARCHAR(255)")
+            add_column(conn, "job_applications", "address", "TEXT")
+            add_column(conn, "job_applications", "education", "TEXT")
+            add_column(conn, "job_applications", "citizenship", "VARCHAR(100)")
+            add_column(conn, "job_applications", "experience", "INTEGER")
+            add_column(conn, "job_applications", "linkedin_url", "TEXT")
 
         print("\n=== Checking saved_jobs table ===")
         if not table_exists(conn, "saved_jobs"):

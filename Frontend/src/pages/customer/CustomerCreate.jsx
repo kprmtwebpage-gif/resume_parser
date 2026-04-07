@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { createCustomer, uploadDocuments } from '../../services/customerApi'
 import { listEmailTemplates } from '../../services/emailApi'
 import CreateTemplateModal from '../../components/email/CreateTemplateModal'
@@ -12,10 +12,12 @@ const SALUTATIONS = ['Mr.', 'Mrs.', 'Ms.', 'Miss', 'Dr.']
 
 export default function CustomerCreate() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [saving, setSaving] = useState(false)
 
   // Basic details
   const [customerType, setCustomerType] = useState('Business')
+  const [entityType, setEntityType] = useState(searchParams.get('type') || 'client')  // client | vendor | own_company | candidate
   const [salutation, setSalutation] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -115,6 +117,14 @@ export default function CustomerCreate() {
       )
     : countryCodes
 
+  const entityLabel = entityType === 'vendor'
+    ? 'Vendor'
+    : entityType === 'own_company' || entityType === 'own'
+    ? 'Own Company'
+    : entityType === 'candidate'
+    ? 'Candidate'
+    : 'Client'
+
   const handleFileSelect = (e) => {
     const newFiles = Array.from(e.target.files)
     const total = files.length + newFiles.length
@@ -212,6 +222,7 @@ export default function CustomerCreate() {
 
       const customer = await createCustomer({
         customer_type: customerType,
+        entity_type: entityType,
         salutation: salutation || null,
         first_name: firstName || null,
         last_name: lastName || null,
@@ -250,17 +261,17 @@ export default function CustomerCreate() {
           {/* Breadcrumb */}
           <div style={{ marginBottom: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span
-              onClick={() => navigate('/customer')}
+              onClick={() => navigate(`/customer?type=${entityType}`)}
               style={{ color: '#2563eb', cursor: 'pointer', fontWeight: 500 }}
             >
-              Customer
+              {entityLabel}
             </span>
             <span style={{ color: '#94a3b8' }}>/</span>
-            <span style={{ color: '#64748b' }}>New Customer</span>
+            <span style={{ color: '#64748b' }}>{`New ${entityLabel}`}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
-              New Customer
+              {`New ${entityLabel}`}
             </h1>
             <button
               onClick={() => { if (window.history.length > 1) navigate(-1); else navigate('/customer'); }}
@@ -525,7 +536,8 @@ export default function CustomerCreate() {
                 onTogglePreview={(id) => setPreviewTemplateId(prev => prev === id ? null : id)}
                 onPreviewClick={(t) => setPreviewTemplate(t)}
                 onCreateClick={() => setShowCreateTemplate(true)}
-              />
+                onDeleted={loadTemplates}
+                />
             )}
           </div>
         </div>

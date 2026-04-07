@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   fetchCustomers, fetchCustomer, updateCustomer, deleteCustomer,
   cloneCustomer, uploadDocuments, deleteDocument, fetchActivities,
-  updateContactPerson, deleteContactPerson,
+  updateContactPerson, deleteContactPerson, updateCustomerStatus,
 } from '../../services/customerApi'
 import { getCPTemplates } from '../../services/emailApi'
 import TemplateAssignModal from '../../components/email/TemplateAssignModal'
@@ -12,6 +12,9 @@ import SendToHRModal from '../../components/email/SendToHRModal'
 export default function CustomerDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const entityTypeFromUrl = searchParams.get('type') || null
+  const [entityType, setEntityType] = useState(entityTypeFromUrl || 'client')
 
   // State
   const [customer, setCustomer] = useState(null)
@@ -22,9 +25,6 @@ export default function CustomerDetail() {
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [attachPopup, setAttachPopup] = useState(false)
-  const [editing, setEditing] = useState(false)
-  const [editData, setEditData] = useState({})
-  const [saving, setSaving] = useState(false)
 
   const [templateModalCP, setTemplateModalCP] = useState(null)
   const [sendEmailCP, setSendEmailCP] = useState(null)
@@ -32,15 +32,23 @@ export default function CustomerDetail() {
   const [editingCP, setEditingCP] = useState(null)
   const [editCPData, setEditCPData] = useState({})
   const [savingCP, setSavingCP] = useState(false)
+  const [togglingStatus, setTogglingStatus] = useState(false)
 
   const moreRef = useRef(null)
   const filterRef = useRef(null)
   const attachRef = useRef(null)
 
+  const entityLabel = entityType === 'vendor'
+    ? 'Vendor'
+    : entityType === 'own_company' || entityType === 'own'
+    ? 'Own Company'
+    : entityType === 'candidate'
+    ? 'Candidate'
+    : 'Client'
   const filterLabels = {
-    all: 'All Customers',
-    active: 'Active Customers',
-    inactive: 'Inactive Customers',
+    all: `All ${entityLabel}s`,
+    active: `Active ${entityLabel}s`,
+    inactive: `Inactive ${entityLabel}s`,
   }
 
   const loadList = useCallback(async () => {
@@ -48,29 +56,41 @@ export default function CustomerDetail() {
       const data = await fetchCustomers({
         search: search || undefined,
         status: filterStatus === 'all' ? undefined : filterStatus,
+        entityType,
         sortBy: 'created_at', sortOrder: 'desc',
       })
       setCustomers(data)
     } catch (err) {
       console.error('Failed to load customers list:', err)
     }
-  }, [search, filterStatus])
+  }, [search, filterStatus, entityType])
 
   const loadDetail = useCallback(async () => {
     if (!id) return
     setLoading(true)
     try {
       const data = await fetchCustomer(id)
+      if (entityTypeFromUrl && data?.entity_type && data.entity_type !== entityTypeFromUrl) {
+        navigate(`/customer?type=${entityTypeFromUrl}`, { replace: true })
+        return
+      }
       setCustomer(data)
     } catch (err) {
       console.error('Failed to load customer:', err)
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }, [id, entityTypeFromUrl, navigate])
 
   useEffect(() => { loadList() }, [loadList])
   useEffect(() => { loadDetail() }, [loadDetail])
+
+  // Sync entityType from loaded customer when no URL param present
+  useEffect(() => {
+    if (customer?.entity_type && !entityTypeFromUrl) {
+      setEntityType(customer.entity_type)
+    }
+  }, [customer, entityTypeFromUrl])
 
   // Load template counts for each contact person
   const refreshTemplateCounts = useCallback(async () => {
@@ -103,7 +123,7 @@ export default function CustomerDetail() {
     if (!window.confirm(`Delete customer "${customer.display_name}"?`)) return
     try {
       await deleteCustomer(id)
-      navigate('/customer')
+      navigate(`/customer?type=${entityType}`)
     } catch (err) {
       alert('Failed to delete customer')
     }
@@ -113,34 +133,27 @@ export default function CustomerDetail() {
     try {
       const cloned = await cloneCustomer(id)
       setMoreOpen(false)
-      navigate(`/customer/${cloned.id}`)
+      navigate(`/customer/${cloned.id}?type=${entityType}`)
     } catch (err) {
       alert('Failed to clone customer')
     }
   }
 
   const handleEdit = () => {
-    setEditData({
-      display_name: customer.display_name,
-      email: customer.email || '',
-      phone: customer.phone || '',
-      company_name: customer.company_name || '',
-      customer_type: customer.customer_type,
-    })
-    setEditing(true)
-    setMoreOpen(false)
+    navigate(`/customer/${id}/edit?type=${entityType}`)
   }
 
-  const handleSaveEdit = async () => {
-    setSaving(true)
+  const handleStatusToggle = async () => {
+    if (!customer) return
+    const newStatus = customer.is_active ? 'inactive' : 'active'
+    setTogglingStatus(true)
     try {
-      const updated = await updateCustomer(id, editData)
-      setCustomer(updated)
-      setEditing(false)
+      await updateCustomerStatus(id, newStatus)
+      await loadDetail()
     } catch (err) {
-      alert('Failed to update customer')
+      alert('Failed to update status')
     } finally {
-      setSaving(false)
+      setTogglingStatus(false)
     }
   }
 
@@ -208,7 +221,7 @@ export default function CustomerDetail() {
             )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={() => navigate('/customer/new')}
+            <button onClick={() => navigate(`/customer/new?type=${entityType}`)}
               style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', width: '28px', height: '28px', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               +
             </button>
@@ -220,7 +233,7 @@ export default function CustomerDetail() {
           {customers.map((c) => (
             <div
               key={c.id}
-              onClick={() => navigate(`/customer/${c.id}`)}
+              onClick={() => navigate(`/customer/${c.id}?type=${entityType}`)}
               style={{
                 padding: '12px 14px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
                 backgroundColor: c.id === id ? '#eff6ff' : '#fff',
@@ -269,6 +282,10 @@ export default function CustomerDetail() {
                 <button onClick={handleEdit}
                   style={{ padding: '7px 18px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#fff', color: '#374151', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>
                   Edit
+                </button>
+                <button onClick={handleStatusToggle} disabled={togglingStatus}
+                  style={{ padding: '7px 18px', border: 'none', borderRadius: '6px', backgroundColor: customer?.is_active ? '#fef2f2' : '#f0fdf4', color: customer?.is_active ? '#dc2626' : '#16a34a', fontSize: '13px', fontWeight: 500, cursor: togglingStatus ? 'not-allowed' : 'pointer', opacity: togglingStatus ? 0.6 : 1 }}>
+                  {togglingStatus ? '...' : (customer?.is_active ? 'Deactivate' : 'Activate')}
                 </button>
 
                 {/* Attachments badge */}
@@ -351,7 +368,7 @@ export default function CustomerDetail() {
                 </div>
 
                 {/* Close button */}
-                <button onClick={() => navigate('/customer')}
+                <button onClick={() => navigate(`/customer?type=${entityType}`)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: '#9ca3af', padding: '4px' }}>
                   &#10005;
                 </button>
@@ -370,45 +387,7 @@ export default function CustomerDetail() {
                 )}
 
                 {/* Edit form */}
-                {editing ? (
-                  <div style={{ marginBottom: '24px' }}>
-                    <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#6b7280', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Edit Customer</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div>
-                        <label style={labelStyle}>Display Name</label>
-                        <input type="text" value={editData.display_name} onChange={(e) => setEditData(prev => ({ ...prev, display_name: e.target.value }))}
-                          style={editInputStyle} />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Company Name</label>
-                        <input type="text" value={editData.company_name} onChange={(e) => setEditData(prev => ({ ...prev, company_name: e.target.value }))}
-                          style={editInputStyle} />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Email</label>
-                        <input type="email" value={editData.email} onChange={(e) => setEditData(prev => ({ ...prev, email: e.target.value }))}
-                          style={editInputStyle} />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Phone</label>
-                        <input type="text" value={editData.phone} onChange={(e) => setEditData(prev => ({ ...prev, phone: e.target.value }))}
-                          style={editInputStyle} />
-                      </div>
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                        <button onClick={handleSaveEdit} disabled={saving}
-                          style={{ padding: '8px 20px', backgroundColor: saving ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                          {saving ? 'Saving...' : 'Save'}
-                        </button>
-                        <button onClick={() => setEditing(false)}
-                          style={{ padding: '8px 20px', backgroundColor: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* Contact info card */}
+                {/* Contact info card */}
                     <div style={{ marginBottom: '24px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '12px' }}>
                         <div style={{
@@ -448,7 +427,6 @@ export default function CustomerDetail() {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         <DetailRow label="Customer Type" value={customer.customer_type} />
-                        <DetailRow label="Default Currency" value={customer.currency || 'INR'} />
                         <DetailRow label="Status" value={customer.is_active ? 'Active' : 'Inactive'} valueColor={customer.is_active ? '#16a34a' : '#dc2626'} />
                       </div>
                     </div>
@@ -548,13 +526,11 @@ export default function CustomerDetail() {
                         </h3>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        <DetailRow label="Customer ID" value={customer.customer_id} />
+                        <DetailRow label={`${entityLabel} ID`} value={customer.customer_id} />
                         <DetailRow label="Created On" value={formatDate(customer.created_at)} />
                         <DetailRow label="Created By" value={customer.created_by || '-'} />
                       </div>
                     </div>
-                  </>
-                )}
               </div>
 
               {/* Right panel - Activity Timeline */}
@@ -624,7 +600,7 @@ export default function CustomerDetail() {
         />
       )}
 
-      {/* Send Email to HR Modal */}
+      {/* Submit Profile to Client Modal */}
       {sendEmailCP && (
         <SendToHRModal
           contactPerson={sendEmailCP}

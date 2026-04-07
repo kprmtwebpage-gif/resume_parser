@@ -289,27 +289,6 @@ _BAD_CITY_TOKENS: frozenset[str] = frozenset({
     "server", "administration", "central", "support", "alcatel",
     "lucent", "sprint", "comcast", "delivery", "strategy",
     "force", "type", "visit", "enterprise",
-    # ── Phase-14: networking / protocol / infrastructure terms ──
-    "bgp", "ospf", "eigrp", "mpls", "vlan", "vxlan", "stp", "rstp",
-    "hsrp", "vrrp", "glbp", "routing", "switching", "firewall",
-    "vpn", "ipsec", "ssl", "tls", "tcp", "udp", "dns", "dhcp",
-    "snmp", "netflow", "sflow", "ntp", "sip", "voip",
-    "wan", "lan", "wlan", "sdwan", "sd-wan",
-    "cisco", "juniper", "arista", "fortinet", "meraki",
-    "nexus", "catalyst", "panorama", "ngfw",
-    "nac", "radius", "tacacs", "tacacs+",
-    "wireshark", "solarwinds", "nagios", "prtg",
-    "vmware", "esxi", "nsx", "hypervisor",
-    # ── Phase-14: additional tech/process terms ──
-    "workflow", "pipeline", "module", "component", "interface",
-    "integration", "migration", "deployment", "configuration",
-    "optimization", "monitoring", "logging", "alerting",
-    "governance", "compliance", "regulatory", "audit",
-    "encryption", "authentication", "authorization",
-    "frontend", "backend", "fullstack", "full-stack",
-    "database", "datawarehouse", "datalake", "lakehouse",
-    "reporting", "dashboard", "visualization",
-    "batch", "streaming", "processing", "ingestion",
 })
 
 # Single tokens that are valid city *prefixes* (part of multi-word names) but never
@@ -332,7 +311,7 @@ def _is_plausible_city(raw: str) -> bool:
     if len(s) > 45:
         return False
     tokens = [t for t in s.split() if t]
-    if not (1 <= len(tokens) <= 4):
+    if not (1 <= len(tokens) <= 6):
         return False
     normed = {_norm_tok(t) for t in tokens}
     if normed & _BAD_CITY_TOKENS:
@@ -415,11 +394,10 @@ _SECTION_HEADING_RE = re.compile(
     r"(?i)^\s*(?:"
     r"technical\s+skills?|skills?\s*(?:summary|profile)?|core\s+(?:skills?|competencies)|"
     r"key\s+skills?|expertise(?:\s+snapshot)?|competencies|technologies|"
-    r"(?:professional\s+)?summary|overview|profile|"
     r"(?:professional\s+)?(?:work\s+)?experience|work\s+history|employment(?:\s+history)?|"
     r"education(?:\s+background)?|academic\s+background|academics?|"
     r"certifications?|licenses?|projects?|training|courses?|awards?"
-    r")\s*:?\s*$",
+    r")\s*$",
     re.IGNORECASE,
 )
 
@@ -499,9 +477,6 @@ def _try_parse_line(line: str) -> LocationResult | None:
         return None
 
     # Split on separator glyphs and try each segment (some headers use | ◇ •)
-    # Normalise non-standard separator glyphs (PDF bullet characters rendered as
-    # Unicode letters, e.g. U+00F2 ò used in place of • or |) before splitting.
-    ln = re.sub(r"[\u00f2\u00f3\u00e2\u00e3\u25a0\u25cf\u2022]", "|", ln)
     if any(sep in ln for sep in ["|", "◇", "·", "•", "∙"]):
         segments = [s.strip() for s in re.split(r"[|◇·•∙]", ln) if s.strip()]
         for seg in reversed(segments):
@@ -513,24 +488,8 @@ def _try_parse_line(line: str) -> LocationResult | None:
     return _parse_fragment(ln)
 
 
-# Matches: "Washington D.C.", "Washington, D.C.", "Washington DC", "Washington, DC"
-_WASHINGTON_DC_RE = re.compile(
-    r"(?i)\bwashington\s*,?\s*d\.?c\.?\b"
-)
-
-
 def _parse_fragment(frag: str) -> LocationResult | None:
     """Run all regex patterns against a single text fragment."""
-    # ── Special case: Washington D.C. ─────────────────────────────────────────
-    if _WASHINGTON_DC_RE.search(frag):
-        return LocationResult(
-            city="Washington",
-            state="District of Columbia",
-            country="United States",
-            confidence="high",
-            source="header_regex",
-        )
-
     # ── City, ST ZIP ─────────────────────────────────────────────────────────
     m = re.search(
         r"\b([A-Za-z][A-Za-z .'\-]{1,}),?\s*(?:" + "|".join(sorted(_US_STATE_ABBR_SET)) + r")\b\s*\d{5}",
@@ -1016,7 +975,19 @@ def detect_location_from_phone(phone: str) -> LocationResult | None:
     national = digits
     if len(digits) == 11 and digits.startswith("1"):
         national = digits[1:]
-    if len(national) < 10:
+    # A valid NANP national number is exactly 10 digits.
+    # Numbers with more digits after stripping are international (e.g., +91 India,
+    # +44 UK, +61 Australia) — their leading digits must NOT be treated as US area codes.
+    # e.g., "+91 9176456033" → raw "919176456033" (12 digits) → area "919" = Raleigh, NC (WRONG).
+    if len(national) != 10:
+        return None
+
+    # NANP structural validation: the exchange (digits 4-6, i.e. national[3:6])
+    # must start with 2-9 (never 0 or 1).  This is a strict NANP standard.
+    # Without this guard, Indian 10-digit mobile numbers whose area-code portion
+    # happens to be in _AREA_CODE_MAP are misidentified as US numbers.
+    # e.g. "9360878880": exchange "087" starts with 0 → invalid NANP → return None.
+    if national[3] in "01":
         return None
 
     area = national[:3]
@@ -1074,10 +1045,18 @@ def detect_location_with_fallback(
             r["source"] = "fulltext_regex"
             return r
 
-    # ── Tier 3 : low-confidence header result (country/state-only) ──────────
-    # Phone area-code inference removed: it maps only US NANP area codes and is
-    # unreliable (area codes don't reflect where someone currently lives).
-    # Employer location fallback is handled upstream in parser.py instead.
+    # ── Tier 3 : phone area code ──────────────────────────────────────────────
+    # Try phone BEFORE accepting a low-confidence header result.  Low-confidence
+    # spaCy results (source="header_spacy") are often false positives — tech
+    # terms like "Maven", "Sqoop", person names, etc.  The phone area-code
+    # lookup is more reliable in those cases.
+    if phone:
+        phone_result = detect_location_from_phone(phone)
+        if phone_result:
+            return phone_result
+
+    # Tier-1 low (header regex found something but just country / state-only):
+    # Only used when phone fallback is unavailable.
     if result:
         return result
 

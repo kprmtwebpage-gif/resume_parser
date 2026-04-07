@@ -26,9 +26,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
+    if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED' || error.code === 'ERR_CONNECTION_CLOSED') {
+      const serverUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
       const customError = new Error(
-        'Cannot connect to backend server. Please ensure the FastAPI server is running on http://localhost:8000'
+        `Cannot connect to backend server. Please ensure the API server is running on ${serverUrl}`
       )
       customError.isNetworkError = true
       return Promise.reject(customError)

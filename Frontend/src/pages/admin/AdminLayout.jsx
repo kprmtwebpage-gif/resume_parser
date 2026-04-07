@@ -5,7 +5,7 @@ import { useTheme } from '../../contexts/ThemeContext'
 import {
   Users, Clock, FileText,
   Menu, Home, ChevronLeft, ChevronDown, ArrowLeft, RefreshCw, Bell,
-  LayoutDashboard, Upload, BarChart3,
+  LayoutDashboard, Upload, BarChart3, Mail,
 } from 'lucide-react'
 import { api } from '../../services/api'
 import companyLogo from '../../assets/company-logo.png'
@@ -38,12 +38,15 @@ export default function AdminLayout() {
   const dashboardSubmenus = [
     { path: '/admin', label: 'Overview', icon: Home },
     { path: '/admin/upload-metrics', label: 'Upload Metrics', icon: Upload },
+    { path: '/admin/email-tracking', label: 'Email Tracking', icon: Mail },
   ]
 
   const menuItems = [
     { path: '/admin/users', label: 'Users', icon: Users },
     { path: '/admin/activity', label: 'Activity Logs', icon: Clock },
     { path: '/admin/upload-log', label: 'Upload Log', icon: FileText },
+    { path: '/admin/email-templates', label: 'Email Templates', icon: Mail },
+    { path: '/admin/candidate-templates', label: 'Candidate Templates', icon: FileText },
   ]
 
   const isActive = (path) => {

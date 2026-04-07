@@ -8,14 +8,20 @@ import Pagination from '../components/Pagination.jsx'
 import ProfileModal from '../components/ProfileModal.jsx'
 import EditProfileModal from '../components/EditProfileModal.jsx'
 
-import { fetchCandidateById, fetchCandidates, updateCandidate, bulkDownloadResumes } from '../services/api.js'
+import { api, fetchCandidateById, fetchCandidates, updateCandidate, bulkDownloadResumes } from '../services/api.js'
 import { apiUrl } from '../config.js'
 import { onCandidateSelected } from '../chatbot/candidateEvents.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 
 export default function SearchPeople() {
   const { colors, isDark } = useTheme()
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
+  const isSuperAdmin = user?.role === 'superuser'
+  const [toast, setToast] = useState(null)
+  const showToast = useCallback((message, type = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 5000)
+  }, [])
   const [filters, setFilters] = useState({
     name: '',
     location: '',
@@ -56,6 +62,10 @@ export default function SearchPeople() {
   // Multi-select export state
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [exporting, setExporting] = useState(false)
+
+  // Bulk delete UI state (super admin only)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   // Client-side filtering based on search text, unique profiles, job titles, names, and locations (OR logic)
   const filteredRows = useMemo(() => {
@@ -152,7 +162,6 @@ export default function SearchPeople() {
         keywords: filters.keywords || undefined,
         experienceFrom: filters.experienceFrom ?? undefined,
         experienceTo: filters.experienceTo ?? undefined,
-        limit: 10000,
         offset: 0 
       })
       const nextRows = Array.isArray(data) ? data : Array.isArray(data?.candidates) ? data.candidates : []
@@ -331,6 +340,56 @@ export default function SearchPeople() {
     }
   }, [selectedIds])
 
+  const handleOpenBulkDelete = useCallback(() => {
+    if (!isSuperAdmin) return
+    if (selectedIds.size === 0) return
+    setBulkDeleteOpen(true)
+  }, [isSuperAdmin, selectedIds])
+
+  const handleConfirmBulkDelete = useCallback(async () => {
+    if (!isSuperAdmin) {
+      showToast('Super Admin access required', 'error')
+      setBulkDeleteOpen(false)
+      return
+    }
+
+    const ids = [...selectedIds]
+    if (ids.length === 0) {
+      setBulkDeleteOpen(false)
+      return
+    }
+
+    setBulkDeleting(true)
+    try {
+      const res = await api.post('/candidates/bulk-delete', { ids })
+      const deletedIds = Array.isArray(res?.data?.deleted_ids) ? res.data.deleted_ids : ids
+      const deletedSet = new Set(deletedIds)
+
+      setAllRows(prev => prev.filter(r => !deletedSet.has(r.id)))
+      setAllProfilesCache(prev => prev.filter(r => !deletedSet.has(r.id)))
+      setSelectedIds(new Set())
+
+      if (activeId != null && deletedSet.has(activeId)) {
+        setModalOpen(false)
+        setActiveId(null)
+        setActiveCandidate(null)
+        setActiveTab('skills')
+      }
+      if (editCandidate?.id != null && deletedSet.has(editCandidate.id)) {
+        setEditModalOpen(false)
+        setEditCandidate(null)
+      }
+
+      showToast('Selected candidates deleted successfully')
+      setBulkDeleteOpen(false)
+    } catch (e) {
+      console.error('Bulk delete failed:', e)
+      showToast(e?.response?.data?.detail || 'Failed to delete selected candidates', 'error')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }, [isSuperAdmin, selectedIds, showToast, activeId, editCandidate])
+
   const handleExportAll = useCallback(async () => {
     const allIds = filteredRows.map(r => r.id)
     if (allIds.length === 0) return
@@ -468,6 +527,33 @@ export default function SearchPeople() {
 
   return (
     <div className="h-screen overflow-hidden">
+      {/* Toast notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed', top: '72px', right: '24px', zIndex: 9999,
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '14px 24px', borderRadius: '10px', maxWidth: '480px',
+          backgroundColor: toast.type === 'error' ? '#fef2f2' : '#ecfdf5',
+          border: `1px solid ${toast.type === 'error' ? '#fca5a5' : '#6ee7b7'}`,
+          color: toast.type === 'error' ? '#991b1b' : '#065f46',
+          fontSize: '14px', fontWeight: 500,
+          boxShadow: '0 10px 40px rgba(0,0,0,0.12)',
+          animation: 'slideInRight 0.3s ease-out',
+        }}>
+          <span style={{ fontSize: '16px', flexShrink: 0 }}>
+            {toast.type === 'error' ? '❌' : '✅'}
+          </span>
+          <span style={{ flex: 1 }}>{toast.message}</span>
+          <button
+            onClick={() => setToast(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#94a3b8', padding: 0, lineHeight: 1 }}
+            aria-label="Close toast"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <SidebarFilters 
         filters={filters} 
         onChange={setFilters} 
@@ -544,24 +630,37 @@ export default function SearchPeople() {
 
               {/* Export Button - Admin only, visible only when items selected */}
               <div className="ml-auto flex items-center gap-2">
+                {isSuperAdmin && selectedIds.size > 0 && (
+                  <button
+                    onClick={handleOpenBulkDelete}
+                    disabled={bulkDeleting}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3m-4 0h14" />
+                    </svg>
+                    Delete Selected
+                  </button>
+                )}
+
                 {isAdmin && selectedIds.size > 0 && (
-                <button
-                  onClick={handleExportSelected}
-                  disabled={exporting}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {exporting ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                      Exporting…
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                      Export Selected ({selectedIds.size})
-                    </>
-                  )}
-                </button>
+                  <button
+                    onClick={handleExportSelected}
+                    disabled={exporting}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {exporting ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                        Exporting…
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                        Export Selected ({selectedIds.size})
+                      </>
+                    )}
+                  </button>
                 )}
               </div>
 
@@ -645,6 +744,55 @@ export default function SearchPeople() {
         onSave={handleSaveProfile}
         saving={saving}
       />
+
+      {/* Bulk delete confirmation modal (super admin only) */}
+      {bulkDeleteOpen && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" />
+          <div
+            className="relative w-full max-w-md rounded-lg border p-6"
+            style={{ backgroundColor: colors.background, borderColor: colors.border }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-delete-title"
+          >
+            <h2
+              id="bulk-delete-title"
+              className="text-lg font-semibold"
+              style={{ color: colors.text }}
+            >
+              Confirm Bulk Deletion
+            </h2>
+            <p className="mt-3 text-sm" style={{ color: colors.textSecondary || '#6b7280' }}>
+              Are you sure you want to delete the selected candidates?
+              <br />
+              This action cannot be undone.
+            </p>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setBulkDeleteOpen(false)}
+                disabled={bulkDeleting}
+                className="px-4 py-2 text-sm font-medium rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                  color: colors.text,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmBulkDelete}
+                disabled={bulkDeleting}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {bulkDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -13,6 +13,7 @@ const baseNavItems = [
   { label: 'Interviews', path: '/interviews' },
   { label: 'Upload', path: '/upload' },
   { label: 'Customer', path: '/customer' },
+  { label: 'User', path: '/user/email' },
 ]
 
 export default function TopNavbar() {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import EmailBodyField from './EmailBodyField'
 import TemplatePickerModal from './TemplatePickerModal'
-import { sendEmail, sendEmailWithAttachments, getSenderInfo } from '../../services/emailApi'
+import { sendEmail, sendEmailWithAttachments, getSenderInfo, getEmailSettings, logSentEmail } from '../../services/emailApi'
 import { prepareEmailHtml } from '../../services/emailHtmlUtils'
 import { fetchCandidateById } from '../../services/api'
 
@@ -9,16 +10,43 @@ const MAX_FILES = 5
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 
 /**
- * Replace {{variable}} placeholders in a string with candidate data.
+ * Detect email provider from an email address domain.
  */
-function replaceTemplateVars(html, candidate, fallbackName) {
+function getEmailProvider(email) {
+  if (!email) return 'default'
+  const domain = email.toLowerCase()
+  if (domain.includes('@gmail.com') || domain.includes('@googlemail.com')) return 'gmail'
+  if (domain.includes('@zohomail.in') || domain.includes('@zoho.com')) return 'zoho'
+  if (domain.includes('@outlook.com') || domain.includes('@hotmail.com') || domain.includes('@live.com') || domain.includes('@office365.com')) return 'outlook'
+  return 'default'
+}
+
+const providerTheme = {
+  gmail:   { bg: '#fdecea', border: '#f5c2c7', text: '#d93025', badgeBg: '#d93025', badgeText: '#fff' },
+  zoho:    { bg: '#e7f5ec', border: '#b7e4c7', text: '#1b7f3b', badgeBg: '#1b7f3b', badgeText: '#fff' },
+  outlook: { bg: '#e7f0ff', border: '#b6d4fe', text: '#0b5ed7', badgeBg: '#0b5ed7', badgeText: '#fff' },
+  default: { bg: '#f8f9fa', border: '#dee2e6', text: '#495057', badgeBg: '#6c757d', badgeText: '#fff' },
+}
+
+/**
+ * Replace {{variable}} placeholders in a string with candidate data.
+ * Handles both snake_case ({{candidate_name}}) and space-separated ({{Candidate Name}}) formats.
+ * @param {string} html
+ * @param {object} candidate
+ * @param {string} fallbackName
+ * @param {object} extraData - { clientName, jobTitle, yourName }
+ */
+function replaceTemplateVars(html, candidate, fallbackName, extraData = {}) {
   if (!html) return ''
+
   const c = candidate || {}
   const expYears = c.experience?.years_of_experience
     ? `${c.experience.years_of_experience} years` : ''
   const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || fallbackName || ''
+  const jobTitle = c.job_title || c.title || c.current_title || extraData.jobTitle || ''
 
   const vars = {
+    // snake_case variants
     candidate_name: name,
     phone: c.phone || (c.phones && c.phones[0]) || '',
     email: c.email || (c.emails && c.emails[0]) || '',
@@ -39,15 +67,66 @@ function replaceTemplateVars(html, candidate, fallbackName) {
     submittal_type: c.submittal_type || '',
     willingness_to_relocate: c.willingness_to_relocate || '',
     ssn_last4: c.ssn_last4 || '',
+    // Human-readable / space-separated variants (title case templates)
+    'candidate name': name,
+    'client name': extraData.clientName || '',
+    'job title': jobTitle,
+    'your name': extraData.yourName || '',
   }
 
-  let result = html
+  // Build a lookup map keyed by normalized variable name (lowercase, trimmed)
+  const varLookup = {}
   for (const [key, val] of Object.entries(vars)) {
-    const re = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi')
-    result = result.replace(re, val)
+    if (!val) continue
+    varLookup[key.toLowerCase().trim()] = val
+    // Also map underscore variant to the same value
+    varLookup[key.toLowerCase().trim().replace(/\s+/g, '_')] = val
+    // Also map space variant
+    varLookup[key.toLowerCase().trim().replace(/_/g, ' ')] = val
   }
-  // Strip any remaining unresolved {{...}} placeholders
-  result = result.replace(/\{\{\s*\w+\s*\}\}/g, '')
+
+  // Helper: resolve a placeholder key to its value
+  function resolveVar(rawKey) {
+    const k = rawKey.toLowerCase().replace(/[\s\u00a0]+/g, ' ').trim()
+    return varLookup[k] || varLookup[k.replace(/\s+/g, '_')] || null
+  }
+
+  // STEP 1: Normalize HTML-fragmented placeholders
+  // Strip HTML tags + &nbsp; from inside {{ }} so editor artifacts are cleaned
+  let result = html
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
+  result = result.replace(/\{\{((?:[^{}]|<[^>]*>)*?)\}\}/g, (_m, inner) => {
+    const cleaned = inner.replace(/<[^>]*>/g, '').replace(/[\s\u00a0]+/g, ' ').trim()
+    return `{{${cleaned}}}`
+  })
+
+  // STEP 2: Regex-based replacement on the HTML string
+  result = result.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_m, rawKey) => {
+    const val = resolveVar(rawKey)
+    return val != null ? val : _m // keep original if no value
+  })
+
+  // STEP 3: DOMParser fallback — replace within individual text nodes
+  // This handles cases where the regex on raw HTML missed placeholders
+  if (/\{\{[^}]+\}\}/.test(result)) {
+    try {
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(`<div>${result}</div>`, 'text/html')
+      const walker = doc.createTreeWalker(doc.body.firstChild, NodeFilter.SHOW_TEXT)
+      let node
+      while ((node = walker.nextNode())) {
+        let text = node.nodeValue
+        text = text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_m, rawKey) => {
+          const val = resolveVar(rawKey)
+          return val != null ? val : _m
+        })
+        node.nodeValue = text
+      }
+      result = doc.body.firstChild.innerHTML
+    } catch (_e) { /* keep regex result on DOMParser failure */ }
+  }
+
   return result
 }
 
@@ -70,20 +149,27 @@ export default function ActionCenter({
   provider,
   initialSubject,
   initialBody,
+  templateType,
+  recipientType,
+  clientName,
   onBack,
   onSent,
   onToast,
 }) {
+  const navigate = useNavigate()
   const fileInputRef = useRef(null)
   const [subject, setSubject] = useState(initialSubject || '')
   const [body, setBody] = useState(initialBody || '')
+  const [bodyKey, setBodyKey] = useState(0)   // incremented to force EmailBodyField remount on programmatic content set
   const [files, setFiles] = useState([])
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [candidate, setCandidate] = useState(null)
-  const [senderInfo, setSenderInfo] = useState({ gmail: { email: '', configured: false }, outlook: { email: '', configured: false } })
+  const [senderInfo, setSenderInfo] = useState({ gmail: { email: '', configured: false }, outlook: { email: '', configured: false }, zoho: { email: '', configured: false } })
+  const [configuredProviders, setConfiguredProviders] = useState({}) // { gmail: true, outlook: false, zoho: false }
+  const [showNotConfigured, setShowNotConfigured] = useState(false)
   // activeProvider: switchable per session, persists to localStorage
   const [activeProvider, setActiveProvider] = useState(
-    () => provider || localStorage.getItem('emailProvider') || 'gmail'
+    () => provider || localStorage.getItem('emailProvider') || 'outlook'
   )
 
   // Fetch full candidate data on mount for template variable replacement
@@ -96,6 +182,28 @@ export default function ActionCenter({
     return () => { cancelled = true }
   }, [candidateId])
 
+  // Apply variable replacement to initial body/subject once when candidate data loads
+  const hasAppliedInitialRef = useRef(false)
+  useEffect(() => {
+    if (!candidate || hasAppliedInitialRef.current) return
+    if (!initialBody && !initialSubject) return
+    hasAppliedInitialRef.current = true
+    const rp_user = JSON.parse(localStorage.getItem('rp_user') || '{}')
+    const extra = { clientName: clientName || '', yourName: rp_user.username || '' }
+    console.log('[ActionCenter] Applying template vars — candidate:', candidate, 'candidateName:', candidateName, 'extra:', extra)
+    if (initialSubject) {
+      const newSubject = replaceTemplateVars(initialSubject, candidate, candidateName, extra)
+      console.log('[ActionCenter] Subject before:', initialSubject, '→ after:', newSubject)
+      setSubject(newSubject)
+    }
+    if (initialBody) {
+      const newBody = replaceTemplateVars(initialBody, candidate, candidateName, extra)
+      console.log('[ActionCenter] Body replaced, placeholders remaining:', (newBody.match(/\{\{[^}]+\}\}/g) || []))
+      setBody(newBody)
+      setBodyKey(k => k + 1)
+    }
+  }, [candidate]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch sender info (configured "from" emails) on mount
   useEffect(() => {
     let cancelled = false
@@ -105,10 +213,36 @@ export default function ActionCenter({
     return () => { cancelled = true }
   }, [])
 
+  // Fetch which providers are configured by the user
+  useEffect(() => {
+    let cancelled = false
+    getEmailSettings()
+      .then(data => {
+        if (!cancelled) {
+          const map = {}
+          data.forEach(s => { map[s.provider] = s.is_connected })
+          setConfiguredProviders(map)
+        }
+      })
+      .catch(err => console.warn('Could not fetch email settings:', err))
+    return () => { cancelled = true }
+  }, [])
+
   const handleProviderChange = useCallback((p) => {
+    // Outlook uses web compose — no SMTP config needed
+    if (p === 'outlook') {
+      setActiveProvider(p)
+      localStorage.setItem('emailProvider', p)
+      return
+    }
+    // Check if provider is configured
+    if (!configuredProviders[p] && !senderInfo[p]?.configured) {
+      setShowNotConfigured(p)
+      return
+    }
     setActiveProvider(p)
     localStorage.setItem('emailProvider', p)
-  }, [])
+  }, [configuredProviders, senderInfo])
 
   /* ── File attachments ────────────────────────────────────────── */
   const handleFileSelect = useCallback((e) => {
@@ -147,6 +281,102 @@ export default function ActionCenter({
   }
 
   const [sending, setSending] = useState(false)
+  const [outlookModal, setOutlookModal] = useState({ open: false, status: 'copied' }) // status: 'copied' | 'fallback'
+  const [outlookConfirm, setOutlookConfirm] = useState(false) // confirmation popup after user returns
+  const outlookUrlRef = useRef('')
+  const outlookFlowActiveRef = useRef(false)
+
+  // Detect when user returns to the app after Outlook tab
+  useEffect(() => {
+    const onFocus = () => {
+      if (outlookFlowActiveRef.current) {
+        outlookFlowActiveRef.current = false
+        setOutlookConfirm(true)
+      }
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  /* ── Prepare Outlook: copy HTML, store URL, show modal ──────── */
+  const handleOutlookWebCompose = useCallback(async () => {
+    // prepareEmailHtml returns a full <!DOCTYPE html>…</html> document (for SMTP).
+    // For clipboard rich-paste we need ONLY the inner body HTML wrapped in a <div>.
+    const fullDoc = prepareEmailHtml(body)
+    const bodyMatch = fullDoc.match(/<body[^>]*>([\s\S]*)<\/body>/i)
+    const innerHtml = bodyMatch ? bodyMatch[1] : body
+    const richHtml = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1e293b;">${innerHtml}</div>`
+
+    // Copy as rich HTML using ClipboardItem + text/html MIME type
+    let copied = false
+    try {
+      const htmlBlob = new Blob([richHtml], { type: 'text/html' })
+      const textBlob = new Blob([richHtml], { type: 'text/plain' })
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': htmlBlob,
+          'text/plain': textBlob,
+        }),
+      ])
+      copied = true
+    } catch (clipErr) {
+      console.warn('[ActionCenter] ClipboardItem write failed:', clipErr)
+      // Fallback: execCommand('copy') via hidden contentEditable div (preserves rich HTML)
+      try {
+        const div = document.createElement('div')
+        div.contentEditable = 'true'
+        div.innerHTML = richHtml
+        div.style.position = 'fixed'
+        div.style.left = '-9999px'
+        div.style.top = '-9999px'
+        div.style.opacity = '0'
+        document.body.appendChild(div)
+        const range = document.createRange()
+        range.selectNodeContents(div)
+        const sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(range)
+        document.execCommand('copy')
+        sel.removeAllRanges()
+        document.body.removeChild(div)
+        copied = true
+      } catch (fallbackErr) {
+        console.error('[ActionCenter] Fallback rich copy also failed:', fallbackErr)
+      }
+    }
+
+    // If clipboard totally failed — download .html file as last resort
+    if (!copied) {
+      try {
+        const blob = new Blob([fullDoc], { type: 'text/html' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `email-${(subject || 'draft').replace(/[^a-z0-9]/gi, '_').slice(0, 40)}.html`
+        a.click()
+        URL.revokeObjectURL(a.href)
+      } catch (dlErr) {
+        console.error('[ActionCenter] Download fallback failed:', dlErr)
+      }
+    }
+
+    // Store URL — Outlook opens only when user clicks "Got it"
+    outlookUrlRef.current = `https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(candidateEmail)}&subject=${encodeURIComponent(subject)}`
+
+    // Show instruction modal
+    setOutlookModal({ open: true, status: copied ? 'copied' : 'fallback' })
+  }, [body, candidateEmail, subject])
+
+  /* ── "Got it" handler: open Outlook → close modal → wait for return */
+  const handleOutlookGotIt = useCallback(() => {
+    // 1. Open Outlook compose in new tab
+    if (outlookUrlRef.current) {
+      window.open(outlookUrlRef.current, '_blank', 'noopener,noreferrer')
+    }
+    // 2. Close instruction modal
+    setOutlookModal({ open: false, status: 'copied' })
+    // 3. Arm the focus listener so confirmation shows when user returns
+    outlookFlowActiveRef.current = true
+  }, [])
 
   /* ── Send email via SMTP (configured in .env) ─────────────────── */
   const handleSend = useCallback(async () => {
@@ -163,9 +393,17 @@ export default function ActionCenter({
       return
     }
 
+    // Outlook: skip SMTP, open Outlook Web Compose with HTML on clipboard
+    if (activeProvider === 'outlook') {
+      await handleOutlookWebCompose()
+      return
+    }
+
     setSending(true)
     try {
       const emailBody = prepareEmailHtml(body)
+      console.log('[ActionCenter] Sending with provider:', activeProvider)
+      console.log('[ActionCenter] Recipient:', candidateEmail)
 
       let result
       // Send via SMTP (configured in server .env)
@@ -199,12 +437,15 @@ export default function ActionCenter({
       }
     } catch (err) {
       console.error('Failed to send email:', err)
-      const msg = err?.response?.data?.detail || err.message || 'Failed to send email'
+      console.error('Response data:', err?.response?.data)
+      console.error('Response status:', err?.response?.status)
+      const detail = err?.response?.data?.detail
+      const msg = detail || err.message || 'Failed to send email'
       onToast?.({ message: msg, type: 'error' })
     } finally {
       setSending(false)
     }
-  }, [candidateId, candidateEmail, subject, body, files, activeProvider, onToast, onSent])
+  }, [candidateId, candidateEmail, subject, body, files, activeProvider, handleOutlookWebCompose, onToast, onSent])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -237,12 +478,16 @@ export default function ActionCenter({
           </p>
         </div>
 
-        {/* Provider toggle — Gmail / Outlook */}
+        {/* Provider toggle — Gmail / Outlook / Zoho */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: '4px',
           backgroundColor: '#f1f5f9', borderRadius: '8px', padding: '3px',
         }}>
-          {[{ key: 'gmail', label: 'Gmail', color: '#2563eb' }, { key: 'outlook', label: 'Outlook', color: '#0078d4' }].map(({ key, label, color }) => (
+          {[
+            { key: 'outlook', label: 'Outlook', color: '#0078d4' },
+            { key: 'zoho', label: 'Zoho', color: '#16a34a' },
+            { key: 'gmail', label: 'Gmail', color: '#dc2626' },
+          ].map(({ key, label, color }) => (
             <button
               key={key}
               type="button"
@@ -265,67 +510,127 @@ export default function ActionCenter({
       {/* Compose area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
 
+        {/* Not configured popup */}
+        {showNotConfigured && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{
+              backgroundColor: '#fff', borderRadius: '16px', padding: '32px',
+              maxWidth: '420px', width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+            }}>
+              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '12px' }}>📧</div>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+                  Account Not Connected
+                </h3>
+                <p style={{ fontSize: '14px', color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                  Please connect your <strong>{typeof showNotConfigured === 'string' ? showNotConfigured.charAt(0).toUpperCase() + showNotConfigured.slice(1) : ''}</strong> account first to send emails with this provider.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => setShowNotConfigured(false)}
+                  style={{
+                    flex: 1, padding: '10px', fontSize: '14px', fontWeight: 600,
+                    backgroundColor: '#f1f5f9', color: '#475569',
+                    border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer',
+                  }}
+                >Cancel</button>
+                <button
+                  onClick={() => navigate('/user/email-settings')}
+                  style={{
+                    flex: 1, padding: '10px', fontSize: '14px', fontWeight: 600,
+                    backgroundColor: '#0078d4', color: '#fff',
+                    border: 'none', borderRadius: '8px', cursor: 'pointer',
+                  }}
+                >Go to Email Settings</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Sending From banner */}
         {(() => {
           const info = senderInfo[activeProvider]
           const senderEmail = info?.email || ''
-          const isOutlook = activeProvider === 'outlook'
+          const fromProvider = activeProvider === 'outlook' ? 'outlook' : (senderEmail ? getEmailProvider(senderEmail) : activeProvider)
+          const theme = providerTheme[fromProvider] || providerTheme.default
+          const providerLabel = (fromProvider === 'default' ? activeProvider : fromProvider).charAt(0).toUpperCase() + (fromProvider === 'default' ? activeProvider : fromProvider).slice(1)
+          const bannerText = activeProvider === 'outlook'
+            ? 'Content will be copied automatically — paste with Ctrl + V in Outlook'
+            : `Sending from: <strong>${senderEmail || 'Not configured'}</strong>`
           return (
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
               padding: '10px 16px', marginBottom: '10px',
-              backgroundColor: isOutlook ? '#f0f4ff' : '#fef2f2',
-              borderRadius: '8px',
-              border: `1px solid ${isOutlook ? '#c7d5fe' : '#fecaca'}`,
+              backgroundColor: theme.bg, borderRadius: '8px', border: `1px solid ${theme.border}`,
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                  stroke={isOutlook ? '#0078d4' : '#dc2626'} strokeWidth="2">
-                  <path d="M22 2L11 13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  stroke={theme.badgeBg} strokeWidth="2">
+                  {activeProvider === 'outlook' ? (
+                    <>
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </>
+                  ) : (
+                    <><path d="M22 2L11 13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></>
+                  )}
                 </svg>
-                <span style={{ fontSize: '13px', color: isOutlook ? '#1e3a8a' : '#991b1b', fontWeight: 500 }}>
-                  Sending from: <strong>{senderEmail || 'Not configured'}</strong>
-                </span>
+                <span style={{ fontSize: '13px', color: theme.text, fontWeight: 500 }}
+                  dangerouslySetInnerHTML={{ __html: bannerText }}
+                />
               </div>
               <span style={{
                 fontSize: '11px', fontWeight: 700, padding: '2px 10px',
                 borderRadius: '20px', letterSpacing: '0.03em',
-                backgroundColor: isOutlook ? '#0078d4' : '#dc2626',
-                color: '#fff',
+                backgroundColor: theme.badgeBg, color: theme.badgeText,
               }}>
-                {isOutlook ? 'Outlook' : 'Gmail'}
+                {providerLabel}
               </span>
             </div>
           )
         })()}
 
         {/* Sending to banner */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
-          padding: '10px 16px', marginBottom: '16px',
-          backgroundColor: activeProvider === 'outlook' ? '#f0f7ff' : '#eff6ff',
-          borderRadius: '8px',
-          border: `1px solid ${activeProvider === 'outlook' ? '#bae0ff' : '#bfdbfe'}`,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-              stroke={activeProvider === 'outlook' ? '#0078d4' : '#2563eb'} strokeWidth="2">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-              <polyline points="22,6 12,13 2,6" />
-            </svg>
-            <span style={{ fontSize: '13px', color: activeProvider === 'outlook' ? '#0369a1' : '#1e40af', fontWeight: 500 }}>
-              Sending to: {candidateEmail || candidateName || 'Unknown'}
-            </span>
-          </div>
-          <span style={{
-            fontSize: '11px', fontWeight: 700, padding: '2px 10px',
-            borderRadius: '20px', letterSpacing: '0.03em',
-            backgroundColor: activeProvider === 'outlook' ? '#0078d4' : '#2563eb',
-            color: '#fff',
-          }}>
-            {activeProvider === 'outlook' ? 'Outlook' : 'Gmail'}
-          </span>
-        </div>
+        {(() => {
+          const toProvider = getEmailProvider(candidateEmail)
+          const toTheme = providerTheme[toProvider] || providerTheme.default
+          const badgeLabel = toProvider === 'default' ? 'Email' : toProvider.charAt(0).toUpperCase() + toProvider.slice(1)
+          return (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+              padding: '10px 16px', marginBottom: '16px',
+              backgroundColor: toTheme.bg,
+              borderRadius: '8px',
+              border: `1px solid ${toTheme.border}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke={toTheme.badgeBg} strokeWidth="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                  <polyline points="22,6 12,13 2,6" />
+                </svg>
+                <span style={{ fontSize: '13px', color: toTheme.text, fontWeight: 500 }}>
+                  Sending to: {candidateEmail || candidateName || 'Unknown'}
+                </span>
+              </div>
+              <span style={{
+                fontSize: '11px', fontWeight: 700, padding: '2px 10px',
+                borderRadius: '20px', letterSpacing: '0.03em',
+                backgroundColor: toTheme.badgeBg,
+                color: toTheme.badgeText,
+              }}>
+                {badgeLabel}
+              </span>
+            </div>
+          )
+        })()}
 
         {/* Subject */}
         <div style={{ marginBottom: '16px' }}>
@@ -370,6 +675,7 @@ export default function ActionCenter({
             </button>
           </div>
           <EmailBodyField
+            key={bodyKey}
             value={body}
             onChange={setBody}
             placeholder="Compose your email..."
@@ -452,15 +758,15 @@ export default function ActionCenter({
             display: 'inline-flex', alignItems: 'center', gap: '8px',
             padding: '10px 24px', fontSize: '14px', fontWeight: 600,
             color: '#ffffff',
-            backgroundColor: sending ? '#94a3b8' : (activeProvider === 'outlook' ? '#0078d4' : '#2563eb'),
+            backgroundColor: sending ? '#94a3b8' : (providerTheme[activeProvider] || providerTheme.default).badgeBg,
             border: 'none', borderRadius: '8px',
             cursor: sending ? 'not-allowed' : 'pointer',
             transition: 'all 0.15s',
             boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
             opacity: sending ? 0.7 : 1,
           }}
-          onMouseEnter={e => { if (!sending) e.currentTarget.style.backgroundColor = activeProvider === 'outlook' ? '#006cbe' : '#1d4ed8' }}
-          onMouseLeave={e => { if (!sending) e.currentTarget.style.backgroundColor = activeProvider === 'outlook' ? '#0078d4' : '#2563eb' }}
+          onMouseEnter={e => { if (!sending) { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.filter = 'brightness(0.9)' } }}
+          onMouseLeave={e => { if (!sending) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.filter = 'none' } }}
         >
           {sending ? (
             <>
@@ -470,6 +776,15 @@ export default function ActionCenter({
                 animation: 'spin 0.8s linear infinite',
               }} />
               Sending...
+            </>
+          ) : activeProvider === 'outlook' ? (
+            <>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+              Open in Outlook
             </>
           ) : (
             <>
@@ -487,16 +802,223 @@ export default function ActionCenter({
       <TemplatePickerModal
         isOpen={showTemplateModal}
         onClose={() => setShowTemplateModal(false)}
+        templateType={templateType || (candidateId ? 'candidate' : null)}
         onSelect={(tpl) => {
+          const rp_user = JSON.parse(localStorage.getItem('rp_user') || '{}')
+          const extra = { clientName: clientName || '', yourName: rp_user.username || '' }
           // Replace {{variables}} with actual candidate data
-          setSubject(replaceTemplateVars(tpl.subject, candidate, candidateName))
-          setBody(replaceTemplateVars(tpl.body, candidate, candidateName))
+          setSubject(replaceTemplateVars(tpl.subject, candidate, candidateName, extra))
+          const newBody = replaceTemplateVars(tpl.body, candidate, candidateName, extra)
+          setBody(newBody)
+          setBodyKey(k => k + 1)  // force editor remount with new content
           setShowTemplateModal(false)
         }}
       />
 
+      {/* ── Outlook Instruction Modal ────────────────────────────── */}
+      {outlookModal.open && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setOutlookModal({ open: false, status: 'copied' }) }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 10000,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            animation: 'outlookFadeIn 0.25s ease-out',
+          }}
+        >
+          <div style={{
+            backgroundColor: '#fff', borderRadius: '16px', padding: '32px 28px',
+            maxWidth: '420px', width: '90%',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.2)',
+            animation: 'outlookSlideUp 0.3s ease-out',
+          }}>
+            {/* Header */}
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{
+                width: '56px', height: '56px', borderRadius: '50%',
+                backgroundColor: '#f0f4ff', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 14px', fontSize: '26px',
+              }}>
+                {outlookModal.status === 'copied' ? '\u2709\uFE0F' : '\uD83D\uDCC4'}
+              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>
+                {outlookModal.status === 'copied' ? 'Outlook Ready' : 'Email HTML Downloaded'}
+              </h3>
+              <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                {outlookModal.status === 'copied'
+                  ? 'Your formatted email content has been copied. Click the button below to open Outlook.'
+                  : 'Clipboard was unavailable. The email was saved as an HTML file.'}
+              </p>
+            </div>
+
+            {/* Steps */}
+            {outlookModal.status === 'copied' ? (
+              <div style={{
+                backgroundColor: '#f8fafc', borderRadius: '10px',
+                padding: '16px 18px', marginBottom: '20px',
+                border: '1px solid #e2e8f0',
+              }}>
+                {[
+                  { num: '1', text: 'Click "Got it" to open Outlook', icon: '\uD83D\uDD17' },
+                  { num: '2', text: 'Click inside the email body area', icon: '\uD83D\uDDB1\uFE0F' },
+                  { num: '3', text: 'Press  Ctrl + V  to paste', icon: '\u2328\uFE0F', bold: true },
+                ].map(({ num, text, icon, bold }) => (
+                  <div key={num} style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '8px 0',
+                    borderBottom: num !== '3' ? '1px solid #f1f5f9' : 'none',
+                  }}>
+                    <div style={{
+                      width: '28px', height: '28px', borderRadius: '50%',
+                      backgroundColor: '#0078d4', color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '13px', fontWeight: 700, flexShrink: 0,
+                    }}>{num}</div>
+                    <span style={{ fontSize: '14px', color: '#1e293b', fontWeight: bold ? 700 : 500 }}>
+                      {text}
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: '16px' }}>{icon}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{
+                backgroundColor: '#fffbeb', borderRadius: '10px',
+                padding: '14px 16px', marginBottom: '20px',
+                border: '1px solid #fde68a', fontSize: '13px', color: '#92400e', lineHeight: 1.6,
+              }}>
+                Open the downloaded <strong>.html</strong> file, select all content (Ctrl+A),
+                copy (Ctrl+C), then paste into Outlook (Ctrl+V).
+              </div>
+            )}
+
+            {/* Copied badge */}
+            {outlookModal.status === 'copied' && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                padding: '10px', marginBottom: '18px',
+                backgroundColor: '#f0fdf4', borderRadius: '8px',
+                border: '1px solid #bbf7d0',
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#15803d' }}>
+                  Email content copied to clipboard
+                </span>
+              </div>
+            )}
+
+            {/* Action button */}
+            <button
+              onClick={handleOutlookGotIt}
+              style={{
+                width: '100%', padding: '11px', fontSize: '14px', fontWeight: 600,
+                backgroundColor: '#0078d4', color: '#fff',
+                border: 'none', borderRadius: '8px', cursor: 'pointer',
+                transition: 'background 0.15s',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#006cbe'}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#0078d4'}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+              Got it — Open Outlook
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Outlook Paste Confirmation Modal ────────────────────── */}
+      {outlookConfirm && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 10000,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            animation: 'outlookFadeIn 0.25s ease-out',
+          }}
+        >
+          <div style={{
+            backgroundColor: '#fff', borderRadius: '16px', padding: '32px 28px',
+            maxWidth: '400px', width: '90%',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.2)',
+            animation: 'outlookSlideUp 0.3s ease-out',
+          }}>
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{
+                width: '56px', height: '56px', borderRadius: '50%',
+                backgroundColor: '#f0fdf4', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 14px', fontSize: '26px',
+              }}>{'\u2705'}</div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>
+                Email Ready?
+              </h3>
+              <p style={{ fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                Did you paste the content in Outlook and send it?
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setOutlookConfirm(false)}
+                style={{
+                  flex: 1, padding: '11px', fontSize: '14px', fontWeight: 600,
+                  backgroundColor: '#f1f5f9', color: '#475569',
+                  border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e2e8f0'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              >
+                Not yet
+              </button>
+              <button
+                onClick={async () => {
+                  setOutlookConfirm(false)
+                  try {
+                    await logSentEmail({
+                      candidateId:    candidateId || 0,
+                      recipientEmail: candidateEmail || '',
+                      senderEmail:    '',
+                      subject:        subject || '',
+                      provider:       'outlook',
+                    })
+                  } catch (logErr) {
+                    console.warn('[ActionCenter] Outlook log failed:', logErr)
+                  }
+                  onSent?.()
+                }}
+                style={{
+                  flex: 1, padding: '11px', fontSize: '14px', fontWeight: 600,
+                  backgroundColor: '#16a34a', color: '#fff',
+                  border: 'none', borderRadius: '8px', cursor: 'pointer',
+                  transition: 'background 0.15s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#15803d'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = '#16a34a'}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Yes, done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes spin { to { transform: rotate(360deg) } }
+        @keyframes outlookFadeIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes outlookSlideUp { from { opacity: 0; transform: translateY(20px) } to { opacity: 1; transform: translateY(0) } }
       `}</style>
     </div>
   )

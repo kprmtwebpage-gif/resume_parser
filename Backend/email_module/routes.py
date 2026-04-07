@@ -3,6 +3,7 @@ FastAPI routes for the email module.
 Handles email sending, provider management, and email history.
 """
 
+import asyncio
 import logging
 import os
 import re
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -48,15 +49,32 @@ OUTLOOK_SMTP_PORT = int(os.getenv("OUTLOOK_SMTP_PORT", "587"))
 OUTLOOK_SMTP_USER = os.getenv("OUTLOOK_SMTP_USER", "")
 OUTLOOK_SMTP_PASSWORD = os.getenv("OUTLOOK_SMTP_PASSWORD", "")
 
+# Zoho
+ZOHO_SMTP_HOST = os.getenv("ZOHO_SMTP_HOST", "smtp.zoho.com")
+ZOHO_SMTP_PORT = int(os.getenv("ZOHO_SMTP_PORT", "587"))
+ZOHO_SMTP_USER = os.getenv("ZOHO_SMTP_USER", "")
+ZOHO_SMTP_PASSWORD = os.getenv("ZOHO_SMTP_PASSWORD", "")
+
 
 def _get_smtp_config(provider: str = "gmail", db: Session = None, user_id: int = None):
     """Return (host, port, user, password) for the requested provider.
 
     Resolution order:
-      1. Per-user DB config (user_email_configs table)
-      2. Global .env fallback
+      1. Per-user encrypted settings (user_email_settings table — new system)
+      2. Per-user legacy config (user_email_configs table — backwards compat)
+      3. Global .env fallback
     """
-    # Try per-user config from DB
+    # 1. Try new per-user encrypted settings
+    if db and user_id:
+        try:
+            from .settings_routes import get_user_smtp_config
+            result = get_user_smtp_config(db, user_id, provider)
+            if result:
+                return result
+        except Exception as e:
+            logger.warning("Failed to load new user email settings: %s", e)
+
+    # 2. Try legacy per-user config from DB
     if db and user_id:
         try:
             user_cfg = (
@@ -67,16 +85,78 @@ def _get_smtp_config(provider: str = "gmail", db: Session = None, user_id: int =
             if user_cfg:
                 if provider == "outlook" and user_cfg.outlook_email and user_cfg.outlook_password:
                     return OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT, user_cfg.outlook_email, user_cfg.outlook_password
-                if user_cfg.gmail_email and user_cfg.gmail_password:
+                if provider == "gmail" and user_cfg.gmail_email and user_cfg.gmail_password:
                     return SMTP_HOST, SMTP_PORT, user_cfg.gmail_email, user_cfg.gmail_password
         except Exception as e:
-            logger.warning("Failed to load user email config: %s", e)
+            logger.warning("Failed to load legacy user email config: %s", e)
 
-    # Fallback to global .env config
-    if provider == "outlook" and OUTLOOK_SMTP_USER and OUTLOOK_SMTP_PASSWORD:
-        return OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT, OUTLOOK_SMTP_USER, OUTLOOK_SMTP_PASSWORD
-    # Default to Gmail
+    # 3. Fallback to global .env config — only use provider-matching env vars
+    if provider == "zoho":
+        if ZOHO_SMTP_USER and ZOHO_SMTP_PASSWORD:
+            return ZOHO_SMTP_HOST, ZOHO_SMTP_PORT, ZOHO_SMTP_USER, ZOHO_SMTP_PASSWORD
+        return ZOHO_SMTP_HOST, ZOHO_SMTP_PORT, "", ""  # not configured — will trigger 503
+    if provider == "outlook":
+        if OUTLOOK_SMTP_USER and OUTLOOK_SMTP_PASSWORD:
+            return OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT, OUTLOOK_SMTP_USER, OUTLOOK_SMTP_PASSWORD
+        return OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT, "", ""  # not configured — will trigger 503
+    # Gmail
     return SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD
+
+
+def _get_oauth2_setting(provider: str, db: Session, user_id: int):
+    """Check if the user has OAuth2 configured for this provider.
+
+    Returns the UserEmailSetting row if OAuth2 is active, else None.
+    """
+    if provider != "outlook" or not db or not user_id:
+        return None
+    try:
+        from .models import UserEmailSetting
+        setting = (
+            db.query(UserEmailSetting)
+            .filter(
+                UserEmailSetting.user_id == user_id,
+                UserEmailSetting.provider == "outlook",
+                UserEmailSetting.auth_method == "OAuth2",
+                UserEmailSetting.is_connected == True,
+            )
+            .first()
+        )
+        if setting and setting.oauth_refresh_token:
+            return setting
+    except Exception as e:
+        logger.warning("Failed to check OAuth2 setting: %s", e)
+    return None
+
+
+def _smtp_send_oauth2(setting, msg: MIMEMultipart, recipient_email: str, db: Session):
+    """Send email via SMTP using XOAUTH2 authentication.
+
+    Gets a valid access token (refreshing if needed), then authenticates
+    with XOAUTH2 instead of plain password.
+    """
+    from . import oauth2_outlook as oauth2
+
+    # Get valid access token (refresh if expired) — run async in sync context
+    loop = asyncio.new_event_loop()
+    try:
+        access_token = loop.run_until_complete(oauth2.get_valid_access_token(db, setting))
+    finally:
+        loop.close()
+
+    smtp_user = setting.email
+    xoauth2_string = oauth2.build_xoauth2_string(smtp_user, access_token)
+
+    logger.info("[EMAIL SEND OAUTH2] Sending as %s via XOAUTH2", smtp_user)
+    with smtplib.SMTP("smtp.office365.com", 587, timeout=30) as server:
+        server.set_debuglevel(1)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        # Use XOAUTH2 instead of plain login
+        server.docmd("AUTH", f"XOAUTH2 {xoauth2_string}")
+        server.sendmail(smtp_user, recipient_email, msg.as_string())
+        logger.info("[EMAIL SEND OAUTH2] Sent OK to %s", recipient_email)
 
 
 # ── Startup diagnostic ──────────────────────────────────────────────────────
@@ -406,16 +486,37 @@ def get_sender_info(
     """Return the configured sender emails for each provider.
 
     Resolution order per provider:
-      1. Per-user DB config  (user_email_configs)
-      2. Global .env fallback
+      1. New user_email_settings table (encrypted)
+      2. Legacy user_email_configs table
+      3. Global .env fallback
     """
     user_id = _get_user_id_from_request(request)
 
     gmail_email = SMTP_USER
     outlook_email = OUTLOOK_SMTP_USER
+    zoho_email = ZOHO_SMTP_USER
 
-    # Try per-user overrides
+    # Try new per-user settings first
     if user_id:
+        try:
+            from .models import UserEmailSetting
+            settings = (
+                db.query(UserEmailSetting)
+                .filter(UserEmailSetting.user_id == user_id, UserEmailSetting.is_connected == True)
+                .all()
+            )
+            for s in settings:
+                if s.provider == "gmail":
+                    gmail_email = s.email
+                elif s.provider == "outlook":
+                    outlook_email = s.email
+                elif s.provider == "zoho":
+                    zoho_email = s.email
+        except Exception as e:
+            logger.warning("Failed to load new user email settings for sender-info: %s", e)
+
+    # Fallback: try legacy per-user overrides
+    if user_id and not any([gmail_email != SMTP_USER, outlook_email != OUTLOOK_SMTP_USER]):
         try:
             user_cfg = (
                 db.query(UserEmailConfig)
@@ -428,7 +529,7 @@ def get_sender_info(
                 if user_cfg.outlook_email:
                     outlook_email = user_cfg.outlook_email
         except Exception as e:
-            logger.warning("Failed to load user email config for sender-info: %s", e)
+            logger.warning("Failed to load legacy user email config for sender-info: %s", e)
 
     return {
         "gmail": {
@@ -438,6 +539,10 @@ def get_sender_info(
         "outlook": {
             "email": outlook_email,
             "configured": bool(outlook_email),
+        },
+        "zoho": {
+            "email": zoho_email,
+            "configured": bool(zoho_email),
         },
     }
 
@@ -517,6 +622,50 @@ def save_user_email_config(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# LOG-ONLY (Outlook web compose — email was sent externally, just record it)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/log")
+def log_sent_email(
+    request: Request,
+    db: Session = Depends(get_db),
+    candidate_id: int = Query(0),
+    recipient_email: str = Query(""),
+    sender_email: str = Query(""),
+    subject: str = Query(""),
+    provider: str = Query("outlook"),
+):
+    """Record an email that was sent externally (e.g. Outlook web compose).
+
+    No SMTP call is made — this only writes a row to email_logs so the
+    email appears in Email History with status='sent'.
+    """
+    username = _get_username_from_request(request)
+    if not username or username == "unknown":
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    if provider not in ("gmail", "outlook", "zoho"):
+        provider = "outlook"
+
+    email_log = EmailLog(
+        candidate_id=candidate_id or 0,
+        recipient_email=recipient_email or "",
+        sender_email=sender_email or "",
+        subject=subject or "",
+        body="",
+        provider=provider,
+        direction="sent",
+        status="sent",
+        sent_by=username,
+    )
+    db.add(email_log)
+    db.commit()
+    db.refresh(email_log)
+    logger.info("[EMAIL LOG] Recorded external send — provider=%s, to=%s, by=%s", provider, recipient_email, username)
+    return {"id": str(email_log.id), "status": "logged"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SEND EMAIL
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -531,16 +680,27 @@ def send_email(
     user_id = _get_user_id_from_request(request)
     logger.info("[EMAIL SEND] to=%s, subject=%s, user=%s, provider=%s", payload.recipient_email, payload.subject, username, payload.provider)
 
+    # Strict provider validation
+    if payload.provider and payload.provider not in ("gmail", "outlook", "zoho"):
+        raise HTTPException(status_code=400, detail=f"Invalid provider: {payload.provider}. Must be 'gmail', 'outlook', or 'zoho'.")
+
     # Resolve SMTP config based on provider + per-user config
     smtp_host, smtp_port, smtp_user, smtp_password = _get_smtp_config(payload.provider or "gmail", db=db, user_id=user_id)
 
-    # Fail fast if SMTP is not configured
-    if not smtp_user or not smtp_password:
+    # Check for OAuth2 (Outlook only)
+    oauth2_setting = _get_oauth2_setting(payload.provider or "gmail", db, user_id)
+
+    # Fail fast if SMTP is not configured (and no OAuth2)
+    if not oauth2_setting and (not smtp_user or not smtp_password):
         logger.error("[EMAIL SEND] SMTP not configured for provider=%s", payload.provider)
         raise HTTPException(
             status_code=503,
             detail=f"Email service not configured for {payload.provider or 'gmail'}. Set SMTP credentials in the server .env file.",
         )
+
+    # Use OAuth2 sender email if available
+    if oauth2_setting:
+        smtp_user = oauth2_setting.email
 
     # Build MIME message
     msg = MIMEMultipart("alternative")
@@ -554,25 +714,76 @@ def send_email(
     msg.attach(MIMEText(styled_body, "html"))
 
     status = "sent"
+    smtp_error_detail = ""
     try:
-        logger.info("[EMAIL SEND] Connecting to %s:%s ...", smtp_host, smtp_port)
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-            server.set_debuglevel(1)
-            server.starttls()
-            logger.info("[EMAIL SEND] STARTTLS OK, logging in as %s ...", smtp_user)
-            server.login(smtp_user, smtp_password)
-            logger.info("[EMAIL SEND] Login OK, sending to %s ...", payload.recipient_email)
-            server.sendmail(smtp_user, payload.recipient_email, msg.as_string())
-            logger.info("[EMAIL SEND] SMTP sendmail completed successfully")
+        if oauth2_setting:
+            # ── OAuth2 / XOAUTH2 path ──
+            logger.info("[EMAIL SEND] Using OAuth2 for Outlook (%s)", smtp_user)
+            _smtp_send_oauth2(oauth2_setting, msg, payload.recipient_email, db)
+        else:
+            # ── Password auth path ──
+            logger.info("[EMAIL SEND] Provider: %s", payload.provider)
+            logger.info("[EMAIL SEND] SMTP Host: %s:%s", smtp_host, smtp_port)
+            logger.info("[EMAIL SEND] SMTP User: %s", smtp_user)
+            logger.info("[EMAIL SEND] Sending to: %s", payload.recipient_email)
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+                server.set_debuglevel(1)
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                logger.info("[EMAIL SEND] STARTTLS OK, logging in as %s ...", smtp_user)
+                server.login(smtp_user, smtp_password)
+                logger.info("[EMAIL SEND] Login OK, sending to %s ...", payload.recipient_email)
+                server.sendmail(smtp_user, payload.recipient_email, msg.as_string())
+                logger.info("[EMAIL SEND] SMTP sendmail completed successfully via %s", payload.provider)
     except smtplib.SMTPAuthenticationError as e:
-        logger.error("[EMAIL SEND] SMTP authentication failed: %s", e)
+        logger.error("[EMAIL SEND] SMTP authentication failed for %s: %s", payload.provider, e)
         status = "failed"
+        raw_error = str(e)
+        raw_lower = raw_error.lower()
+        if "basic authentication is disabled" in raw_lower or "5.7.139" in raw_error:
+            smtp_error_detail = (
+                f"Microsoft has permanently disabled Basic Authentication (username + password) for Outlook.com. "
+                f"This is a Microsoft policy change — it cannot be re-enabled. "
+                f"To send emails, please use Gmail (with an App Password) or another provider that supports SMTP login."
+            )
+        elif "smtpclientauthentication is disabled" in raw_lower:
+            smtp_error_detail = (
+                f"SMTP client authentication is disabled for {smtp_user}. "
+                f"For personal Outlook.com: go to https://outlook.live.com > Settings (gear) > "
+                f"Mail > Sync email > enable POP/IMAP toggles > Save. Wait 15-30 minutes. "
+                f"If this still fails, Microsoft may have fully disabled Basic Auth for your account — use Gmail instead."
+            )
+        elif "authentication unsuccessful" in raw_lower or "authentication failed" in raw_lower or "5.7.3" in raw_error:
+            _prov = (payload.provider or "gmail").lower()
+            if _prov == "zoho":
+                smtp_error_detail = (
+                    f"Invalid login for {smtp_user}. Check your password. "
+                    f"If 2FA is enabled on your Zoho account, generate an App Password at "
+                    f"https://accounts.zoho.com/home#security/app-passwords and use that instead."
+                )
+            elif _prov == "gmail":
+                smtp_error_detail = (
+                    f"Gmail rejected the password for {smtp_user}. "
+                    f"Google requires an App Password — go to "
+                    f"https://myaccount.google.com/apppasswords, generate one, and save it in User → Email Settings."
+                )
+            else:
+                smtp_error_detail = f"Invalid login for {smtp_user}. Check your password. If two-step verification is on, you must use an App Password from https://account.live.com/proofs/AppPassword"
+        else:
+            smtp_error_detail = f"SMTP authentication failed for {payload.provider}: {raw_error}"
     except smtplib.SMTPRecipientsRefused as e:
         logger.error("[EMAIL SEND] Recipient refused: %s", e)
         status = "failed"
+        smtp_error_detail = f"Recipient address rejected: {payload.recipient_email}"
+    except smtplib.SMTPConnectError as e:
+        logger.error("[EMAIL SEND] SMTP connect error: %s", e)
+        status = "failed"
+        smtp_error_detail = f"Could not connect to {smtp_host}:{smtp_port}. Check server address and port."
     except Exception as e:
         logger.error("[EMAIL SEND] Failed to send email to %s: %s", payload.recipient_email, e)
         status = "failed"
+        smtp_error_detail = f"SMTP error ({payload.provider}): {str(e)}"
 
     # Log email
     email_log = EmailLog(
@@ -592,11 +803,11 @@ def send_email(
 
     if status == "failed":
         raise HTTPException(
-            status_code=500,
-            detail="Failed to send email. Check server logs for SMTP errors.",
+            status_code=422,
+            detail=smtp_error_detail or "Failed to send email. Check server logs for SMTP errors.",
         )
 
-    logger.info("[EMAIL SEND] Email delivered — id=%s, status=%s", email_log.id, status)
+    logger.info("[EMAIL SEND] Email delivered via %s — id=%s, sender=%s", payload.provider, email_log.id, smtp_user)
     return {
         "id": str(email_log.id),
         "candidate_id": email_log.candidate_id,
@@ -614,11 +825,11 @@ def send_email(
 
 @router.post("/send-with-attachments")
 async def send_email_with_attachments(
-    candidate_id: int = Query(...),
-    recipient_email: str = Query(...),
-    subject: str = Query(...),
-    body: str = Query(...),
-    provider: str = Query("gmail"),
+    candidate_id: int = Form(...),
+    recipient_email: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    provider: str = Form("gmail"),
     files: List[UploadFile] = File(default=[]),
     request: Request = None,
     db: Session = Depends(get_db),
@@ -630,6 +841,9 @@ async def send_email_with_attachments(
     # Resolve SMTP config based on provider + per-user config
     smtp_host, smtp_port, smtp_user, smtp_password = _get_smtp_config(provider, db=db, user_id=user_id)
 
+    # Check for OAuth2 (Outlook only)
+    oauth2_setting = _get_oauth2_setting(provider, db, user_id)
+
     if len(files) > MAX_ATTACHMENTS:
         raise HTTPException(
             status_code=400,
@@ -639,7 +853,7 @@ async def send_email_with_attachments(
     # Build MIME message
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
-    msg["From"] = smtp_user
+    msg["From"] = oauth2_setting.email if oauth2_setting else smtp_user
     msg["To"] = recipient_email
 
     styled_body = _format_email_html(body)
@@ -649,7 +863,7 @@ async def send_email_with_attachments(
     email_log = EmailLog(
         candidate_id=candidate_id,
         recipient_email=recipient_email,
-        sender_email=smtp_user,
+        sender_email=oauth2_setting.email if oauth2_setting else smtp_user,
         subject=subject,
         body=body,
         provider=provider,
@@ -692,8 +906,8 @@ async def send_email_with_attachments(
         part.add_header("Content-Disposition", f'attachment; filename="{f.filename}"')
         msg.attach(part)
 
-    # Fail fast if SMTP is not configured
-    if not smtp_user or not smtp_password:
+    # Fail fast if SMTP is not configured (and no OAuth2)
+    if not oauth2_setting and (not smtp_user or not smtp_password):
         logger.error("[EMAIL SEND] SMTP not configured for provider=%s — cannot send attachment email", provider)
         raise HTTPException(
             status_code=503,
@@ -701,27 +915,79 @@ async def send_email_with_attachments(
         )
 
     # Send
+    smtp_error_detail = ""
     try:
-        logger.info("[EMAIL SEND+ATTACH] Connecting to %s:%s ...", smtp_host, smtp_port)
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-            server.set_debuglevel(1)
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, recipient_email, msg.as_string())
-            logger.info("[EMAIL SEND+ATTACH] Sent OK to %s", recipient_email)
-        email_log.status = "sent"
+        if oauth2_setting:
+            # ── OAuth2 / XOAUTH2 path ──
+            sender = oauth2_setting.email
+            logger.info("[EMAIL SEND+ATTACH] Using OAuth2 for Outlook (%s)", sender)
+            _smtp_send_oauth2(oauth2_setting, msg, recipient_email, db)
+            email_log.status = "sent"
+        else:
+            # ── Password auth path ──
+            logger.info("[EMAIL SEND+ATTACH] Provider: %s", provider)
+            logger.info("[EMAIL SEND+ATTACH] SMTP Host: %s:%s", smtp_host, smtp_port)
+            logger.info("[EMAIL SEND+ATTACH] SMTP User: %s", smtp_user)
+            logger.info("[EMAIL SEND+ATTACH] Sending to: %s", recipient_email)
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+                server.set_debuglevel(1)
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, recipient_email, msg.as_string())
+                logger.info("[EMAIL SEND+ATTACH] Sent OK to %s via %s", recipient_email, provider)
+            email_log.status = "sent"
     except smtplib.SMTPAuthenticationError as e:
-        logger.error("[EMAIL SEND+ATTACH] SMTP auth failed: %s", e)
+        logger.error("[EMAIL SEND+ATTACH] SMTP auth failed for %s: %s", provider, e)
         email_log.status = "failed"
+        raw_error = str(e)
+        raw_lower = raw_error.lower()
+        if "basic authentication is disabled" in raw_lower or "5.7.139" in raw_error:
+            smtp_error_detail = (
+                f"Microsoft has permanently disabled Basic Authentication (username + password) for Outlook.com. "
+                f"This is a Microsoft policy change — it cannot be re-enabled. "
+                f"To send emails, please use Gmail (with an App Password) or another provider that supports SMTP login."
+            )
+        elif "smtpclientauthentication is disabled" in raw_lower:
+            smtp_error_detail = (
+                f"SMTP client authentication is disabled for {smtp_user}. "
+                f"For personal Outlook.com: go to https://outlook.live.com > Settings (gear) > "
+                f"Mail > Sync email > enable POP/IMAP toggles > Save. Wait 15-30 minutes. "
+                f"If this still fails, Microsoft may have fully disabled Basic Auth for your account — use Gmail instead."
+            )
+        elif "authentication unsuccessful" in raw_lower or "authentication failed" in raw_lower or "5.7.3" in raw_error:
+            _prov = (provider or "gmail").lower()
+            if _prov == "zoho":
+                smtp_error_detail = (
+                    f"Invalid login for {smtp_user}. Check your password. "
+                    f"If 2FA is enabled on your Zoho account, generate an App Password at "
+                    f"https://accounts.zoho.com/home#security/app-passwords and use that instead."
+                )
+            elif _prov == "gmail":
+                smtp_error_detail = (
+                    f"Gmail rejected the password for {smtp_user}. "
+                    f"Google requires an App Password — go to "
+                    f"https://myaccount.google.com/apppasswords, generate one, and save it in User → Email Settings."
+                )
+            else:
+                smtp_error_detail = f"Invalid login for {smtp_user}. Check your password. If two-step verification is on, you must use an App Password from https://account.live.com/proofs/AppPassword"
+        else:
+            smtp_error_detail = f"SMTP authentication failed for {provider}: {raw_error}"
+    except smtplib.SMTPConnectError as e:
+        logger.error("[EMAIL SEND+ATTACH] Connect error: %s", e)
+        email_log.status = "failed"
+        smtp_error_detail = f"Could not connect to {smtp_host}:{smtp_port}. Check server address and port."
     except Exception as e:
         logger.error("[EMAIL SEND+ATTACH] Failed: %s", e)
         email_log.status = "failed"
+        smtp_error_detail = f"SMTP error ({provider}): {str(e)}"
 
     db.commit()
     db.refresh(email_log)
 
     if email_log.status == "failed":
-        raise HTTPException(status_code=500, detail="Failed to send email. Check server logs for SMTP errors.")
+        raise HTTPException(status_code=422, detail=smtp_error_detail or "Failed to send email. Check server logs for SMTP errors.")
 
     return {
         "id": str(email_log.id),
@@ -741,6 +1007,138 @@ async def send_email_with_attachments(
 # ══════════════════════════════════════════════════════════════════════════════
 # EMAIL HISTORY
 # ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/history")
+def get_user_email_history(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    provider: str = Query(None),
+    date_range: str = Query(None),   # today|yesterday|last7|last30|thismonth|lastmonth
+    date_from: str = Query(None),    # ISO date string for custom range start
+    date_to: str = Query(None),      # ISO date string for custom range end
+    db: Session = Depends(get_db),
+):
+    """Get all email history for the currently logged-in user, with optional filters."""
+    from datetime import timedelta
+
+    username = _get_username_from_request(request)
+    if not username or username == "unknown":
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    now = datetime.now(timezone.utc)
+    query = db.query(EmailLog).filter(EmailLog.sent_by == username)
+
+    if provider:
+        query = query.filter(EmailLog.provider == provider)
+
+    # ── Date range filtering ─────────────────────────────────────────────────
+    if date_range == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        query = query.filter(EmailLog.sent_at >= start)
+    elif date_range == "yesterday":
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start = today_start - timedelta(days=1)
+        query = query.filter(EmailLog.sent_at >= yesterday_start, EmailLog.sent_at < today_start)
+    elif date_range == "last7":
+        query = query.filter(EmailLog.sent_at >= now - timedelta(days=7))
+    elif date_range == "last30":
+        query = query.filter(EmailLog.sent_at >= now - timedelta(days=30))
+    elif date_range == "thismonth":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        query = query.filter(EmailLog.sent_at >= start)
+    elif date_range == "lastmonth":
+        this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if this_month.month == 1:
+            last_month = this_month.replace(year=this_month.year - 1, month=12)
+        else:
+            last_month = this_month.replace(month=this_month.month - 1)
+        query = query.filter(EmailLog.sent_at >= last_month, EmailLog.sent_at < this_month)
+
+    if date_from:
+        try:
+            from datetime import date as _date
+            start_dt = datetime.fromisoformat(date_from)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            query = query.filter(EmailLog.sent_at >= start_dt)
+        except Exception:
+            pass
+    if date_to:
+        try:
+            end_dt = datetime.fromisoformat(date_to)
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            query = query.filter(EmailLog.sent_at <= end_dt)
+        except Exception:
+            pass
+
+    # ── Global stats for this user (no date/provider filter) ────────────────
+    base = db.query(EmailLog).filter(EmailLog.sent_by == username)
+    total_sent = base.count()
+    gmail_cnt = base.filter(EmailLog.provider == "gmail").count()
+    zoho_cnt = base.filter(EmailLog.provider == "zoho").count()
+    outlook_cnt = base.filter(EmailLog.provider == "outlook").count()
+
+    # Filtered count (before pagination)
+    filtered_total = query.count()
+
+    # ── Paginated results ────────────────────────────────────────────────────
+    emails = (
+        query
+        .order_by(desc(EmailLog.sent_at))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    # ── Enrich with candidate names ──────────────────────────────────────────
+    candidate_names: dict = {}
+    candidate_ids = list({e.candidate_id for e in emails if e.candidate_id is not None})
+    if candidate_ids:
+        try:
+            import os as _os
+            from sqlalchemy import text as _text
+            from .database import engine as _engine
+            _table = _os.getenv("NEW_CANDIDATES_TABLE", "candidate_profile")
+            ids_str = ",".join(str(int(cid)) for cid in candidate_ids)
+            with _engine.connect() as conn:
+                rows = conn.execute(
+                    _text(f"SELECT id, first_name, last_name FROM {_table} WHERE id IN ({ids_str})")
+                ).fetchall()
+                for row in rows:
+                    name = " ".join(filter(None, [row[1], row[2]])).strip()
+                    candidate_names[row[0]] = name or f"Candidate #{row[0]}"
+        except Exception as _ex:
+            logger.warning("Could not fetch candidate names for history: %s", _ex)
+
+    result = []
+    for e in emails:
+        result.append({
+            "id": str(e.id),
+            "candidate_id": e.candidate_id,
+            "candidate_name": candidate_names.get(e.candidate_id, f"Candidate #{e.candidate_id}"),
+            "recipient_email": e.recipient_email,
+            "sender_email": e.sender_email,
+            "subject": e.subject,
+            "provider": e.provider,
+            "direction": e.direction,
+            "status": e.status,
+            "sent_by": e.sent_by,
+            "sent_at": e.sent_at.isoformat() if e.sent_at else None,
+        })
+
+    return {
+        "emails": result,
+        "total": filtered_total,
+        "stats": {
+            "total": total_sent,
+            "gmail": gmail_cnt,
+            "zoho": zoho_cnt,
+            "outlook": outlook_cnt,
+        },
+    }
+
 
 @router.get("/history/{candidate_id}")
 def get_email_history(
