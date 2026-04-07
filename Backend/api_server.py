@@ -1823,15 +1823,10 @@ async def update_candidate(candidate_id: int, data: CandidateUpdate):
 
 
 async def _dedup_candidate(candidate_id: int, label: str = ""):
-    """Deduplicate candidate records (same email), keeping the newest completed row.
+    """Remove duplicate candidate records (same email), keeping the newest.
 
-    Only considers rows with resume_parse_status='completed'.  Rows that are
-    still 'processing', 'failed', 'not_a_resume', or 'duplicate' are left
-    untouched so they remain visible in the Upload Log and won't cause 404s
-    on active polling.
-
-    Surplus completed rows are marked 'duplicate' (not deleted) so every
-    upload attempt is recorded in the Upload Log.
+    Waits briefly so concurrent parsers have time to commit their data,
+    then uses FOR UPDATE locking to safely deduplicate.
     """
     await asyncio.sleep(3)
     try:
@@ -1856,7 +1851,6 @@ async def _dedup_candidate(candidate_id: int, label: str = ""):
                     cursor.execute(
                         f"""SELECT id FROM {CANDIDATES_TABLE}
                             WHERE LOWER(email) = LOWER(%s)
-                              AND resume_parse_status = 'completed'
                             ORDER BY id DESC
                             FOR UPDATE""",
                         (_email,),
@@ -1871,7 +1865,6 @@ async def _dedup_candidate(candidate_id: int, label: str = ""):
                         f"""SELECT id FROM {CANDIDATES_TABLE}
                             WHERE LOWER(first_name) = LOWER(%s)
                               AND LOWER(last_name) = LOWER(%s)
-                              AND resume_parse_status = 'completed'
                             ORDER BY id DESC
                             FOR UPDATE""",
                         (_fn, _ln),
@@ -1888,13 +1881,10 @@ async def _dedup_candidate(candidate_id: int, label: str = ""):
                             (keep_id, did),
                         )
                         cursor.execute(
-                            f"""UPDATE {CANDIDATES_TABLE}
-                                SET resume_parse_status = 'duplicate',
-                                    parse_failure_reason = %s
-                                WHERE id = %s""",
-                            (f"duplicate_of:{keep_id}", did),
+                            f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s",
+                            (did,),
                         )
-                    print(f"[DEDUP] {label} — kept id={keep_id}, marked {len(dup_ids)} duplicate(s) for {_fn} {_ln} <{_email}>", flush=True)
+                    print(f"[DEDUP] {label} — kept id={keep_id}, removed {len(dup_ids)} duplicate(s) for {_fn} {_ln} <{_email}>", flush=True)
             conn.commit()
     except Exception:
         import traceback
@@ -2170,7 +2160,6 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                 f"""SELECT id FROM {CANDIDATES_TABLE}
                                     WHERE LOWER(email) = LOWER(%s)
                                       AND id NOT IN (%s, %s)
-                                      AND resume_parse_status = 'completed'
                                     LIMIT 1""",
                                 (_parsed_email.strip(), parser_id, placeholder_id),
                             )
@@ -2179,42 +2168,15 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                                 _collision_id = _col["id"] if isinstance(_col, dict) else _col[0]
 
                         if _collision_id:
-                            # A completed row already exists for this email.
-                            # Merge: transfer the new parse data into placeholder_id (keeping it
-                            # alive so the upload-status poll doesn't get a 404), then remove
-                            # the parser temp row and the old collision row.
+                            # A completed row already exists for this email — delete both
+                            # the placeholder and the parser row, keep the original.
                             cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
-                            cursor.execute(
-                                f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
-                                (placeholder_id, parser_id),
-                            )
-                            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
-                            # Remove the old collision row (placeholder now owns the email)
-                            cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (_collision_id,))
-                            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (_collision_id,))
-                            if parsed_data:
-                                cursor.execute(
-                                    f"""UPDATE {CANDIDATES_TABLE}
-                                        SET first_name = %s, last_name = %s, address = %s,
-                                            phone = %s, email = %s, qualification = %s,
-                                            visa_support = %s, work_authorization_type = %s,
-                                            linkedin = %s, profile_picture_url = %s,
-                                            parsed_at = %s, resume_parse_status = 'completed'
-                                        WHERE id = %s""",
-                                    (parsed_data["first_name"], parsed_data["last_name"],
-                                     parsed_data["address"], parsed_data["phone"],
-                                     parsed_data["email"], parsed_data["qualification"],
-                                     parsed_data["visa_support"], parsed_data["work_authorization_type"],
-                                     parsed_data["linkedin"], parsed_data["profile_picture_url"],
-                                     parsed_data["parsed_at"], placeholder_id),
-                                )
-                            else:
-                                cursor.execute(
-                                    f"UPDATE {CANDIDATES_TABLE} SET resume_parse_status = 'completed' WHERE id = %s",
-                                    (placeholder_id,),
-                                )
-                            print(f"[DEDUP] email collision for {_parsed_email!r} — merged to placeholder={placeholder_id}, removed old id={_collision_id}", flush=True)
-                            final_candidate_id = placeholder_id
+                            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (placeholder_id,))
+                            if parser_id != _collision_id:
+                                cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (parser_id,))
+                                cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
+                            print(f"[DEDUP] email collision for {_parsed_email!r} — kept id={_collision_id}, discarded placeholder={placeholder_id}", flush=True)
+                            final_candidate_id = _collision_id
                         else:
                             # Delete placeholder's skills row first (if any) to avoid PK conflict,
                             # then re-point parser's skills row to placeholder_id.
