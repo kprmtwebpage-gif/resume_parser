@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -825,11 +825,11 @@ def send_email(
 
 @router.post("/send-with-attachments")
 async def send_email_with_attachments(
-    candidate_id: int = Query(...),
-    recipient_email: str = Query(...),
-    subject: str = Query(...),
-    body: str = Query(...),
-    provider: str = Query("gmail"),
+    candidate_id: int = Form(...),
+    recipient_email: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    provider: str = Form("gmail"),
     files: List[UploadFile] = File(default=[]),
     request: Request = None,
     db: Session = Depends(get_db),
@@ -957,7 +957,21 @@ async def send_email_with_attachments(
                 f"If this still fails, Microsoft may have fully disabled Basic Auth for your account — use Gmail instead."
             )
         elif "authentication unsuccessful" in raw_lower or "authentication failed" in raw_lower or "5.7.3" in raw_error:
-            smtp_error_detail = f"Invalid login for {smtp_user}. Check your password. If two-step verification is on, you must use an App Password from https://account.live.com/proofs/AppPassword"
+            _prov = (provider or "gmail").lower()
+            if _prov == "zoho":
+                smtp_error_detail = (
+                    f"Invalid login for {smtp_user}. Check your password. "
+                    f"If 2FA is enabled on your Zoho account, generate an App Password at "
+                    f"https://accounts.zoho.com/home#security/app-passwords and use that instead."
+                )
+            elif _prov == "gmail":
+                smtp_error_detail = (
+                    f"Gmail rejected the password for {smtp_user}. "
+                    f"Google requires an App Password — go to "
+                    f"https://myaccount.google.com/apppasswords, generate one, and save it in User → Email Settings."
+                )
+            else:
+                smtp_error_detail = f"Invalid login for {smtp_user}. Check your password. If two-step verification is on, you must use an App Password from https://account.live.com/proofs/AppPassword"
         else:
             smtp_error_detail = f"SMTP authentication failed for {provider}: {raw_error}"
     except smtplib.SMTPConnectError as e:

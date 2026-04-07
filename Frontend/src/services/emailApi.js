@@ -50,20 +50,18 @@ export async function sendEmail({ candidateId, recipientEmail, subject, body, pr
 export async function sendEmailWithAttachments({ candidateId, recipientEmail, subject, body, provider, files }) {
   console.log('emailApi — sendEmailWithAttachments:', { candidateId, recipientEmail, subject, provider, fileCount: files?.length })
   const formData = new FormData()
+  formData.append('candidate_id', candidateId)
+  formData.append('recipient_email', recipientEmail)
+  formData.append('subject', subject)
+  formData.append('body', body)
+  formData.append('provider', provider || 'gmail')
   if (files && files.length > 0) {
     files.forEach((file) => formData.append('files', file))
   }
 
   const res = await api.post('/email/send-with-attachments', formData, {
-    params: {
-      candidate_id: candidateId,
-      recipient_email: recipientEmail,
-      subject,
-      body,
-      provider,
-    },
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 60000,
+    timeout: 120000,
   })
   console.log('emailApi — sendEmailWithAttachments response:', res.data)
   return res.data
