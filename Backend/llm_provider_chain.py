@@ -209,7 +209,7 @@ def _call_ollama(prompt: str) -> str | None:
     model = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
     try:
         import openai
-        client = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=15.0)
+        client = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=60.0)
         response = client.chat.completions.create(
             model=model,
             messages=[
