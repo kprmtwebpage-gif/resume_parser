@@ -90,12 +90,16 @@ def _get_smtp_config(provider: str = "gmail", db: Session = None, user_id: int =
         except Exception as e:
             logger.warning("Failed to load legacy user email config: %s", e)
 
-    # 3. Fallback to global .env config
-    if provider == "zoho" and ZOHO_SMTP_USER and ZOHO_SMTP_PASSWORD:
-        return ZOHO_SMTP_HOST, ZOHO_SMTP_PORT, ZOHO_SMTP_USER, ZOHO_SMTP_PASSWORD
-    if provider == "outlook" and OUTLOOK_SMTP_USER and OUTLOOK_SMTP_PASSWORD:
-        return OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT, OUTLOOK_SMTP_USER, OUTLOOK_SMTP_PASSWORD
-    # Default to Gmail
+    # 3. Fallback to global .env config — only use provider-matching env vars
+    if provider == "zoho":
+        if ZOHO_SMTP_USER and ZOHO_SMTP_PASSWORD:
+            return ZOHO_SMTP_HOST, ZOHO_SMTP_PORT, ZOHO_SMTP_USER, ZOHO_SMTP_PASSWORD
+        return ZOHO_SMTP_HOST, ZOHO_SMTP_PORT, "", ""  # not configured — will trigger 503
+    if provider == "outlook":
+        if OUTLOOK_SMTP_USER and OUTLOOK_SMTP_PASSWORD:
+            return OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT, OUTLOOK_SMTP_USER, OUTLOOK_SMTP_PASSWORD
+        return OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT, "", ""  # not configured — will trigger 503
+    # Gmail
     return SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD
 
 
@@ -751,7 +755,21 @@ def send_email(
                 f"If this still fails, Microsoft may have fully disabled Basic Auth for your account — use Gmail instead."
             )
         elif "authentication unsuccessful" in raw_lower or "authentication failed" in raw_lower or "5.7.3" in raw_error:
-            smtp_error_detail = f"Invalid login for {smtp_user}. Check your password. If two-step verification is on, you must use an App Password from https://account.live.com/proofs/AppPassword"
+            _prov = (payload.provider or "gmail").lower()
+            if _prov == "zoho":
+                smtp_error_detail = (
+                    f"Invalid login for {smtp_user}. Check your password. "
+                    f"If 2FA is enabled on your Zoho account, generate an App Password at "
+                    f"https://accounts.zoho.com/home#security/app-passwords and use that instead."
+                )
+            elif _prov == "gmail":
+                smtp_error_detail = (
+                    f"Gmail rejected the password for {smtp_user}. "
+                    f"Google requires an App Password — go to "
+                    f"https://myaccount.google.com/apppasswords, generate one, and save it in User → Email Settings."
+                )
+            else:
+                smtp_error_detail = f"Invalid login for {smtp_user}. Check your password. If two-step verification is on, you must use an App Password from https://account.live.com/proofs/AppPassword"
         else:
             smtp_error_detail = f"SMTP authentication failed for {payload.provider}: {raw_error}"
     except smtplib.SMTPRecipientsRefused as e:
