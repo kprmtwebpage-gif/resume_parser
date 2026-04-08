@@ -7,7 +7,7 @@ import { apiUrl } from '../config'
 import logoUrl from '../assets/company-logo.png'
 
 const baseNavItems = [
-  { label: 'Search', path: '/' },
+  { label: 'Search', path: '/dashboard' },
   { label: 'Jobs', path: '/jobs' },
   { label: 'Upload', path: '/upload' },
   { label: 'Customer', path: '/customer' },
@@ -73,8 +73,8 @@ export default function TopNavbar() {
           <img src={logoUrl} alt="Company Logo" className="h-10 w-auto object-contain" />
           <nav className="hidden items-center gap-1 md:flex">
             {navItems.map((item) => {
-              const isItemActive = item.path === '/'
-                ? location.pathname === '/'
+              const isItemActive = item.path === '/dashboard'
+                ? location.pathname === '/dashboard'
                 : location.pathname.startsWith(item.path)
               return (
                 <NavLink

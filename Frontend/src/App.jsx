@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { UploadProvider } from './contexts/UploadContext'
@@ -24,6 +24,7 @@ import ServerStatus from './components/ServerStatus.jsx'
 import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
 import LoginPage from './login/LoginPage.jsx'
+import Home from './pages/Home.jsx'
 import CustomerPage from './pages/customer/CustomerPage.jsx'
 import CustomerCreate from './pages/customer/CustomerCreate.jsx'
 import CustomerDetail from './pages/customer/CustomerDetail.jsx'
@@ -43,13 +44,91 @@ function AdminGuard({ children }) {
     const user = stored ? JSON.parse(stored) : null
     if (user?.role === 'superuser' || user?.role === 'admin') return children
   } catch {}
-  return <Navigate to="/" replace />
+  return <Navigate to="/dashboard" replace />
 }
 
 function SearchPageChatbot() {
   const location = useLocation()
-  if (location.pathname !== '/') return null
+  if (location.pathname !== '/dashboard') return null
   return <ChatLauncher />
+}
+
+function LoginRoute({ onLoginSuccess }) {
+  const navigate = useNavigate()
+  const handleSuccess = () => {
+    onLoginSuccess()
+    navigate('/dashboard', { replace: true })
+  }
+  return <LoginPage onLoginSuccess={handleSuccess} />
+}
+
+function AuthenticatedRoutes() {
+  // Upload-only users: restrict to /upload route exclusively
+  try {
+    const stored = localStorage.getItem('rp_user')
+    const user = stored ? JSON.parse(stored) : null
+    if (user?.role === 'upload_user') {
+      return (
+        <UploadProvider>
+          <Routes>
+            <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
+            <Route path="*" element={<Navigate to="/upload" replace />} />
+          </Routes>
+        </UploadProvider>
+      )
+    }
+  } catch {}
+
+  return (
+    <UploadProvider>
+      <ServerStatus />
+      <FloatingUploadIndicator />
+      <Routes>
+        {/* Public home page remains accessible when logged in */}
+        <Route path="/" element={<Home />} />
+        {/* Main dashboard (was previously at /) */}
+        <Route path="/dashboard" element={<DashboardLayout><SearchPeople /></DashboardLayout>} />
+        <Route path="/jobs" element={<DashboardLayout><Jobs /></DashboardLayout>} />
+        <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
+        <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
+        <Route path="/jobs/:jobId/applied" element={<DashboardLayout><AppliedCandidatesPage /></DashboardLayout>} />
+        {/* Customer routes */}
+        <Route path="/customer" element={<DashboardLayout><CustomerPage /></DashboardLayout>} />
+        <Route path="/customer/new" element={<DashboardLayout><CustomerCreate /></DashboardLayout>} />
+        <Route path="/customer/:id/edit" element={<DashboardLayout><CustomerEdit /></DashboardLayout>} />
+        <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
+        {/* Send Mail page */}
+        <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
+        {/* User section (user panel only) */}
+        <Route path="/user" element={<DashboardLayout><UserLayout /></DashboardLayout>}>
+          <Route index element={<Navigate to="email/settings" replace />} />
+          <Route path="upload-log" element={<UserUploadLogs />} />
+          <Route path="email" element={<Navigate to="settings" replace />} />
+          <Route path="email/history" element={<EmailHistorySection />} />
+          <Route path="email/settings" element={<EmailSettingsPage />} />
+          {/* Back-compat routes */}
+          <Route path="email-settings" element={<Navigate to="email/settings" replace />} />
+        </Route>
+        {/* Templates page (part of Customer module) */}
+        <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
+        {/* Admin routes — protected by role check */}
+        <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
+          <Route index element={<DashboardOverview />} />
+          <Route path="upload-metrics" element={<UploadMetrics />} />
+          <Route path="upload-log" element={<UploadLog />} />
+          <Route path="email-tracking" element={<EmailTrackingDashboard />} />
+          <Route path="users" element={<UsersManagement />} />
+          <Route path="activity" element={<ActivityLog />} />
+          <Route path="candidate-templates" element={<CandidateTemplates />} />
+          <Route path="email-templates" element={<TemplateManager />} />
+          <Route path="resumes" element={<AdminResumes />} />
+        </Route>
+        {/* Catch-all: redirect unmatched routes to dashboard */}
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+      <SearchPageChatbot />
+    </UploadProvider>
+  )
 }
 
 function AppContent() {
@@ -92,73 +171,17 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
-    return <LoginPage onLoginSuccess={handleLoginSuccess} />
-  }
-
-  // Upload-only users: restrict to /upload route exclusively
-  try {
-    const stored = localStorage.getItem('rp_user')
-    const user = stored ? JSON.parse(stored) : null
-    if (user?.role === 'upload_user') {
-      return (
-        <UploadProvider>
-          <Routes>
-            <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
-            <Route path="*" element={<Navigate to="/upload" replace />} />
-          </Routes>
-        </UploadProvider>
-      )
-    }
-  } catch {}
-
-  return (
-    <UploadProvider>
-      <ServerStatus />
-      <FloatingUploadIndicator />
+    return (
       <Routes>
-        {/* Main app routes with DashboardLayout */}
-        <Route path="/" element={<DashboardLayout><SearchPeople /></DashboardLayout>} />
-        <Route path="/jobs" element={<DashboardLayout><Jobs /></DashboardLayout>} />
-        <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
-        <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
-        <Route path="/jobs/:jobId/applied" element={<DashboardLayout><AppliedCandidatesPage /></DashboardLayout>} />
-        {/* Customer routes */}
-        <Route path="/customer" element={<DashboardLayout><CustomerPage /></DashboardLayout>} />
-        <Route path="/customer/new" element={<DashboardLayout><CustomerCreate /></DashboardLayout>} />
-        <Route path="/customer/:id/edit" element={<DashboardLayout><CustomerEdit /></DashboardLayout>} />
-        <Route path="/customer/:id" element={<DashboardLayout><CustomerDetail /></DashboardLayout>} />
-        {/* Send Mail page */}
-        <Route path="/send-mail" element={<DashboardLayout><SendMail /></DashboardLayout>} />
-        {/* User section (user panel only) */}
-        <Route path="/user" element={<DashboardLayout><UserLayout /></DashboardLayout>}>
-          <Route index element={<Navigate to="email/settings" replace />} />
-          <Route path="upload-log" element={<UserUploadLogs />} />
-          <Route path="email" element={<Navigate to="settings" replace />} />
-          <Route path="email/history" element={<EmailHistorySection />} />
-          <Route path="email/settings" element={<EmailSettingsPage />} />
-          {/* Back-compat routes */}
-          <Route path="email-settings" element={<Navigate to="email/settings" replace />} />
-        </Route>
-        {/* Templates page (part of Customer module) */}
-        <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
-        {/* Admin routes — protected by role check */}
-        <Route path="/admin" element={<AdminGuard><AdminLayout /></AdminGuard>}>
-          <Route index element={<DashboardOverview />} />
-          <Route path="upload-metrics" element={<UploadMetrics />} />
-          <Route path="upload-log" element={<UploadLog />} />
-          <Route path="email-tracking" element={<EmailTrackingDashboard />} />
-          <Route path="users" element={<UsersManagement />} />
-          <Route path="activity" element={<ActivityLog />} />
-          <Route path="candidate-templates" element={<CandidateTemplates />} />
-          <Route path="email-templates" element={<TemplateManager />} />
-          <Route path="resumes" element={<AdminResumes />} />
-        </Route>
-        {/* Catch-all: redirect unmatched routes (e.g. /admin/login) to home */}
+        <Route path="/" element={<Home />} />
+        <Route path="/find-jobs" element={<FindJobs />} />
+        <Route path="/admin" element={<LoginRoute onLoginSuccess={handleLoginSuccess} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      <SearchPageChatbot />
-    </UploadProvider>
-  )
+    )
+  }
+
+  return <AuthenticatedRoutes />
 }
 
 export default function App() {

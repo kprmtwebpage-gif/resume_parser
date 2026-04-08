@@ -395,7 +395,7 @@ export default function AdminDashboard() {
           <p className="text-slate-400 text-sm mt-0.5">User management &amp; upload stats</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/')}
+          <button onClick={() => navigate('/dashboard')}
             className="px-4 py-2 text-sm rounded-lg border border-slate-600 hover:bg-slate-700 transition">
             ← Back to App
           </button>

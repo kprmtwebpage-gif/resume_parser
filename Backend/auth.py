@@ -425,26 +425,35 @@ async def login(
         { "access_token": "...", "token_type": "bearer",
           "username": "...", "role": "admin|user" }
     """
-    user = get_user_by_username(form_data.username)
-    if user is None or not verify_password(form_data.password, user["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        user = get_user_by_username(form_data.username)
+        if user is None or not verify_password(form_data.password, user["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if not user["is_active"]:
+            raise HTTPException(status_code=403, detail="Account disabled")
+
+        client_ip = request.client.host if request.client else "unknown"
+        record_login(user["id"], client_ip)
+
+        token = create_access_token({"sub": user["username"], "role": user["role"]})
+        return Token(
+            access_token=token,
+            token_type="bearer",
+            username=user["username"],
+            role=user["role"],
         )
-    if not user["is_active"]:
-        raise HTTPException(status_code=403, detail="Account disabled")
-
-    client_ip = request.client.host if request.client else "unknown"
-    record_login(user["id"], client_ip)
-
-    token = create_access_token({"sub": user["username"], "role": user["role"]})
-    return Token(
-        access_token=token,
-        token_type="bearer",
-        username=user["username"],
-        role=user["role"],
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Unhandled error during login")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "detail": "Internal Server Error"},
+        )
 
 
 @router.post("/logout")

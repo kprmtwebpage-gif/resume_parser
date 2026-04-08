@@ -145,7 +145,7 @@ export default function AdminLogin() {
 
         <div style={{ marginTop: '24px', textAlign: 'center' }}>
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/dashboard')}
             style={{
               background: 'none',
               border: 'none',

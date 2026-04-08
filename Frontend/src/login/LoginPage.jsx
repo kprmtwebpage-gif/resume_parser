@@ -233,7 +233,8 @@ export default function LoginPage({ onLoginSuccess }) {
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ username: forgotUser.trim() }),
                         })
-                        const data = await res.json()
+                        let data
+                        try { data = await res.json() } catch { throw new Error('Invalid server response') }
                         if (data.otp_sent) {
                           setForgotMsg(data.detail || 'OTP sent to your email.')
                           setForgotStep('otp')
@@ -297,7 +298,8 @@ export default function LoginPage({ onLoginSuccess }) {
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ username: forgotUser.trim(), otp: otpCode }),
                         })
-                        const data = await res.json()
+                        let data
+                        try { data = await res.json() } catch { throw new Error('Invalid server response') }
                         if (res.ok && data.reset_token) {
                           setResetToken(data.reset_token)
                           setForgotMsg('OTP verified! Set your new password.')
@@ -372,7 +374,8 @@ export default function LoginPage({ onLoginSuccess }) {
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ reset_token: resetToken, new_password: newPassword }),
                         })
-                        const data = await res.json()
+                        let data
+                        try { data = await res.json() } catch { throw new Error('Invalid server response') }
                         if (res.ok) {
                           setForgotMsg(data.detail || 'Password reset successfully!')
                           setForgotStep('done')

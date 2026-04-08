@@ -348,11 +348,11 @@ export default function FindJobs() {
           {/* Left: Back button and title */}
           <div className="flex items-center gap-4">
             <button
-              onClick={() => navigate('/jobs')}
+              onClick={() => navigate(sessionStorage.getItem('userLoginAuth') === 'true' ? '/jobs' : '/')}
               className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
             >
               <ArrowLeftIcon className="w-5 h-5" />
-              <span className="text-sm font-medium">Back to Jobs</span>
+              <span className="text-sm font-medium">{sessionStorage.getItem('userLoginAuth') === 'true' ? 'Back to Jobs' : 'Back to Home'}</span>
             </button>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">

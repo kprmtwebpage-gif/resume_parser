@@ -297,7 +297,7 @@ export default function UsersManagement() {
       const res = await fetch(apiUrl('/api/auth/admin/users'), { headers: getAuthHeaders() })
       if (res.status === 401) {
         logout()
-        navigate('/')
+        navigate('/dashboard')
         return
       }
       const data = await res.json()

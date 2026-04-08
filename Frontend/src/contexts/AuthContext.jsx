@@ -80,8 +80,13 @@ export function AuthProvider({ children }) {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Login failed')
+      let data
+      try {
+        data = await res.json()
+      } catch (e) {
+        throw new Error('Invalid server response')
+      }
+      if (!res.ok) throw new Error(data?.detail || 'Login failed')
 
       localStorage.setItem('rp_token', data.access_token)
       localStorage.setItem('rp_user',  JSON.stringify({ username: data.username, role: data.role }))
