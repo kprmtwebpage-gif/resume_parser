@@ -27,9 +27,7 @@ google-api-python-client>=2.120
 google-auth>=2.25
 google-auth-oauthlib>=1.2
 
-# Optional: LLM-powered extraction layer (set LLM_EXTRACT_ENABLED=true to activate)
-# Choose ONE depending on your LLM provider:
-#   OpenAI / Groq / any OpenAI-compatible API:
-# openai>=1.0
-#   Anthropic Claude:
+# LLM-powered extraction (Ollama, Cerebras, Groq all use OpenAI-compatible API)
+openai>=1.0
+#   Anthropic Claude (optional):
 # anthropic>=0.20
