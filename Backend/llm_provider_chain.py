@@ -158,10 +158,15 @@ def _call_groq(prompt: str) -> str | None:
 
 
 def _call_ollama(prompt: str) -> str | None:
-    """Call Ollama (OpenAI-compatible API)."""
-    base_url = os.getenv("OLLAMA_BASE_URL", "").strip()
-    if not base_url:
-        return None             # Not configured — skip silently
+    """Call a locally-running Ollama instance (OpenAI-compatible API).
+
+    Environment variables:
+        OLLAMA_BASE_URL   Ollama API base URL (default: http://localhost:11434/v1)
+        OLLAMA_MODEL      Model name as shown in `ollama list` (default: qwen2.5:7b)
+
+    Ollama does not require an API key — any non-empty string is accepted.
+    """
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").strip()
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip()
     try:
         import openai
@@ -180,15 +185,64 @@ def _call_ollama(prompt: str) -> str | None:
         raise RuntimeError(f"Ollama error: {type(e).__name__}: {e}") from e
 
 
+def _call_openrouter(prompt: str) -> str | None:
+    """Call OpenRouter (OpenAI-compatible aggregator with many free/paid models).
+
+    Environment variables:
+        OPENROUTER_API_KEY   OpenRouter API key (required)
+        OPENROUTER_MODEL     Model slug (default: meta-llama/llama-3.1-8b-instruct:free)
+
+    Free models on OpenRouter: meta-llama/llama-3.1-8b-instruct:free,
+    meta-llama/llama-3.3-70b-instruct:free, google/gemma-3-27b-it:free, etc.
+    """
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return None             # Not configured — skip silently
+    model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free").strip()
+    try:
+        import openai
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            timeout=30.0,
+            max_retries=1,
+            default_headers={"HTTP-Referer": "https://github.com/resume-parser", "X-Title": "ResumeParser"},
+        )
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a resume parser. Return ONLY valid JSON."},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=2048,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        raise RuntimeError(f"OpenRouter error: {type(e).__name__}: {e}") from e
+
+
 def _call_cerebras(prompt: str) -> str | None:
-    """Call Cerebras API (OpenAI-compatible)."""
+    """Call Cerebras Cloud API (OpenAI-compatible, very fast inference).
+
+    Environment variables:
+        CEREBRAS_API_KEY   Cerebras API key (required)
+        CEREBRAS_MODEL     Model slug (default: llama-3.3-70b)
+
+    Free tier: generous TPM limits, ~900 tokens/sec inference speed.
+    """
     api_key = os.getenv("CEREBRAS_API_KEY", "").strip()
     if not api_key:
         return None             # Not configured — skip silently
-    model = os.getenv("CEREBRAS_MODEL", "llama3.1-8b").strip()
+    model = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
     try:
         import openai
-        client = openai.OpenAI(api_key=api_key, base_url="https://api.cerebras.ai/v1", timeout=30.0)
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://api.cerebras.ai/v1",
+            timeout=30.0,
+            max_retries=1,
+        )
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -205,10 +259,11 @@ def _call_cerebras(prompt: str) -> str | None:
 
 # Registry: name → callable
 _PROVIDER_REGISTRY: dict[str, Any] = {
-    "hf":       _call_hf,
-    "groq":     _call_groq,
-    "ollama":   _call_ollama,
-    "cerebras": _call_cerebras,
+    "hf":         _call_hf,
+    "groq":       _call_groq,
+    "ollama":     _call_ollama,
+    "openrouter": _call_openrouter,
+    "cerebras":   _call_cerebras,
 }
 
 

@@ -9227,7 +9227,7 @@ def main() -> int:
                     _log.warning("LLM_USAGE [%s] %s", file, llm_status_msg)
             
             if use_llm:
-                _llm = _llm_extract(resume_text, ocr_text="")
+                _llm = _llm_extract(resume_text, ocr_text="", filename=file)
                 if _llm:
                     _llm_prefer = (_parse_mode == "llm_first")
                     extraction_method = "llm_first" if _parse_mode == "llm_first" else ("hybrid" if confidence_score >= 0.5 else "llm")
