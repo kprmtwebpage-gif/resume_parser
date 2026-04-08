@@ -345,9 +345,10 @@ WORK HISTORY:
 - Dates as "MM/YYYY" or "YYYY" format. null if not specified.
 
 CERTIFICATIONS:
-- Professional certifications only (AWS, Azure, PMP, CFA, CISSP, etc.).
-- NOT online course completions (Udemy, Coursera completion certs).
-- Normalize: "AZ-104" -> "Microsoft Certified: Azure Administrator Associate".
+- Extract ALL professional certifications explicitly stated in the resume.
+- Include ALL domains: cloud/tech (AWS CCP/SAA/SAP/DEA, Azure AZ-900/AZ-104/AZ-305, GCP ACE/PCE), security (CISSP, CEH, CompTIA Security+), project management (PMP, CAPM, PRINCE2, PMI-ACP), business analysis (CBAP, CCBA, PMI-PBA), Agile/Scrum (CSM, CSPO, SAFe, PSM, PMI-ACP), finance (CFA, FRM, CPA, CA, ACCA), data (CDP, DAMA-CDMP, Tableau Certified), quality (Six Sigma Green/Black/Yellow Belt, Lean, ITIL), and any other domain explicitly stated.
+- NOT online course completions (Udemy, Coursera, LinkedIn Learning) unless labeled as a professional certification.
+- Normalize short forms: AZ-104->Microsoft Certified: Azure Administrator Associate, AZ-305->Microsoft Certified: Azure Solutions Architect Expert, AZ-900->Microsoft Azure Fundamentals, CSM->Certified ScrumMaster (Scrum Alliance), PMP->Project Management Professional (PMI), CAPM->Certified Associate in Project Management (PMI), CBAP->Certified Business Analysis Professional (IIBA), PMI-ACP->PMI Agile Certified Practitioner.
 
 EDUCATION:
 - Extract all degrees with institution names.
@@ -769,7 +770,9 @@ SKILLS:
 
 CERTIFICATIONS:
 - Extract ALL professional certifications with issuing organization.
-- Normalize names: AWS SAA->AWS Solutions Architect Associate, AZ-900->Microsoft Azure Fundamentals, PMP->Project Management Professional, CSM->Certified ScrumMaster, CCNA->Cisco Certified Network Associate.
+- Include ALL domains: cloud/tech (AWS, Azure, GCP), security (CISSP, CEH, CompTIA), project management (PMP, CAPM, PRINCE2, PMI-ACP), business analysis (CBAP, CCBA, PMI-PBA), Agile/Scrum (CSM, CSPO, SAFe, PSM), finance (CFA, FRM, CPA, CA, ACCA), data (CDP, Tableau Certified), quality (Six Sigma Green/Black/Yellow Belt, Lean, ITIL), and any domain explicitly stated.
+- NOT online course completions (Udemy, Coursera, LinkedIn Learning) unless labeled as professional certification.
+- Normalize: AWS SAA->AWS Solutions Architect Associate, AZ-900->Microsoft Azure Fundamentals, AZ-104->Microsoft Certified: Azure Administrator Associate, AZ-305->Microsoft Certified: Azure Solutions Architect Expert, PMP->Project Management Professional (PMI), CAPM->Certified Associate in Project Management (PMI), CSM->Certified ScrumMaster (Scrum Alliance), CSPO->Certified Scrum Product Owner (Scrum Alliance), CBAP->Certified Business Analysis Professional (IIBA), CCNA->Cisco Certified Network Associate, PMI-ACP->PMI Agile Certified Practitioner.
 - Confidence 0.95 for explicitly stated certs, 0.70 for inferred from context.
 
 EDUCATION:

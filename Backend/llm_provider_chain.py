@@ -227,21 +227,23 @@ def _call_cerebras(prompt: str) -> str | None:
 
     Environment variables:
         CEREBRAS_API_KEY   Cerebras API key (required)
-        CEREBRAS_MODEL     Model slug (default: llama-3.3-70b)
+        CEREBRAS_MODEL     Model slug (default: llama3.1-8b)
 
     Free tier: generous TPM limits, ~900 tokens/sec inference speed.
+    Recommended production model: llama3.1-8b (fast, high rate limits).
+    For highest accuracy (dev only): qwen-3-235b-a22b-instruct-2507 (severe rate limits).
     """
     api_key = os.getenv("CEREBRAS_API_KEY", "").strip()
     if not api_key:
         return None             # Not configured — skip silently
-    model = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
+    model = os.getenv("CEREBRAS_MODEL", "llama3.1-8b").strip()
     try:
         import openai
         client = openai.OpenAI(
             api_key=api_key,
             base_url="https://api.cerebras.ai/v1",
             timeout=30.0,
-            max_retries=1,
+            max_retries=0,  # No library-level retries — chain handles it at provider level
         )
         response = client.chat.completions.create(
             model=model,
@@ -253,6 +255,9 @@ def _call_cerebras(prompt: str) -> str | None:
             max_tokens=2048,
         )
         return (response.choices[0].message.content or "").strip()
+    except openai.RateLimitError as e:
+        # Prefix with RATE_LIMIT: so call_llm_chain can use a shorter circuit-open window
+        raise RuntimeError(f"RATE_LIMIT:Cerebras 429 rate limited: {e}") from e
     except Exception as e:
         raise RuntimeError(f"Cerebras error: {type(e).__name__}: {e}") from e
 
@@ -373,10 +378,16 @@ def call_llm_chain(prompt: str, source_file: str = "") -> dict | None:
                                source_file, provider_name)
 
         except Exception as e:
-            state.record_failure(max_fails, reset_secs)
+            # Rate limit errors use a shorter circuit-open window (5 min) so the
+            # provider recovers quickly once the quota resets, rather than being
+            # skipped for the full 30 minutes like a hard error.
+            is_rate_limit = str(e).startswith("RATE_LIMIT:")
+            circuit_secs = min(reset_secs, 300.0) if is_rate_limit else reset_secs
+            state.record_failure(max_fails, circuit_secs)
             logger.warning(
-                "llm_chain [%s]: provider '%s' failed (%s), trying next provider",
-                source_file, provider_name, e,
+                "llm_chain [%s]: provider '%s' %s, trying next provider",
+                source_file, provider_name,
+                "rate-limited (circuit open 5 min)" if is_rate_limit else f"failed ({e})",
             )
             continue
 
