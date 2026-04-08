@@ -307,23 +307,13 @@ CONTACT:
 - linkedin_url: Normalize to https://www.linkedin.com/in/username format. Strip trailing slashes or query params.
 
 LOCATION:
-- Extract the candidate's CURRENT residential/personal location.
-- Priority order (strictly follow this order — do NOT skip ahead):
-  1. Explicit location/address near the candidate's name at the top of the resume (highest priority)
-  2. Address line with city/state/zip anywhere in the header section
-  3. Labels: "Location:", "Address:", "City:", "Based in:", "Residing in:"
-  4. Phone area code as country signal: 3-digit US area codes (e.g. 405=Oklahoma, 972=Texas, 214=Texas, 312=Illinois, 212=New York, 415=California, 713=Texas, 617=Massachusetts) → candidate is in USA. Use this to determine country if no explicit location.
-  5. ONLY if truly no personal location available: use the MOST RECENT/CURRENT employer's location as a last-resort proxy. "Most recent" = the job with the latest start date or marked Present/Current. NEVER use an older employer's location if a more recent one exists — even if the older one has a clearer address.
-- CAREER MIGRATION RULE: If the resume shows a clear pattern of older roles in India/another country but current roles in the US (or phone has a US area code), the candidate is currently in the US. Use city from current employer if available, else return just "United States".
-- US PHONE SIGNAL: If the phone number is a 10-digit US number (starts with area code like 405, 972, 214, 469, 817, 312, 773, 212, 646, 718, 415, 650, 408, 713, 832, 617, 857, 206, 425, 253, 602, 480, 303, 720, 404, 678, 770, 512, 737, 214, etc.) AND there is no current US employer location, return "United States" as the country even if older employers were in India or elsewhere.
+- Extract the candidate's CURRENT location using ONLY these two sources (in priority order):
+  1. EXPLICIT location in the resume: address/city/state near the candidate's name at the top, or any "Location:", "Address:", "City:", "Based in:" label anywhere in the document.
+  2. CURRENT employer's location: ONLY if the current/most-recent job role explicitly states a city or location AND that role is marked Present or has the most recent start date. If the current role has no location listed — return null, do NOT fall back to any older role.
+- STRICT: NEVER use a past employer's location. NEVER infer location from phone numbers, names, or any other signal. If no location is found via sources 1 or 2, return null.
 - Format as: "City, State/Province, Country"
-- MANDATORY state/country expansion rules:
-  - ALWAYS expand US state abbreviations: TX->Texas, CA->California, NY->New York, FL->Florida, OH->Ohio, IL->Illinois, GA->Georgia, NC->North Carolina, PA->Pennsylvania, NJ->New Jersey, VA->Virginia, WA->Washington, MA->Massachusetts, MD->Maryland, MN->Minnesota, CO->Colorado, AZ->Arizona, IN->Indiana, MI->Michigan, MO->Missouri, TN->Tennessee, WI->Wisconsin, CT->Connecticut, OR->Oregon, SC->South Carolina, KY->Kentucky, AL->Alabama, LA->Louisiana, OK->Oklahoma, UT->Utah, NV->Nevada, etc.
-  - ALWAYS use "United States" not "US", "USA", or "U.S.A."
-  - ALWAYS use "United Kingdom" not "UK"
-  - ALWAYS use "United Arab Emirates" not "UAE"
-- Do NOT include zip codes, street addresses, apartment numbers, or company names in location.
-- If genuinely unknown and no signals available, return null.
+- MANDATORY expansion: ALWAYS expand US state abbreviations (TX->Texas, CA->California, NY->New York, FL->Florida, OH->Ohio, IL->Illinois, GA->Georgia, NC->North Carolina, VA->Virginia, WA->Washington, MA->Massachusetts, MD->Maryland, CO->Colorado, AZ->Arizona, IN->Indiana, MI->Michigan, TN->Tennessee, OK->Oklahoma, NV->Nevada, etc.). ALWAYS use "United States" not "US"/"USA". ALWAYS use "United Kingdom" not "UK". ALWAYS use "United Arab Emirates" not "UAE".
+- Do NOT include zip codes, street addresses, or company names.
 
 SKILLS:
 - Extract ALL technical skills, tools, frameworks, programming languages, platforms, methodologies mentioned anywhere in the resume.
@@ -453,17 +443,6 @@ def _build_prompt(resume_text: str, ocr_text: str, filename: str = "") -> str:
     clean_text = re.sub(r'[\u200b\u200c\u200d\u200e\u200f\ufeff]', '', clean_text)  # zero-width chars
     clean_text = re.sub(r'[^\x20-\x7e\n\r\t\u00a0-\u024f\u0370-\u03ff\u0400-\u04ff\u2000-\u206f\u2190-\u21ff]', ' ', clean_text)  # non-printable
     clean_text = re.sub(r' {3,}', '  ', clean_text)  # collapse excess spaces
-    # Detect US phone number and inject a location hint — helps LLM override old-employer locations
-    # Pattern: 10-digit US number (NXX-NXX-XXXX) with or without country code
-    _us_phone = re.search(
-        r'(?<!\d)(?:\+?1[\s.\-]?)?(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})(?!\d)',
-        clean_text
-    )
-    if _us_phone:
-        # Verify it looks like a US NANP number (area code 200-999, not 000/100)
-        digits = re.sub(r'\D', '', _us_phone.group(0))
-        if len(digits) in (10, 11) and (len(digits) == 10 and digits[0] >= '2' or len(digits) == 11 and digits[0] == '1' and digits[1] >= '2'):
-            clean_text = "[LOCATION HINT: US phone number detected — candidate is currently in the United States]\n" + clean_text
     # Extract a clean name hint from filename (remove extensions, IDs, timestamps)
     fname_hint = ""
     if filename:
@@ -683,20 +662,47 @@ def llm_extract(
             return [d for d in v if isinstance(d, dict)]
         return []
 
-    # If no explicit location, infer from current employer's location
+    # Location post-processing: strict current-only rule
     raw_location = _str_or_none(result.get("location"))
-    if not raw_location or raw_location.lower() in {"null", "none", "n/a", "unknown", ""}:
-        work_hist = _list_of_dicts(result.get("work_history", []))
+    work_hist = _list_of_dicts(result.get("work_history", []))
+
+    # Classify work history locations into current vs past
+    _NULL_VALS = {"null", "none", "n/a", "unknown", ""}
+    current_locs: list[str] = []
+    past_locs: list[str] = []
+    for wh in work_hist:
+        loc = wh.get("location")
+        if not loc:
+            continue
+        loc_str = str(loc).strip()
+        end = str(wh.get("end_date", "") or "").lower()
+        if wh.get("is_current") or end in {"present", "current", "now", ""}:
+            current_locs.append(loc_str)
+        else:
+            past_locs.append(loc_str)
+
+    def _city_matches(a: str, b: str) -> bool:
+        """True if two location strings share the same leading city token."""
+        a_city = a.lower().split(",")[0].strip()
+        b_city = b.lower().split(",")[0].strip()
+        return bool(a_city and b_city and (a_city in b_city or b_city in a_city))
+
+    # If LLM returned a location, validate it is not sourced from a past employer
+    if raw_location and raw_location.lower() not in _NULL_VALS:
+        has_current_match = any(_city_matches(raw_location, c) for c in current_locs)
+        has_past_match = any(_city_matches(raw_location, p) for p in past_locs)
+        if has_past_match and not has_current_match:
+            # Location came from an old employer — discard it
+            raw_location = None
+
+    # If still no location, fall back to current employer's location only
+    if not raw_location or raw_location.lower() in _NULL_VALS:
         for wh in work_hist:
-            if wh.get("is_current") and wh.get("location"):
+            end = str(wh.get("end_date", "") or "").lower()
+            if (wh.get("is_current") or end in {"present", "current", "now", ""}) and wh.get("location"):
                 raw_location = str(wh["location"]).strip()
                 break
-        # fallback: first entry's location
-        if (not raw_location or raw_location.lower() in {"null", "none", ""}) and work_hist:
-            for wh in work_hist:
-                if wh.get("location"):
-                    raw_location = str(wh["location"]).strip()
-                    break
+        # NOTE: do NOT fall back to past employer locations
 
     return {
         "first_name":           _str_or_none(result.get("first_name")),
