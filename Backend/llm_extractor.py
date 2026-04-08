@@ -288,7 +288,8 @@ JOB TITLE:
 - Do NOT use: section headers ("Experience", "Summary"), industry labels ("Public Sector"), department names, or skill categories as job title.
 - Normalize abbreviations only: Sr->Senior, Jr->Junior, Mgr->Manager, Dept->Department.
 - Keep the specific title as-is. Do NOT generalize ("Document Controller" stays "Document Controller", NOT "Manager").
-- Do NOT combine multiple titles. Pick the single most prominent one.
+- If the resume headline contains pipe-separated specializations (e.g., "Senior Business Analyst | Banking | Finance | Data Analytics"), preserve the FULL headline exactly as written — these are domain specializations, not separate job titles.
+- If the resume shows multiple UNRELATED titles in different roles, pick only the most recent/prominent one.
 
 CONTACT:
 - email: Extract email address. Normalize to lowercase.
@@ -323,7 +324,9 @@ LOCATION:
 
 SKILLS:
 - Extract ALL technical skills, tools, frameworks, programming languages, platforms, methodologies mentioned anywhere in the resume.
-- Return as a flat array of lowercase strings.
+- Return as a flat array of lowercase strings. Each skill should be ONE individual item, NOT a category.
+  CORRECT: ["sql", "power bi", "tableau", "jira", "agile", "scrum", "excel"]
+  WRONG:   ["Data/BI Tools", "Project Management Tools", "Programming Languages"]
 - Include: programming languages (python, java), frameworks (react, spring boot), tools (docker, jenkins), cloud (aws, azure, gcp), databases (postgresql, mongodb), methodologies (agile, scrum).
 - ALSO include domain-specific terms: business analysis (brd, frd, uat, gap analysis, process mapping, bpmn, user stories, wireframing, stakeholder management), project management (kanban, sprint planning, risk management), data/BI tools (etl, data pipelines, dimensional modeling, financial modeling, kpi), and any other professional domain terms explicitly mentioned.
 - Extract skills from ALL sections: skills sidebar, core competencies, technical skills, work experience bullets, summary, tools & technologies.
@@ -753,7 +756,8 @@ JOB TITLE:
 - Normalize abbreviations only: Sr->Senior, Jr->Junior, Mgr->Manager.
 - Keep the FULL specific title as written in the resume. Do NOT generalize, shorten, or remove qualifiers.
   Example: "ETL and Data Hub Consultant" must NOT become just "Consultant".
-- Pick the single most prominent title. Do NOT combine multiple titles.
+- If the resume headline contains pipe-separated specializations (e.g., "Senior Business Analyst | Banking | Finance | Data Analytics"), preserve the FULL headline exactly as written.
+- If the resume shows multiple UNRELATED titles in different roles, pick only the most recent/prominent one.
 
 SKILLS:
 - Extract ALL technical skills, tools, frameworks, methodologies, and platforms explicitly mentioned.
