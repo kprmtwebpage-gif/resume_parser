@@ -282,12 +282,22 @@ def _parse_json_response(raw: str) -> dict | None:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1:
-            try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
-                pass
+        pass
+    # Extract JSON object from surrounding text
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end != -1:
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        # Fix trailing commas before } or ]
+        import re
+        cleaned = re.sub(r',\s*([}\]])', r'\1', candidate)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
     return None
 
 

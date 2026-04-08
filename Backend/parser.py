@@ -1159,6 +1159,10 @@ def extract_text_from_doc(path: str) -> str:
                             i += 1
                     extracted = " ".join(text_chunks)
                     if len(extracted.strip()) > 50:
+                        # Strip HYPERLINK markup left by Word's OLE stream
+                        # (e.g., 'HYPERLINK "https://..."') before returning.
+                        extracted = re.sub(r'HYPERLINK\s+"[^"]+"', " ", extracted)
+                        extracted = re.sub(r'\s{2,}', " ", extracted)
                         return extracted
         except Exception:
             pass
@@ -1171,7 +1175,24 @@ def extract_text_from_doc(path: str) -> str:
         text = printable.decode("ascii", errors="ignore")
         # Filter out short garbage tokens
         words = [w for w in text.split() if len(w) >= 2]
-        return " ".join(words)
+        text = " ".join(words)
+        # Strip HYPERLINK markup (left by Word) before returning
+        text = re.sub(r'HYPERLINK\s+"[^"]+"', " ", text)
+        text = re.sub(r'\s{2,}', " ", text)
+        # Strip binary-garbage prefix: the OLE raw binary often starts with
+        # non-meaningful tokens before the actual resume content begins.
+        # Find the first meaningful anchor: an all-caps name block, email, or
+        # phone number which signals the start of the resume header.
+        _anchor = re.search(
+            r'(?:(?:[A-Z]{2,}\s+){2,}[A-Z]{2,})'   # e.g. "ABDUL HAKKIM NAWAZ"
+            r'|(?:E[\s-]?Mail\s*:)'                  # "E-Mail:"
+            r'|(?:[\w.+%-]+@[\w.-]+\.[A-Za-z]{2,})' # email address
+            r'|(?:\+?1?\s*\(?\d{3}\)?[\s.-]\d{3})',  # phone number
+            text,
+        )
+        if _anchor and _anchor.start() > 20:
+            text = text[_anchor.start():]
+        return text.strip()
     except Exception:
         return ""
 
@@ -2730,6 +2751,12 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                     _name_salvaged = True
                     break
                 if len(_rem_tokens) == 1 and _rem_tokens[0].casefold() in known_first_names:
+                    # Do NOT salvage a single token from a line that contains institution words
+                    # (e.g. "Kent State University KENT, OH" → reject "Kent" as a name)
+                    _orig_lower = " ".join(_bc_words).lower()
+                    _institution_words = {"university", "college", "school", "institute", "polytechnic", "academy"}
+                    if any(w in _orig_lower for w in _institution_words):
+                        break  # skip this line entirely
                     line = ' '.join(_remaining)
                     lnl = line.lower().strip()
                     _name_salvaged = True
@@ -2741,6 +2768,35 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         cleaned = re.sub(r"(?i)^name\s*[:\-]\s*", "", line).strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
         cleaned = cleaned.strip(" ,|-/\t")
+
+        # ── Strip comma-separated certifications / suffixes ──
+        # Handles patterns like "Amit Tawari, PMP, ITIL, CSM" → "Amit Tawari"
+        # Keep only the first comma-part if trailing parts are short abbreviations
+        # or well-known certification acronyms.
+        _cert_like = {"pmp", "csm", "itil", "aws", "saa", "sap", "cka",
+                      "ccna", "ccnp", "ccie", "cissp", "cisa", "cism",
+                      "togaf", "safe", "popm", "psm", "pmi", "acp",
+                      "istqb", "ocjp", "ocp", "oca", "scjp", "rhce",
+                      "rhcsa", "mcsa", "mcse", "mcts", "mcp", "ceh",
+                      "comptia", "a+", "n+", "s+", "capm", "prince2",
+                      "six", "sigma", "lean", "ssgb", "ssbb", "lssbb",
+                      "lssgb", "cbap", "ecba", "ccba", "cpim", "cscp"}
+        if "," in cleaned:
+            _comma_parts = [p.strip() for p in cleaned.split(",")]
+            if len(_comma_parts) >= 2:
+                _trailing = _comma_parts[1:]
+                _trailing_tokens = [t.strip().lower().rstrip(".") for t in _trailing]
+                # If most trailing comma-parts are short (≤6 chars) or are known cert abbrevs,
+                # they're credentials, not part of the name.
+                _cert_count = sum(
+                    1 for t in _trailing_tokens
+                    if len(t) <= 6 or t in _cert_like or t.replace("-", "").replace(" ", "") in _cert_like
+                )
+                if _cert_count >= len(_trailing) * 0.5 and looks_like_name_tokens(
+                    [t.strip(",./") for t in _comma_parts[0].split() if t.strip(",./")]
+                ):
+                    cleaned = _comma_parts[0].strip()
+        # ── end cert stripping ──
 
         # Tokenize and drop common suffixes.
         tokens = [t for t in re.split(r"\s+", cleaned) if t]
@@ -2758,6 +2814,14 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         # Garbled PDF text often produces concatenated words like
         # "Istqb®Certifiedprofessionalrecognizedfor" which are clearly not names.
         tokens = [t for t in tokens if len(t) <= 20]
+        # Strip trailing section/label words that leak into names
+        # e.g. "Atul G. Patil SYNOPSIS" → tokens[3] = "SYNOPSIS" should be stripped
+        _name_section_trailers = {"synopsis", "summary", "profile", "resume", "cv", "curriculum",
+                                   "introduction", "overview", "contact", "details"}
+        while tokens and tokens[-1].casefold() in _name_section_trailers:
+            tokens = tokens[:-1]
+        if not tokens:
+            continue
         suffixes = {"jr", "sr", "ii", "iii", "iv",
                     "msc", "bsc", "mba", "phd", "btech", "mtech",
                     "be", "bca", "mca", "mca", "mca"}
@@ -2820,6 +2884,13 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
         score = 0
         score += max(0, 60 - idx * 3)
 
+        # Strong bonus: idx 0-1 lines with 2-4 pure Title-Case words are almost certainly the name.
+        # This prevents later lines (e.g. "Kent State University") from outscoring the real name.
+        if idx <= 1 and 2 <= len(tokens) <= 4:
+            if all(re.match(r'^[A-Z][A-Za-z\'-]+$', t) for t in tokens):
+                if not any(t.casefold() in role_words for t in tokens):
+                    score += 30
+
         # Bonus if line is ALL CAPS (common in headers) but still name-like.
         letters = re.sub(r"[^A-Za-z]", "", cleaned)
         if letters and letters.isupper():
@@ -2856,8 +2927,14 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
                 # Append initial as last token so it becomes last_name
                 tokens.append(initial)
 
-        first = tokens[0]
-        last = tokens[-1] if len(tokens) >= 2 else ""
+        # For 4+ token names keep all middle tokens in first_name
+        # e.g. "John Michael David Smith" → first="John Michael David", last="Smith"
+        if len(tokens) >= 4:
+            first = " ".join(tokens[:-1])
+            last = tokens[-1]
+        else:
+            first = tokens[0]
+            last = tokens[-1] if len(tokens) >= 2 else ""
 
         # ── Surname particles ─────────────────────────────────────────
         # "Angela Du Buc" → first="Angela", last="DuBuc"
@@ -2896,28 +2973,28 @@ def extract_name(text: str, *, email: str | None = None) -> tuple[str, str]:
             # Case A: surname particle → merge particle + surname as last name
             if t1a.casefold() in _surname_particles and len(t0a) >= 2 and len(t2a) >= 2:
                 first = tokens[0]
-                last = tokens[1][:1].upper() + tokens[1][1:].lower() + tokens[2][:1].upper() + tokens[2][1:].lower()
+                last = tokens[1][:1].upper() + tokens[1][1:].lower() + " " + tokens[2][:1].upper() + tokens[2][1:].lower()
 
             # Case B: trailing single-letter initial → compound first name
-            # "Sri Viswanath K" → first="SriViswanath", last="K"
+            # "Sri Viswanath K" → first="Sri Viswanath", last="K"
             elif len(t2a) == 1 and t2a.isupper() and len(t0a) >= 2 and len(t1a) >= 3:
                 _tc0 = tokens[0][:1].upper() + tokens[0][1:].lower()
                 _tc1 = tokens[1][:1].upper() + tokens[1][1:].lower()
-                merged = _tc0 + _tc1
-                if len(merged) <= 20:
+                merged = _tc0 + " " + _tc1
+                if len(merged) <= 21:
                     first = merged
                     last = tokens[2]
 
             # Case C: known South Asian compound second part → merge first two
-            # "Sai Surendra Siripurapu" → first="SaiSurendra", last="Siripurapu"
+            # "Sai Surendra Siripurapu" → first="Sai Surendra", last="Siripurapu"
             elif (
                 len(t0a) >= 2 and len(t1a) >= 2 and len(t2a) >= 2
                 and t1a.casefold() in _compound_parts
             ):
                 _tc0 = tokens[0][:1].upper() + tokens[0][1:].lower()
                 _tc1 = tokens[1][:1].upper() + tokens[1][1:].lower()
-                merged_candidate = _tc0 + _tc1
-                if len(merged_candidate) <= 20:
+                merged_candidate = _tc0 + " " + _tc1
+                if len(merged_candidate) <= 21:
                     first = merged_candidate
                     last = tokens[2]
                 else:

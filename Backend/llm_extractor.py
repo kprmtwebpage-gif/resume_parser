@@ -275,6 +275,7 @@ NAME:
 - The candidate's full legal name is almost always the FIRST prominent text at the very top of the resume, before any contact info or section headers.
 - Split into first_name and last_name. For multi-part names (e.g., "Arbaz Shareef Mohammed"), first_name = first word, last_name = remaining words joined.
 - For single-word names, set first_name = that word, last_name = null.
+- ALWAYS return names in Title Case (capitalize first letter of each word). Examples: ABDULAI CAULKER -> Abdulai Caulker, john doe -> John Doe.
 - Do NOT use company names, email usernames, addresses, job titles, or section headers as name.
 - The filename may contain the candidate's name as a hint: "{filename_hint}"
 - If the resume text is garbled or unreadable at the top, use the filename hint to identify the name.
@@ -324,6 +325,8 @@ SKILLS:
 - Extract ALL technical skills, tools, frameworks, programming languages, platforms, methodologies mentioned anywhere in the resume.
 - Return as a flat array of lowercase strings.
 - Include: programming languages (python, java), frameworks (react, spring boot), tools (docker, jenkins), cloud (aws, azure, gcp), databases (postgresql, mongodb), methodologies (agile, scrum).
+- ALSO include domain-specific terms: business analysis (brd, frd, uat, gap analysis, process mapping, bpmn, user stories, wireframing, stakeholder management), project management (kanban, sprint planning, risk management), data/BI tools (etl, data pipelines, dimensional modeling, financial modeling, kpi), and any other professional domain terms explicitly mentioned.
+- Extract skills from ALL sections: skills sidebar, core competencies, technical skills, work experience bullets, summary, tools & technologies.
 - Exclude: soft skills (leadership, communication), generic terms (computer, internet).
 
 EXPERIENCE YEARS:
@@ -723,6 +726,8 @@ NAME:
     "Abdul Khader Mohammed" → first_name: "Abdul", last_name: "Khader Mohammed"
     "Jyotsna M" → first_name: "Jyotsna", last_name: "M"
     "Li Wei" → first_name: "Li", last_name: "Wei"
+- ALWAYS return names in Title Case (capitalize first letter of each word).
+  Examples: ABDULAI CAULKER -> Abdulai Caulker, john doe -> John Doe.
 - For single-word names, set first_name = that word, last_name = null.
 - CRITICAL — DO NOT use any of these as name:
     × Company or employer names (e.g. "Google", "Infosys", "Microsoft")
