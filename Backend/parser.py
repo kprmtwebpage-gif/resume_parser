@@ -9229,9 +9229,21 @@ def main() -> int:
             if use_llm:
                 _llm = _llm_extract(resume_text, ocr_text="", filename=file)
                 if _llm:
-                    _llm_prefer = (_parse_mode == "llm_first")
+                    _llm_prefer = (_parse_mode == "llm_first")  # in llm_first mode, LLM takes priority
                     extraction_method = "llm_first" if _parse_mode == "llm_first" else ("hybrid" if confidence_score >= 0.5 else "llm")
-                    
+
+                    # Name: LLM-first mode overrides NLP name
+                    _llm_fn = (_llm.get("first_name") or "").strip()
+                    _llm_ln = (_llm.get("last_name") or "").strip()
+                    if (_llm_fn or _llm_ln) and (_llm_prefer or (not first_name and not last_name)):
+                        _log.info("LLM_ENRICH [%s] name: %s %s -> %s %s",
+                                  file, first_name or "(empty)", last_name or "(empty)",
+                                  _llm_fn or "(empty)", _llm_ln or "(empty)")
+                        if _llm_fn:
+                            first_name = _llm_fn
+                        if _llm_ln:
+                            last_name = _llm_ln
+
                     # Job title: prefer LLM when it has high confidence or rule-based missed
                     _llm_jt = _llm.get("job_title")
                     _llm_jt_conf = _llm.get("job_title_confidence") or 0.0
@@ -9304,6 +9316,17 @@ def main() -> int:
                                 # Current address looks US-derived but LLM says different country
                                 _log.info("LLM_ENRICH [%s] location (country-fix): %s -> %s", file, address, _llm_loc)
                                 address = _llm_loc
+
+                    # Skills: merge LLM skills with NLP skills (union, deduplicated)
+                    _llm_skills = _llm.get("skills") or []
+                    if _llm_skills and isinstance(_llm_skills, list):
+                        _existing_skills = set(s.strip().lower() for s in (skills or "").split(",") if s.strip())
+                        _new_skills = [s for s in _llm_skills if s.lower() not in _existing_skills]
+                        if _new_skills:
+                            _combined = sorted(_existing_skills | set(s.lower() for s in _new_skills))
+                            skills = ", ".join(_combined)
+                            _log.info("LLM_ENRICH [%s] skills: +%d new (total %d)",
+                                      file, len(_new_skills), len(_combined))
             
             # ── SELECTIVE MODE: field-specific LLM extraction ─────────────────
             # NLP keeps: name, email, phone, location, linkedin, experience_years
