@@ -308,11 +308,13 @@ CONTACT:
 
 LOCATION:
 - Extract the candidate's CURRENT residential/personal location.
-- Priority order:
+- Priority order (strictly follow this order — do NOT skip ahead):
   1. Explicit location/address near the candidate's name at the top of the resume (highest priority)
-  2. Address line with city/state/zip
-  3. "Location:", "Address:", "City:" labels
-  4. If no personal location found, use the location of the MOST RECENT/CURRENT employer as proxy
+  2. Address line with city/state/zip anywhere in the header section
+  3. Labels: "Location:", "Address:", "City:", "Based in:", "Residing in:"
+  4. Phone area code as country signal: 3-digit US area codes (e.g. 405=Oklahoma, 972=Texas, 214=Texas, 312=Illinois, 212=New York, 415=California, 713=Texas, 617=Massachusetts) → candidate is in USA. Use this to determine country if no explicit location.
+  5. ONLY if truly no personal location available: use the MOST RECENT/CURRENT employer's location as a last-resort proxy. "Most recent" = the job with the latest start date or marked Present/Current. NEVER use an older employer's location if a more recent one exists — even if the older one has a clearer address.
+- CAREER MIGRATION RULE: If the resume shows a clear pattern of older roles in India/another country but current roles in the US (or phone has a US area code), the candidate is currently in the US. Use city from current employer if available, else return just "United States".
 - Format as: "City, State/Province, Country"
 - MANDATORY state/country expansion rules:
   - ALWAYS expand US state abbreviations: TX->Texas, CA->California, NY->New York, FL->Florida, OH->Ohio, IL->Illinois, GA->Georgia, NC->North Carolina, PA->Pennsylvania, NJ->New Jersey, VA->Virginia, WA->Washington, MA->Massachusetts, MD->Maryland, MN->Minnesota, CO->Colorado, AZ->Arizona, IN->Indiana, MI->Michigan, MO->Missouri, TN->Tennessee, WI->Wisconsin, CT->Connecticut, OR->Oregon, SC->South Carolina, KY->Kentucky, AL->Alabama, LA->Louisiana, OK->Oklahoma, UT->Utah, NV->Nevada, etc.
@@ -320,7 +322,7 @@ LOCATION:
   - ALWAYS use "United Kingdom" not "UK"
   - ALWAYS use "United Arab Emirates" not "UAE"
 - Do NOT include zip codes, street addresses, apartment numbers, or company names in location.
-- If genuinely unknown and no employer location available, return null.
+- If genuinely unknown and no signals available, return null.
 
 SKILLS:
 - Extract ALL technical skills, tools, frameworks, programming languages, platforms, methodologies mentioned anywhere in the resume.
