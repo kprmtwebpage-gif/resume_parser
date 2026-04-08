@@ -59,6 +59,8 @@ services:
       LLM_RATE_DELAY: ${LLM_RATE_DELAY:-10}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      CEREBRAS_MODEL: ${CEREBRAS_MODEL:-llama3.1-8b}
     volumes:
       - resume_cache:/app/Backend/resumes_cache
       - ./Backend/drive_service_account.json:/app/Backend/drive_service_account.json:ro
@@ -95,6 +97,8 @@ services:
       LLM_RATE_DELAY: ${LLM_RATE_DELAY:-10}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      CEREBRAS_MODEL: ${CEREBRAS_MODEL:-llama3.1-8b}
       # Increase timeout to accommodate OCR on complex PDFs in Docker
       PDF_TIMEOUT_SECONDS: ${PDF_TIMEOUT_SECONDS:-120}
     volumes:
