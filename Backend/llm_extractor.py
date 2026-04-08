@@ -253,6 +253,7 @@ Return ONLY valid JSON matching this exact schema:
   "phone": string or null,
   "linkedin_url": string or null,
   "location": string or null,
+  "experience_years": number or null,
   "skills": [string],
   "work_history": [
     {{
@@ -290,7 +291,17 @@ JOB TITLE:
 
 CONTACT:
 - email: Extract email address. Normalize to lowercase.
-- phone: Extract phone number including country code if present. Format: +CountryCode(AreaCode)-Number.
+- phone: Extract the phone number EXACTLY as it appears in the resume. Apply these rules strictly:
+  * If a country code is present (+91, +1, 0044, 00971, etc.), preserve it and normalize to E.164: +[countrycode][number].
+  * Indian numbers (10 digits starting with 6, 7, 8, or 9, no country code) → add +91 prefix: +91XXXXXXXXXX.
+  * US/Canada numbers (10-digit NANP or 11-digit starting with 1) → normalize to +1XXXXXXXXXX.
+  * UAE numbers starting with 05X → +9715XXXXXXXX.
+  * UK numbers starting with 07 → +447XXXXXXXXX.
+  * For ALL other numbers without a country code, return the digits exactly as found WITHOUT adding any country code.
+  * If multiple phone numbers appear, prefer the one labeled "Phone:", "Mobile:", "Cell:", or "Contact:".
+  * NEVER extract fax numbers, company switchboard numbers, or numbers that appear inside bullet points describing job duties.
+  * NEVER use email digits, zip codes, employee IDs, or years as phone numbers.
+  * Return null if no valid phone number found.
 - linkedin_url: Normalize to https://www.linkedin.com/in/username format. Strip trailing slashes or query params.
 
 LOCATION:
@@ -314,6 +325,12 @@ SKILLS:
 - Return as a flat array of lowercase strings.
 - Include: programming languages (python, java), frameworks (react, spring boot), tools (docker, jenkins), cloud (aws, azure, gcp), databases (postgresql, mongodb), methodologies (agile, scrum).
 - Exclude: soft skills (leadership, communication), generic terms (computer, internet).
+
+EXPERIENCE YEARS:
+- Extract the total years of professional experience as a number.
+- Look for explicit statements first: "X years of experience", "X+ years", "over X years", "X yrs".
+- If no explicit statement, calculate from work_history: sum of all role durations (most recent role end = today if is_current).
+- Round to 1 decimal. Return null only if no dates and no explicit statement found.
 
 WORK HISTORY:
 - Extract ALL job positions listed, ordered from most recent to oldest.
@@ -669,6 +686,7 @@ def llm_extract(
         "phone":                _str_or_none(result.get("phone")),
         "linkedin_url":         _str_or_none(result.get("linkedin_url")),
         "location":             _str_or_none(raw_location),
+        "experience_years":     _float_or_none(result.get("experience_years")),
         "skills":               _list_of_strings(result.get("skills", [])),
         "work_history":         _list_of_dicts(result.get("work_history", [])),
         "certifications":       _list_of_dicts(result.get("certifications", [])),

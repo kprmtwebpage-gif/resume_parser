@@ -9317,6 +9317,38 @@ def main() -> int:
                                 _log.info("LLM_ENRICH [%s] location (country-fix): %s -> %s", file, address, _llm_loc)
                                 address = _llm_loc
 
+                    # Phone: use LLM phone when NLP found nothing, or LLM has country code and NLP doesn't
+                    _llm_phone_raw = (_llm.get("phone") or "").strip()
+                    _null_phone_values = {"null", "none", "n/a", "unknown", "not found", "not available", ""}
+                    if _llm_phone_raw and _llm_phone_raw.lower() not in _null_phone_values:
+                        _llm_phone_digits = re.sub(r"\D+", "", _llm_phone_raw)
+                        if 9 <= len(_llm_phone_digits) <= 15:
+                            _nlp_has_country = phone and (
+                                re.sub(r"\D+", "", str(phone)).startswith("1") and len(re.sub(r"\D+", "", str(phone))) == 11
+                                or len(re.sub(r"\D+", "", str(phone))) > 11
+                            )
+                            _llm_has_country = _llm_phone_raw.startswith("+") or len(_llm_phone_digits) > 10
+                            if not phone:
+                                # NLP missed the phone entirely
+                                phone = _llm_phone_digits
+                                phone_to_store = format_phone_display(phone) or f"+{_llm_phone_digits}"
+                                _log.info("LLM_ENRICH [%s] phone (fill): %s", file, phone_to_store)
+                            elif _llm_has_country and not _nlp_has_country and _llm_prefer:
+                                # LLM found country-code-qualified number; NLP only has bare digits
+                                phone = _llm_phone_digits
+                                phone_to_store = format_phone_display(phone) or f"+{_llm_phone_digits}"
+                                _log.info("LLM_ENRICH [%s] phone (country-upgrade): %s", file, phone_to_store)
+
+                    # Experience years: use LLM value when NLP regex found nothing
+                    _llm_exp = _llm.get("experience_years")
+                    if _llm_exp is not None and isinstance(_llm_exp, (int, float)) and _llm_exp > 0:
+                        if not experience_years or experience_years == 0:
+                            experience_years = float(_llm_exp)
+                            _log.info("LLM_ENRICH [%s] experience_years (fill): %.1f", file, experience_years)
+                        elif _llm_prefer:
+                            experience_years = float(_llm_exp)
+                            _log.info("LLM_ENRICH [%s] experience_years (override): %.1f", file, experience_years)
+
                     # Skills: merge LLM skills with NLP skills (union, deduplicated)
                     _llm_skills = _llm.get("skills") or []
                     if _llm_skills and isinstance(_llm_skills, list):
