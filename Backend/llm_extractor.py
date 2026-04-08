@@ -315,6 +315,7 @@ LOCATION:
   4. Phone area code as country signal: 3-digit US area codes (e.g. 405=Oklahoma, 972=Texas, 214=Texas, 312=Illinois, 212=New York, 415=California, 713=Texas, 617=Massachusetts) → candidate is in USA. Use this to determine country if no explicit location.
   5. ONLY if truly no personal location available: use the MOST RECENT/CURRENT employer's location as a last-resort proxy. "Most recent" = the job with the latest start date or marked Present/Current. NEVER use an older employer's location if a more recent one exists — even if the older one has a clearer address.
 - CAREER MIGRATION RULE: If the resume shows a clear pattern of older roles in India/another country but current roles in the US (or phone has a US area code), the candidate is currently in the US. Use city from current employer if available, else return just "United States".
+- US PHONE SIGNAL: If the phone number is a 10-digit US number (starts with area code like 405, 972, 214, 469, 817, 312, 773, 212, 646, 718, 415, 650, 408, 713, 832, 617, 857, 206, 425, 253, 602, 480, 303, 720, 404, 678, 770, 512, 737, 214, etc.) AND there is no current US employer location, return "United States" as the country even if older employers were in India or elsewhere.
 - Format as: "City, State/Province, Country"
 - MANDATORY state/country expansion rules:
   - ALWAYS expand US state abbreviations: TX->Texas, CA->California, NY->New York, FL->Florida, OH->Ohio, IL->Illinois, GA->Georgia, NC->North Carolina, PA->Pennsylvania, NJ->New Jersey, VA->Virginia, WA->Washington, MA->Massachusetts, MD->Maryland, MN->Minnesota, CO->Colorado, AZ->Arizona, IN->Indiana, MI->Michigan, MO->Missouri, TN->Tennessee, WI->Wisconsin, CT->Connecticut, OR->Oregon, SC->South Carolina, KY->Kentucky, AL->Alabama, LA->Louisiana, OK->Oklahoma, UT->Utah, NV->Nevada, etc.
@@ -452,6 +453,17 @@ def _build_prompt(resume_text: str, ocr_text: str, filename: str = "") -> str:
     clean_text = re.sub(r'[\u200b\u200c\u200d\u200e\u200f\ufeff]', '', clean_text)  # zero-width chars
     clean_text = re.sub(r'[^\x20-\x7e\n\r\t\u00a0-\u024f\u0370-\u03ff\u0400-\u04ff\u2000-\u206f\u2190-\u21ff]', ' ', clean_text)  # non-printable
     clean_text = re.sub(r' {3,}', '  ', clean_text)  # collapse excess spaces
+    # Detect US phone number and inject a location hint — helps LLM override old-employer locations
+    # Pattern: 10-digit US number (NXX-NXX-XXXX) with or without country code
+    _us_phone = re.search(
+        r'(?<!\d)(?:\+?1[\s.\-]?)?(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})(?!\d)',
+        clean_text
+    )
+    if _us_phone:
+        # Verify it looks like a US NANP number (area code 200-999, not 000/100)
+        digits = re.sub(r'\D', '', _us_phone.group(0))
+        if len(digits) in (10, 11) and (len(digits) == 10 and digits[0] >= '2' or len(digits) == 11 and digits[0] == '1' and digits[1] >= '2'):
+            clean_text = "[LOCATION HINT: US phone number detected — candidate is currently in the United States]\n" + clean_text
     # Extract a clean name hint from filename (remove extensions, IDs, timestamps)
     fname_hint = ""
     if filename:
