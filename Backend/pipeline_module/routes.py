@@ -16,7 +16,7 @@ from .database import get_db
 from .models import (
     PipelineCandidate, PipelineStageHistory, PipelineFeedback, PipelineScorecard,
     PipelineStageConfig, DEFAULT_PIPELINE_STAGES, DEFAULT_STAGE_LABELS,
-    RANKING_TIERS, RANKING_LABELS,
+    PIPELINE_STAGES, RANKING_TIERS, RANKING_LABELS,
 )
 from .schemas import (
     PipelineCandidateCreate, PipelineCandidateUpdate, PipelineCandidateRead,
