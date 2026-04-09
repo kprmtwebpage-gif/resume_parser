@@ -1995,11 +1995,29 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
             sha_existing = cursor.fetchone()
     if sha_existing:
         _prev_status = sha_existing.get("resume_parse_status")
-        # If the previous upload failed/stuck/was not a resume, delete the row so user can re-upload
-        _retriable = _prev_status in ("failed", "processing", "not_a_resume")
-        # Also allow re-upload if record is stuck in "parsing" with no actual data
-        if _prev_status == "parsing" and not sha_existing.get("first_name"):
-            _retriable = True
+        # If actively processing/parsing, return as "already being processed" —
+        # do NOT delete, otherwise concurrent uploads of the same file cause FK violations.
+        if _prev_status in ("processing", "parsing") and sha_existing.get("first_name"):
+            # Has data — actively being parsed
+            full_name = " ".join(filter(None, [sha_existing.get("first_name"), sha_existing.get("last_name")])) or None
+            return {
+                "status": "processing",
+                "message": "This exact resume is already being processed",
+                "id": sha_existing["id"],
+                "name": full_name,
+                "email": sha_existing.get("email"),
+                "job_title": sha_existing.get("job_title"),
+            }
+        if _prev_status in ("processing", "parsing") and not sha_existing.get("first_name"):
+            # No data yet — could be queued just now (concurrent upload) or stuck from a crash.
+            # Return as "already being processed" to avoid deleting an active placeholder.
+            return {
+                "status": "processing",
+                "message": "This exact resume is already being processed",
+                "id": sha_existing["id"],
+            }
+        # If the previous upload failed or was not a resume, delete the row so user can re-upload
+        _retriable = _prev_status in ("failed", "not_a_resume")
         if _retriable:
             failed_id = sha_existing["id"]
             with get_db() as conn:
@@ -2209,12 +2227,20 @@ async def upload_resume_endpoint(request: Request, background_tasks: BackgroundT
                         else:
                             # Delete placeholder's skills row first (if any) to avoid PK conflict,
                             # then re-point parser's skills row to placeholder_id.
-                            cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
-                            cursor.execute(
-                                f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
-                                (placeholder_id, parser_id),
-                            )
-                            cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
+                            # Use SAVEPOINT to recover from FK violations caused by concurrent
+                            # uploads that may have deleted parser_id under us.
+                            cursor.execute("SAVEPOINT sp_merge_skills")
+                            try:
+                                cursor.execute(f"DELETE FROM {SKILLS_TABLE} WHERE candidate_id = %s", (placeholder_id,))
+                                cursor.execute(
+                                    f"UPDATE {SKILLS_TABLE} SET candidate_id = %s WHERE candidate_id = %s",
+                                    (placeholder_id, parser_id),
+                                )
+                                cursor.execute(f"DELETE FROM {CANDIDATES_TABLE} WHERE id = %s", (parser_id,))
+                                cursor.execute("RELEASE SAVEPOINT sp_merge_skills")
+                            except Exception as _merge_err:
+                                cursor.execute("ROLLBACK TO SAVEPOINT sp_merge_skills")
+                                print(f"[MERGE WARN] merge parser_id={parser_id}->placeholder_id={placeholder_id} failed ({_merge_err}), checking placeholder directly", flush=True)
                             if parsed_data:
                                 cursor.execute(
                                     f"""UPDATE {CANDIDATES_TABLE}

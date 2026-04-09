@@ -312,6 +312,7 @@ LOCATION:
   2. CURRENT employer's location: ONLY if the current/most-recent job role explicitly states a city or location AND that role is marked Present or has the most recent start date. If the current role has no location listed — return null, do NOT fall back to any older role.
 - STRICT RULES:
   * NEVER use a past employer's location as the candidate's location.
+  * NEVER use an education/university/college location as the candidate's location. The candidate may have relocated after graduation. University addresses are NOT current addresses.
   * NEVER infer location from phone numbers, area codes, names, or any other signal.
   * NEVER use company names, project names, client names, or technology names as location.
   * NEVER use words from job descriptions, skill names, or section headers as city/state names.
@@ -728,12 +729,34 @@ def llm_extract(
         b_city = b.lower().split(",")[0].strip()
         return bool(a_city and b_city and (a_city in b_city or b_city in a_city))
 
+    # Collect education locations to reject them as candidate location
+    edu_list = _list_of_dicts(result.get("education", []))
+    edu_locs: list[str] = []
+    for edu in edu_list:
+        for key in ("university", "location", "college"):
+            val = edu.get(key)
+            if val and str(val).strip():
+                edu_locs.append(str(val).strip())
+
     # If LLM returned a location, validate it is not sourced from a past employer
+    # or from an education institution
     if raw_location and raw_location.lower() not in _NULL_VALS:
         has_current_match = any(_city_matches(raw_location, c) for c in current_locs)
         has_past_match = any(_city_matches(raw_location, p) for p in past_locs)
         if has_past_match and not has_current_match:
             # Location came from an old employer — discard it
+            raw_location = None
+
+    # Reject location if it matches an education institution location
+    # (the candidate may have relocated after graduation)
+    if raw_location and raw_location.lower() not in _NULL_VALS:
+        has_current_match = any(_city_matches(raw_location, c) for c in current_locs)
+        _raw_lower = raw_location.lower()
+        has_edu_match = any(
+            _city_matches(raw_location, e) or e.lower() in _raw_lower or _raw_lower in e.lower()
+            for e in edu_locs
+        )
+        if has_edu_match and not has_current_match:
             raw_location = None
 
     # If still no location, fall back to current employer's location only
