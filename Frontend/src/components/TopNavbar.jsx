@@ -10,7 +10,6 @@ const baseNavItems = [
   { label: 'Search', path: '/' },
   { label: 'Jobs', path: '/jobs' },
   { label: 'Pipeline', path: '/pipeline' },
-  { label: 'Interviews', path: '/interviews' },
   { label: 'Upload', path: '/upload' },
   { label: 'Customer', path: '/customer' },
   { label: 'User', path: '/user/email' },

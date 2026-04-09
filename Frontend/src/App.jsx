@@ -144,8 +144,8 @@ function AppContent() {
         </Route>
         {/* Templates page (part of Customer module) */}
         <Route path="/customer/templates" element={<DashboardLayout><TemplatesPage /></DashboardLayout>} />
-        {/* Interview Scheduling */}
-        <Route path="/interviews" element={<DashboardLayout><Interviews /></DashboardLayout>} />
+        {/* Interview Scheduling — redirect to Pipeline Interviews tab */}
+        <Route path="/interviews" element={<Navigate to="/pipeline?tab=interviews" replace />} />
         {/* Pipeline Kanban */}
         <Route path="/pipeline" element={<DashboardLayout><PipelineBoard /></DashboardLayout>} />
         <Route path="/pipeline/settings" element={<AdminGuard><DashboardLayout><PipelineSettings /></DashboardLayout></AdminGuard>} />

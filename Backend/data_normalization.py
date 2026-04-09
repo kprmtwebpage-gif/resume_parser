@@ -76,8 +76,15 @@ def canonicalize_job_title(title: str) -> str:
         "UX/UI": "ZUXUIZ", "UI/UX": "ZUIUXZ",
         "ux/ui": "ZUXUIZ", "ui/ux": "ZUIUXZ",
         "Ux/Ui": "ZUXUIZ", "Ui/Ux": "ZUIUXZ",
+        "AI/ML": "ZAIMLZ", "ai/ml": "ZAIMLZ", "Ai/Ml": "ZAIMLZ",
+        "ML/AI": "ZMLAIZ", "ml/ai": "ZMLAIZ", "Ml/Ai": "ZMLAIZ",
+        "CI/CD": "ZCICDZ", "ci/cd": "ZCICDZ", "Ci/Cd": "ZCICDZ",
     }
-    _COMPOUND_RESTORE = {"ZUXUIZ": "UX/UI", "ZUIUXZ": "UI/UX"}
+    _COMPOUND_RESTORE = {
+        "ZUXUIZ": "UX/UI", "ZUIUXZ": "UI/UX",
+        "ZAIMLZ": "AI/ML", "ZMLAIZ": "ML/AI",
+        "ZCICDZ": "CI/CD",
+    }
     for term, placeholder in _COMPOUND_SLASH_TERMS.items():
         title = title.replace(term, placeholder)
 

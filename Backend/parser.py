@@ -6346,11 +6346,16 @@ def extract_experience_years(text):
         r"(?i)(?:over\s*|more\s*than\s*|around\s*)?(\d{1,2}(?:\.\d+)?)\s*\+?\s*(?:years|yrs)\s*(?:of\s*)?",
         text,
     )
-    if m:
-        return float(m.group(1))
+    explicit_years = float(m.group(1)) if m else None
 
-    # Fallback: compute from work history date ranges
-    return _compute_experience_from_date_ranges(text)
+    # Compute from work history date ranges (more reliable for total experience)
+    computed_years = _compute_experience_from_date_ranges(text)
+
+    if explicit_years is not None and computed_years is not None:
+        # Prefer the LARGER value — explicit "X years" might refer to a single
+        # role whereas date-range computation covers the full career span.
+        return max(explicit_years, computed_years)
+    return explicit_years or computed_years
 
 
 def extract_role_experience_years(text: str, job_title: str) -> float | None:
@@ -9326,9 +9331,17 @@ def main() -> int:
                             last_name = _llm_ln
 
                     # Job title: prefer LLM when it has high confidence or rule-based missed
+                    # BUT: keep NLP multi-role title (pipe-separated) when LLM returned
+                    # a narrower single-role title (LLM sometimes picks the work-exp
+                    # title instead of the broader headline).
                     _llm_jt = _llm.get("job_title")
                     _llm_jt_conf = _llm.get("job_title_confidence") or 0.0
-                    if _llm_jt and (_llm_prefer or _llm_jt_conf >= 0.85 or not job_title):
+                    _nlp_jt_has_multi = job_title and ("|" in job_title or " / " in job_title)
+                    _llm_jt_is_single = _llm_jt and "|" not in _llm_jt and " / " not in _llm_jt
+                    if _nlp_jt_has_multi and _llm_jt_is_single:
+                        _log.info("LLM_ENRICH [%s] job_title: keeping NLP multi-role '%s' over LLM '%s'",
+                                  file, job_title, _llm_jt)
+                    elif _llm_jt and (_llm_prefer or _llm_jt_conf >= 0.85 or not job_title):
                         _log.info("LLM_ENRICH [%s] job_title: %s -> %s (conf=%.2f)", 
                                   file, job_title or "(empty)", _llm_jt, _llm_jt_conf)
                         job_title = _llm_jt
@@ -9349,9 +9362,23 @@ def main() -> int:
                         _log.info("LLM_ENRICH [%s] certifications: %s",
                                   file, (certifications or "")[:80])
 
-                    # Education: enrich structured entries when rule-based returned none
+                    # Education: enrich structured entries when rule-based returned
+                    # none, or when NLP entries are weak (missing university or
+                    # degree is just a bare level like "Diploma").
                     _llm_edu = _llm.get("education") or []
-                    if _llm_edu and (not education_entries or all(not e.get("degree") for e in education_entries)):
+                    _nlp_edu_weak = (
+                        not education_entries
+                        or all(not e.get("degree") for e in education_entries)
+                        or all(not e.get("university") for e in education_entries)
+                        or all(
+                            (e.get("degree") or "").strip().lower() in {
+                                "diploma", "bachelor", "master", "phd", "associate",
+                                "doctorate", "high school",
+                            }
+                            for e in education_entries
+                        )
+                    )
+                    if _llm_edu and _nlp_edu_weak:
                         education_entries = [
                             {
                                 "degree":            e.get("normalized_degree") or e.get("degree") or "",
@@ -9367,6 +9394,11 @@ def main() -> int:
                         _edu_structured = _json2.dumps(
                             [{k: v for k, v in e.items() if k != "raw_line"} for e in education_entries]
                         ) if education_entries else _edu_structured
+                        # also update flat qualification string
+                        _flat2 = education_to_flat_string(education_entries)
+                        if _flat2:
+                            from data_normalization import post_normalize_qualification
+                            qualification = post_normalize_qualification(_flat2)
                         _log.info("LLM_ENRICH [%s] education: %d entries",
                                   file, len(education_entries))
 
@@ -9698,6 +9730,40 @@ def main() -> int:
             if last_name and last_name.lower().strip() in _BAD_NAME_TOKENS:
                 _log.info("SANITIZE [%s] rejected bad last_name: %s", file, last_name)
                 last_name = None
+
+            # ── Phone → country inference ───────────────────────────────────
+            # When location is completely NULL but phone has a country code,
+            # infer country-only location from the phone prefix.
+            if not address and phone_to_store:
+                _ph_digits = re.sub(r"\D+", "", str(phone_to_store))
+                _PHONE_COUNTRY_MAP = {
+                    "91": "India", "1": "United States", "44": "United Kingdom",
+                    "971": "United Arab Emirates", "966": "Saudi Arabia",
+                    "974": "Qatar", "968": "Oman", "973": "Bahrain",
+                    "965": "Kuwait", "61": "Australia", "64": "New Zealand",
+                    "49": "Germany", "33": "France", "39": "Italy",
+                    "34": "Spain", "31": "Netherlands", "46": "Sweden",
+                    "47": "Norway", "45": "Denmark", "358": "Finland",
+                    "353": "Ireland", "41": "Switzerland", "43": "Austria",
+                    "32": "Belgium", "351": "Portugal", "48": "Poland",
+                    "65": "Singapore", "60": "Malaysia", "63": "Philippines",
+                    "62": "Indonesia", "66": "Thailand", "84": "Vietnam",
+                    "86": "China", "81": "Japan", "82": "South Korea",
+                    "55": "Brazil", "52": "Mexico", "7": "Russia",
+                    "27": "South Africa", "234": "Nigeria", "254": "Kenya",
+                    "20": "Egypt", "972": "Israel",
+                }
+                _inferred_country = None
+                for _prefix, _country in sorted(
+                    _PHONE_COUNTRY_MAP.items(), key=lambda x: len(x[0]), reverse=True
+                ):
+                    if _ph_digits.startswith(_prefix):
+                        _inferred_country = _country
+                        break
+                if _inferred_country:
+                    address = _inferred_country
+                    _log.info("PHONE_COUNTRY [%s] inferred country '%s' from phone %s",
+                              file, _inferred_country, phone_to_store[:6] + "...")
 
             # ── Person-level de-duplication ───────────────────────────────
             # The SHA-256 ON CONFLICT handles byte-identical files.  But the

@@ -345,7 +345,8 @@ EXPERIENCE YEARS:
 
 WORK HISTORY:
 - Extract ALL job positions listed, ordered from most recent to oldest.
-- For each: company name, job title held there, location of that role (if mentioned), whether it's the current role, start/end dates.
+- For each: company name, job title held there, location of that role (if mentioned — look for "City, State" or "City, Country" near the company name or role header), whether it's the current role, start/end dates.
+- IMPORTANT: Extract the location for EACH role. Many resumes write it as "Company — City, State | Date" or "Company Name, City, State" near the role header. Always look for geographic text near each job entry.
 - is_current=true ONLY for roles explicitly marked "Present", "Current", "Till Date", "Ongoing", or where no end date is given for the most recent role.
 - If the candidate has NO work experience at all (e.g., fresh graduate, student), return an empty array [].
 - Dates as "MM/YYYY" or "YYYY" format. null if not specified.

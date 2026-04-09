@@ -154,6 +154,9 @@ def _call_groq(prompt: str) -> str | None:
         )
         return (response.choices[0].message.content or "").strip()
     except Exception as e:
+        _rate_msg = str(e).lower()
+        if "rate" in _rate_msg and ("limit" in _rate_msg or "429" in _rate_msg):
+            raise RuntimeError(f"RATE_LIMIT:Groq 429 rate limited: {e}") from e
         raise RuntimeError(f"Groq error: {type(e).__name__}: {e}") from e
 
 
