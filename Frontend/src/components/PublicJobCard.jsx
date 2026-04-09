@@ -66,7 +66,7 @@ export default function PublicJobCard({ job, isSaved, onSave, onClick, onApply }
   const applicantCount = job.applicant_count || 0
 
   const handleShare = (platform) => {
-    const jobUrl = `${window.location.origin}/find-jobs?job=${job.id}`
+    const jobUrl = `${window.location.origin}/job-search?job=${job.id}`
     const text = `Check out this job: ${job.job_title} at ${job.company}`
     switch (platform) {
       case 'copy':

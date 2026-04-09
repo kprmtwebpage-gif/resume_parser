@@ -15,6 +15,11 @@ export const api = axios.create({
 
 // Attach JWT token to every request automatically
 api.interceptors.request.use((config) => {
+  // Public portal requests can opt out of JWT injection.
+  if (config.skipAuth) {
+    return config
+  }
+
   const token = localStorage.getItem('rp_token')
   if (token) {
     config.headers['Authorization'] = `Bearer ${token}`

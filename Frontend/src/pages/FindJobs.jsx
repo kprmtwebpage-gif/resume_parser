@@ -18,18 +18,25 @@ import SavedJobsPanel from '../components/SavedJobsPanel'
 import SearchHistoryPanel from '../components/SearchHistoryPanel'
 import './FindJobs.css'
 
+const PUBLIC_JOB_ENDPOINTS = [
+  '/api/job-projects/public',
+  '/job-projects/public',
+]
+
 export default function FindJobs() {
   const navigate = useNavigate()
   
   // Map stored experience values to filter categories
   const mapExperienceToCategory = (exp) => {
-    if (!exp) return null
-    const lower = exp.toLowerCase().trim()
+    if (exp === null || exp === undefined) return null
+    const lower = String(exp).toLowerCase().trim()
+    if (!lower) return null
     if (lower === 'fresher' || lower === 'intern' || lower === 'entry level') return 'Under 1 Year'
     // Extract numeric value
-    const match = lower.match(/(\d+)/)
+    const match = lower.match(/(\d+(?:\.\d+)?)/)
     if (!match) return null
-    const years = parseInt(match[1], 10)
+    const years = Number(match[1])
+    if (Number.isNaN(years)) return null
     if (years < 1) return 'Under 1 Year'
     if (years <= 2) return '1 - 2 Year'
     if (years <= 6) return '2 - 6 Year'
@@ -92,25 +99,57 @@ export default function FindJobs() {
   const [searchHistory, setSearchHistory] = useState([])
   const [showSearchHistory, setShowSearchHistory] = useState(false)
 
+  const normalizeJobsPayload = (payload) => {
+    if (Array.isArray(payload)) return payload
+    if (Array.isArray(payload?.items)) return payload.items
+    if (Array.isArray(payload?.results)) return payload.results
+    return []
+  }
+
+  const fetchPublicJobs = useCallback(async () => {
+    let lastError = null
+
+    for (const endpoint of PUBLIC_JOB_ENDPOINTS) {
+      try {
+        const { data } = await api.get(endpoint, {
+          params: { limit: 500 },
+          skipAuth: true,
+        })
+        return normalizeJobsPayload(data)
+      } catch (err) {
+        lastError = err
+        if (err?.response?.status === 404) {
+          continue
+        }
+        break
+      }
+    }
+
+    throw lastError || new Error('Failed to load public jobs')
+  }, [])
+
   // Fetch jobs
   const fetchJobs = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
-      const { data } = await api.get('/api/job-projects/public', { params: { limit: 500 } })
-      console.log('[PUBLIC_JOBS] Public API returned jobs', { count: data?.length || 0 })
-      setJobs(data || [])
-      calculateCounts(data || [])
+      const publicJobs = await fetchPublicJobs()
+      console.log('[PUBLIC_JOBS] Public API returned jobs', { count: publicJobs.length })
+      setJobs(publicJobs)
+      calculateCounts(publicJobs)
     } catch (err) {
       console.error('Failed to load jobs:', err)
-      setError('Could not load jobs. Please try again later.')
+      setJobs([])
+      setError(err?.isNetworkError ? err.message : 'Could not load jobs. Please try again later.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchPublicJobs])
 
   // Calculate filter counts
   const calculateCounts = (jobsData) => {
+    const safeJobs = Array.isArray(jobsData) ? jobsData : []
+
     const typeCounts = {
       'Full Time': 0,
       'Freelance': 0,
@@ -119,8 +158,8 @@ export default function FindJobs() {
       'Temporary': 0
     }
     
-    jobsData.forEach(job => {
-      const type = job.employment_type
+    safeJobs.forEach(job => {
+      const type = typeof job.employment_type === 'string' ? job.employment_type.trim() : null
       if (type && typeCounts[type] !== undefined) {
         typeCounts[type]++
       }
@@ -137,7 +176,7 @@ export default function FindJobs() {
       '10 - 15 Year': 0,
       '15 - 20 Year': 0
     }
-    jobsData.forEach(job => {
+    safeJobs.forEach(job => {
       const category = mapExperienceToCategory(job.experience)
       if (category && expCounts[category] !== undefined) {
         expCounts[category]++
@@ -149,7 +188,7 @@ export default function FindJobs() {
   // Fetch saved jobs
   const fetchSavedJobs = useCallback(async () => {
     try {
-      const { data } = await api.get('/saved-jobs')
+      const { data } = await api.get('/saved-jobs', { skipAuth: true })
       setSavedJobs(data || [])
     } catch (err) {
       // If endpoint doesn't exist, use local storage
@@ -161,7 +200,7 @@ export default function FindJobs() {
   // Fetch search history
   const fetchSearchHistory = useCallback(async () => {
     try {
-      const { data } = await api.get('/search-history')
+      const { data } = await api.get('/search-history', { skipAuth: true })
       setSearchHistory(data || [])
     } catch (err) {
       // If endpoint doesn't exist, use local storage
@@ -188,7 +227,7 @@ export default function FindJobs() {
       }
       
       try {
-        await api.post('/search-history', historyEntry)
+        await api.post('/search-history', historyEntry, { skipAuth: true })
       } catch (err) {
         // Save locally if API fails
         const localHistory = JSON.parse(localStorage.getItem('searchHistory') || '[]')
@@ -244,7 +283,7 @@ export default function FindJobs() {
     if (isAlreadySaved) {
       // Remove from saved jobs
       try {
-        await api.delete(`/saved-jobs/${job.id}`)
+        await api.delete(`/saved-jobs/${job.id}`, { skipAuth: true })
       } catch (err) {
         // Handle locally
       }
@@ -264,7 +303,7 @@ export default function FindJobs() {
       }
       
       try {
-        await api.post('/saved-jobs', { job_id: job.id })
+        await api.post('/saved-jobs', { job_id: job.id }, { skipAuth: true })
       } catch (err) {
         // Save locally if API fails
       }
@@ -301,7 +340,7 @@ export default function FindJobs() {
       const query = searchQuery.toLowerCase()
       const matchesTitle = job.job_title?.toLowerCase().includes(query)
       const matchesCompany = job.company?.toLowerCase().includes(query)
-      const matchesExperience = job.experience?.toLowerCase().includes(query)
+      const matchesExperience = String(job.experience || '').toLowerCase().includes(query)
       if (!matchesTitle && !matchesCompany && !matchesExperience) return false
     }
     

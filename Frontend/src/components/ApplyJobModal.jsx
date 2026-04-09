@@ -170,7 +170,8 @@ export default function ApplyJobModal({ job, onClose }) {
       
       // Use the correct endpoint: /api/job-projects/{job_id}/applications
       await api.post(`/api/job-projects/${job.id}/applications`, submitData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        skipAuth: true,
       })
       
       setSubmitStatus('success')

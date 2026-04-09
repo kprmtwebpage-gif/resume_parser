@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom'
+import 'animate.css'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { UploadProvider } from './contexts/UploadContext'
@@ -7,7 +8,7 @@ import DashboardLayout from './layouts/DashboardLayout.jsx'
 import SearchPeople from './pages/SearchPeople.jsx'
 import Jobs from './pages/Jobs.jsx'
 import Upload from './pages/Upload.jsx'
-import FindJobs from './pages/FindJobs.jsx'
+import JobSearch from './pages/JobSearch.jsx'
 import AppliedCandidatesPage from './pages/AppliedCandidatesPage.jsx'
 import AdminDashboard from './pages/AdminDashboard.jsx'
 import AdminResumes from './pages/AdminResumes.jsx'
@@ -25,6 +26,7 @@ import ChatLauncher from './chatbot/ChatLauncher.jsx'
 import FloatingUploadIndicator from './components/FloatingUploadIndicator.jsx'
 import LoginPage from './login/LoginPage.jsx'
 import Home from './pages/Home.jsx'
+import PrivacyPolicy from './pages/PrivacyPolicy.jsx'
 import CustomerPage from './pages/customer/CustomerPage.jsx'
 import CustomerCreate from './pages/customer/CustomerCreate.jsx'
 import CustomerDetail from './pages/customer/CustomerDetail.jsx'
@@ -32,10 +34,45 @@ import CustomerEdit from './pages/customer/CustomerEdit.jsx'
 import SendMail from './pages/SendMail.jsx'
 import TemplatesPage from './pages/TemplatesPage.jsx'
 import EmailSettingsPage from './pages/EmailSettingsPage.jsx'
+import NotFound from './pages/NotFound.jsx'
 // User panel
 import UserLayout from './pages/user/UserLayout.jsx'
 import UserUploadLogs from './pages/user/UserUploadLogs.jsx'
 import EmailHistorySection from './components/email/EmailHistorySection.jsx'
+
+
+function ScrollAnimationBootstrap() {
+  const location = useLocation()
+
+  useEffect(() => {
+    // Re-query on every route change so newly mounted .wow elements are observed
+    const elements = document.querySelectorAll('.wow')
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const el = entry.target
+            const duration = el.getAttribute('data-wow-duration')
+            const delay = el.getAttribute('data-wow-delay')
+            if (duration) el.style.animationDuration = duration
+            if (delay) el.style.animationDelay = delay
+            el.style.visibility = 'visible'
+            el.classList.add('animated')
+            observer.unobserve(el)
+          }
+        })
+      },
+      { threshold: 0.15 }
+    )
+
+    elements.forEach((el) => observer.observe(el))
+
+    return () => observer.disconnect()
+  }, [location.pathname])
+
+  return <style>{`.wow { visibility: hidden; }`}</style>
+}
 
 
 function AdminGuard({ children }) {
@@ -86,11 +123,14 @@ function AuthenticatedRoutes() {
       <Routes>
         {/* Public home page remains accessible when logged in */}
         <Route path="/" element={<Home />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/kprmt-privacy-policy.html" element={<Navigate to="/privacy-policy" replace />} />
         {/* Main dashboard (was previously at /) */}
         <Route path="/dashboard" element={<DashboardLayout><SearchPeople /></DashboardLayout>} />
         <Route path="/jobs" element={<DashboardLayout><Jobs /></DashboardLayout>} />
         <Route path="/upload" element={<DashboardLayout><Upload /></DashboardLayout>} />
-        <Route path="/find-jobs" element={<DashboardLayout><FindJobs /></DashboardLayout>} />
+        <Route path="/job-search" element={<DashboardLayout><JobSearch /></DashboardLayout>} />
+        <Route path="/find-jobs" element={<DashboardLayout><JobSearch /></DashboardLayout>} />
         <Route path="/jobs/:jobId/applied" element={<DashboardLayout><AppliedCandidatesPage /></DashboardLayout>} />
         {/* Customer routes */}
         <Route path="/customer" element={<DashboardLayout><CustomerPage /></DashboardLayout>} />
@@ -123,8 +163,8 @@ function AuthenticatedRoutes() {
           <Route path="email-templates" element={<TemplateManager />} />
           <Route path="resumes" element={<AdminResumes />} />
         </Route>
-        {/* Catch-all: redirect unmatched routes to dashboard */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        {/* Catch-all: unmatched routes render a proper not-found page */}
+        <Route path="*" element={<DashboardLayout><NotFound /></DashboardLayout>} />
       </Routes>
       <SearchPageChatbot />
     </UploadProvider>
@@ -174,9 +214,12 @@ function AppContent() {
     return (
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/find-jobs" element={<FindJobs />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/kprmt-privacy-policy.html" element={<Navigate to="/privacy-policy" replace />} />
+        <Route path="/job-search" element={<JobSearch />} />
+        <Route path="/find-jobs" element={<JobSearch />} />
         <Route path="/admin" element={<LoginRoute onLoginSuccess={handleLoginSuccess} />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     )
   }
@@ -191,6 +234,7 @@ export default function App() {
     <AuthProvider>
       <ThemeProvider>
         <BrowserRouter basename={basePath || '/'}>
+          <ScrollAnimationBootstrap />
           <AppContent />
         </BrowserRouter>
       </ThemeProvider>

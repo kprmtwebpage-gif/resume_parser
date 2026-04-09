@@ -850,7 +850,7 @@ export default function Jobs() {
                   <button
                     type="button"
                     className="flex items-center gap-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 transition-colors"
-                    onClick={() => navigate('/find-jobs')}
+                    onClick={() => navigate('/job-search')}
                   >
                     <MagnifyingGlassIcon className="w-4 h-4" />
                     Find Job

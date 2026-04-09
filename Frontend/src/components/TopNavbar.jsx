@@ -35,7 +35,7 @@ export default function TopNavbar() {
     sessionStorage.removeItem('userLoginAuth')
     localStorage.removeItem('rp_token')
     localStorage.removeItem('rp_user')
-    window.location.reload()
+    window.location.href = '/'
   }
 
   const handleChangePassword = async () => {
