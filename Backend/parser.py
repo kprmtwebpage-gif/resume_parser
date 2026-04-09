@@ -9781,6 +9781,46 @@ def main() -> int:
                     _log.info("SANITIZE [%s] rejected bad location: %s", file, address)
                     address = None
 
+            # ── Current-employer location recovery ─────────────────────────
+            # When the sanitizer blanked the address (or it was already null),
+            # try to extract city/state from the CURRENT employer's line
+            # (contains "Present/Current") before falling back to phone-only.
+            if not address and resume_text:
+                _ce_us_abbrs = {
+                    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID",
+                    "IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS",
+                    "MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK",
+                    "OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV",
+                    "WI","WY","DC",
+                }
+                # Broad "City, ST" pattern on current-employer lines.
+                # We only consider lines with "Present/Current" AND date-like
+                # patterns (month+year), so false positives are minimal.
+                _ce_re = re.compile(
+                    r'([A-Z][A-Za-z .\'-]{1,30}),\s*([A-Z]{2})\b'
+                )
+                _ce_date_re = re.compile(
+                    r'(?i)\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{4}\b'
+                )
+                for _ce_ln in non_empty_lines(resume_text)[:300]:
+                    if not re.search(r'(?i)\b(?:present|current)\b', _ce_ln):
+                        continue
+                    # Must also contain a date (month+year) to confirm this is
+                    # a work-experience line (not "Currently open to relocate")
+                    if not _ce_date_re.search(_ce_ln):
+                        continue
+                    _ce_m = _ce_re.search(_ce_ln)
+                    if _ce_m:
+                        _ce_city = _ce_m.group(1).strip()
+                        _ce_state = _ce_m.group(2).strip().upper()
+                        # Reject if the "city" is itself a bad word
+                        if _ce_city.lower() in _FINAL_BAD_CITY_WORDS:
+                            continue
+                        if _ce_state in _ce_us_abbrs and len(_ce_city) >= 2:
+                            address = f"{_ce_city}, {US_STATE_ABBR_TO_FULL.get(_ce_state, _ce_state)}, United States"
+                            _log.info("CURRENT_EMPLOYER_LOC [%s] recovered: %s", file, address)
+                            break
+
             # Reject garbage name tokens (hyperlink labels, Python literals, etc.)
             _BAD_NAME_TOKENS = {
                 "click", "here", "none", "null", "n/a", "resume", "cv", "page",
