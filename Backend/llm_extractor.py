@@ -693,6 +693,24 @@ def llm_extract(
         "wfh", "freelance", "contract", "full-time", "part-time", "n/a",
         "not specified", "not mentioned", "not available", "confidential",
         "various", "multiple", "global", "worldwide", "international",
+        # Networking / protocol terms
+        "bgp", "ospf", "tcp", "udp", "dhcp", "dns", "vpn", "ssl", "tls",
+        "http", "https", "smtp", "ftp", "ssh", "snmp", "mpls", "vlan",
+        "ipsec", "osi", "arp", "icmp", "rip", "eigrp", "isis",
+        # Common company / org abbreviations that look like cities
+        "fda", "ibm", "hcl", "tcs", "cts", "wipro", "infosys", "cognizant",
+        "accenture", "deloitte", "capgemini", "dxc", "ntt",
+        # Other false positives
+        "routing", "switching", "firewall", "devops", "frontend", "backend",
+        "fullstack", "middleware", "microservices", "saas", "paas", "iaas",
+    }
+
+    # Known company names that may prefix a real city (e.g., "Ebay San Jose")
+    _COMPANY_PREFIXES = {
+        "ebay", "google", "meta", "apple", "amazon", "microsoft", "oracle",
+        "cisco", "intel", "uber", "lyft", "netflix", "adobe", "paypal",
+        "salesforce", "vmware", "dell", "hp", "ibm", "sap", "tesla",
+        "nvidia", "qualcomm", "broadcom", "twitter",
     }
 
     def _is_suspicious_location(loc: str) -> bool:
@@ -703,13 +721,23 @@ def llm_extract(
         # Single short word that's in the invalid set
         if city in _INVALID_CITY_WORDS:
             return True
+        # Check if city part starts with a company name
+        for cp in _COMPANY_PREFIXES:
+            if city.startswith(cp + " ") or city == cp:
+                return True
+        # Check if any individual word in the city is an invalid term
+        city_words = city.split()
+        if len(city_words) >= 2 and any(w in _INVALID_CITY_WORDS for w in city_words):
+            return True
         # Very short city name (1-2 chars) is almost always wrong
         if len(city) <= 2 and city not in {"la", "dc"}:
             return True
         # City name is a common tech/skill term (LLM confusion)
         _tech_terms = {"java", "python", "react", "angular", "node", "aws", "azure",
                        "sql", "api", "rest", "data", "cloud", "agile", "scrum",
-                       "docker", "linux", "oracle", "sap", "excel", "power"}
+                       "docker", "linux", "oracle", "sap", "excel", "power",
+                       "pega", "kafka", "spark", "hadoop", "jenkins", "git",
+                       "jira", "confluence", "splunk", "grafana", "terraform"}
         if city in _tech_terms:
             return True
         return False
@@ -779,9 +807,29 @@ def llm_extract(
                     break
         # NOTE: do NOT fall back to past employer locations
 
+    # ── Name sanity check: reject hallucinated / garbage name tokens ──
+    _SUSPICIOUS_NAME_WORDS = {
+        "click", "here", "none", "null", "n/a", "resume", "cv", "page",
+        "download", "view", "link", "profile", "home", "unknown",
+        "untitled", "document", "file", "undefined", "test", "sample",
+        "curriculum", "vitae", "objective", "summary", "experience",
+        "education", "skills", "contact", "references", "portfolio",
+    }
+    raw_fn = _str_or_none(result.get("first_name"))
+    raw_ln = _str_or_none(result.get("last_name"))
+    if raw_fn and raw_fn.lower().strip() in _SUSPICIOUS_NAME_WORDS:
+        raw_fn = None
+    if raw_ln and raw_ln.lower().strip() in _SUSPICIOUS_NAME_WORDS:
+        raw_ln = None
+    # Reject names that contain @ (email) or digits
+    if raw_fn and (("@" in raw_fn) or any(c.isdigit() for c in raw_fn)):
+        raw_fn = None
+    if raw_ln and (("@" in raw_ln) or any(c.isdigit() for c in raw_ln)):
+        raw_ln = None
+
     return {
-        "first_name":           _str_or_none(result.get("first_name")),
-        "last_name":            _str_or_none(result.get("last_name")),
+        "first_name":           raw_fn,
+        "last_name":            raw_ln,
         "job_title":            _str_or_none(result.get("job_title")),
         "job_title_confidence": _float_or_none(result.get("job_title_confidence")),
         "email":                _str_or_none(result.get("email")),

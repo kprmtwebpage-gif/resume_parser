@@ -9654,6 +9654,51 @@ def main() -> int:
                 # Default: store a relative path (or a URL when base_url is set).
                 resume_file_ref = url or path_ref
 
+            # ── Final sanitisation of address, name before DB write ─────────
+            # Catch any remaining hallucinated locations that slipped through
+            # both NLP regex and LLM extraction.
+            _FINAL_BAD_CITY_WORDS = {
+                "open", "remote", "hybrid", "onsite", "wfh", "freelance",
+                "bgp", "ospf", "tcp", "udp", "dhcp", "dns", "vpn", "ssl",
+                "tls", "http", "https", "smtp", "ftp", "ssh", "snmp", "mpls",
+                "vlan", "routing", "switching", "firewall", "devops",
+                "fda", "ibm", "hcl", "tcs", "cts", "fullstack", "middleware",
+                "java", "python", "react", "angular", "node", "aws", "azure",
+                "sql", "api", "rest", "data", "cloud", "agile", "scrum",
+                "docker", "linux", "oracle", "sap", "excel", "power",
+                "pega", "kafka", "spark", "hadoop", "jenkins", "git",
+            }
+            _FINAL_COMPANY_PREFIXES = {
+                "ebay", "google", "meta", "apple", "amazon", "microsoft",
+                "oracle", "cisco", "intel", "uber", "netflix", "adobe",
+                "paypal", "salesforce", "vmware", "dell", "hp", "sap", "tesla",
+            }
+            if address:
+                _fc = address.lower().split(",")[0].strip()
+                _fc_words = _fc.split()
+                _bad_city = (
+                    _fc in _FINAL_BAD_CITY_WORDS
+                    or (len(_fc_words) >= 2 and any(w in _FINAL_BAD_CITY_WORDS for w in _fc_words))
+                    or any(_fc.startswith(cp + " ") or _fc == cp for cp in _FINAL_COMPANY_PREFIXES)
+                    or (len(_fc) <= 2 and _fc not in {"la", "dc"})
+                )
+                if _bad_city:
+                    _log.info("SANITIZE [%s] rejected bad location: %s", file, address)
+                    address = None
+
+            # Reject garbage name tokens (hyperlink labels, Python literals, etc.)
+            _BAD_NAME_TOKENS = {
+                "click", "here", "none", "null", "n/a", "resume", "cv", "page",
+                "download", "view", "link", "profile", "home", "unknown",
+                "untitled", "document", "file", "undefined", "test", "sample",
+            }
+            if first_name and first_name.lower().strip() in _BAD_NAME_TOKENS:
+                _log.info("SANITIZE [%s] rejected bad first_name: %s", file, first_name)
+                first_name = None
+            if last_name and last_name.lower().strip() in _BAD_NAME_TOKENS:
+                _log.info("SANITIZE [%s] rejected bad last_name: %s", file, last_name)
+                last_name = None
+
             # ── Person-level de-duplication ───────────────────────────────
             # The SHA-256 ON CONFLICT handles byte-identical files.  But the
             # same person's resume uploaded as a different file (different
