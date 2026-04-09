@@ -9459,8 +9459,12 @@ def main() -> int:
                             experience_years = float(_llm_exp)
                             _log.info("LLM_ENRICH [%s] experience_years (fill): %.1f", file, experience_years)
                         elif _llm_prefer:
-                            experience_years = float(_llm_exp)
-                            _log.info("LLM_ENRICH [%s] experience_years (override): %.1f", file, experience_years)
+                            # Take the LARGER of NLP and LLM — NLP date-range
+                            # computation is often more accurate for total career
+                            # span, while LLM might return a single-role duration.
+                            _prev_exp = experience_years
+                            experience_years = max(float(experience_years), float(_llm_exp))
+                            _log.info("LLM_ENRICH [%s] experience_years (max): NLP=%.1f LLM=%.1f -> %.1f", file, _prev_exp, float(_llm_exp), experience_years)
 
                     # Skills: merge LLM skills with NLP skills (union, deduplicated)
                     _llm_skills = _llm.get("skills") or []
@@ -9495,10 +9499,15 @@ def main() -> int:
                     extraction_method = "selective"
 
                     # Job title: smart merge — LLM wins when more specific or NLP is empty
+                    # BUT: preserve multi-role titles (pipe/slash separated)
                     _sel_jt = (_sel.get("job_title") or "").strip()
                     _sel_jt_conf = _sel.get("job_title_confidence") or 0.0
                     _nlp_jt = (job_title or "").strip()
-                    if _sel_jt and _sel_jt_conf >= 0.70:
+                    _sel_cur_has_multi = _nlp_jt and ("|" in _nlp_jt or " / " in _nlp_jt)
+                    _sel_llm_is_single = _sel_jt and "|" not in _sel_jt and " / " not in _sel_jt
+                    if _sel_cur_has_multi and _sel_llm_is_single:
+                        _log.info("SELECTIVE [%s] job_title: keeping multi-role '%s' over LLM '%s'", file, _nlp_jt, _sel_jt)
+                    elif _sel_jt and _sel_jt_conf >= 0.70:
                         if _nlp_jt and _sel_jt.lower() in _nlp_jt.lower() and len(_nlp_jt) > len(_sel_jt):
                             _log.info("SELECTIVE [%s] job_title: keeping NLP '%s' (more specific than LLM '%s')", file, _nlp_jt, _sel_jt)
                         else:
@@ -9628,7 +9637,14 @@ def main() -> int:
                 last_name = _hybrid_result["last_name"]
                 email = _hybrid_result["email"]
                 phone = _hybrid_result["phone"]
-                job_title = _hybrid_result["job_title"]
+                # Protect multi-role titles from hybrid override
+                _hyb_jt = _hybrid_result["job_title"]
+                _hyb_cur_multi = job_title and ("|" in job_title or " / " in job_title)
+                _hyb_new_single = _hyb_jt and "|" not in _hyb_jt and " / " not in _hyb_jt
+                if _hyb_cur_multi and _hyb_new_single:
+                    _log.info("HYBRID [%s] job_title: keeping multi-role '%s' over hybrid '%s'", file, job_title, _hyb_jt)
+                else:
+                    job_title = _hyb_jt
                 address = _hybrid_result["address"]
                 linkedin = _hybrid_result["linkedin"]
                 if _hybrid_result.get("enhancement_log"):
