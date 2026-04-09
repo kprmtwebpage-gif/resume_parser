@@ -310,7 +310,13 @@ LOCATION:
 - Extract the candidate's CURRENT location using ONLY these two sources (in priority order):
   1. EXPLICIT location in the resume: address/city/state near the candidate's name at the top, or any "Location:", "Address:", "City:", "Based in:" label anywhere in the document.
   2. CURRENT employer's location: ONLY if the current/most-recent job role explicitly states a city or location AND that role is marked Present or has the most recent start date. If the current role has no location listed — return null, do NOT fall back to any older role.
-- STRICT: NEVER use a past employer's location. NEVER infer location from phone numbers, names, or any other signal. If no location is found via sources 1 or 2, return null.
+- STRICT RULES:
+  * NEVER use a past employer's location as the candidate's location.
+  * NEVER infer location from phone numbers, area codes, names, or any other signal.
+  * NEVER use company names, project names, client names, or technology names as location.
+  * NEVER use words from job descriptions, skill names, or section headers as city/state names.
+  * The location MUST be a real, well-known geographic place (city, state, country). If you are unsure whether the text is a real location, return null.
+  * If no location is found via sources 1 or 2, return null.
 - Format as: "City, State/Province, Country"
 - MANDATORY expansion: ALWAYS expand US state abbreviations (TX->Texas, CA->California, NY->New York, FL->Florida, OH->Ohio, IL->Illinois, GA->Georgia, NC->North Carolina, VA->Virginia, WA->Washington, MA->Massachusetts, MD->Maryland, CO->Colorado, AZ->Arizona, IN->Indiana, MI->Michigan, TN->Tennessee, OK->Oklahoma, NV->Nevada, etc.). ALWAYS use "United States" not "US"/"USA". ALWAYS use "United Kingdom" not "UK". ALWAYS use "United Arab Emirates" not "UAE".
 - Do NOT include zip codes, street addresses, or company names.
@@ -318,23 +324,27 @@ LOCATION:
 SKILLS:
 - Extract ALL technical skills, tools, frameworks, programming languages, platforms, methodologies mentioned anywhere in the resume.
 - Return as a flat array of lowercase strings. Each skill should be ONE individual item, NOT a category.
-  CORRECT: ["sql", "power bi", "tableau", "jira", "agile", "scrum", "excel"]
+  CORRECT: ["sql", "power bi", "tableau", "jira", "agile", "scrum", "excel", "generative ai", "langchain", "rag"]
   WRONG:   ["Data/BI Tools", "Project Management Tools", "Programming Languages"]
-- Include: programming languages (python, java), frameworks (react, spring boot), tools (docker, jenkins), cloud (aws, azure, gcp), databases (postgresql, mongodb), methodologies (agile, scrum).
-- ALSO include domain-specific terms: business analysis (brd, frd, uat, gap analysis, process mapping, bpmn, user stories, wireframing, stakeholder management), project management (kanban, sprint planning, risk management), data/BI tools (etl, data pipelines, dimensional modeling, financial modeling, kpi), and any other professional domain terms explicitly mentioned.
-- Extract skills from ALL sections: skills sidebar, core competencies, technical skills, work experience bullets, summary, tools & technologies.
-- Exclude: soft skills (leadership, communication), generic terms (computer, internet).
+- Include: programming languages (python, java, c++, c#, javascript, typescript, go, rust, ruby, r, scala, kotlin, swift), frameworks (react, angular, vue.js, spring boot, django, flask, fastapi, .net, node.js, express.js, next.js), tools (docker, kubernetes, jenkins, git, terraform, ansible, puppet, chef, grafana, prometheus, splunk, elk stack, new relic), cloud (aws, azure, gcp, aws lambda, s3, ec2, ecs, eks, rds, dynamodb, cloudformation, azure devops, azure functions, azure data factory, google bigquery), databases (postgresql, mysql, mongodb, oracle, sql server, redis, elasticsearch, cassandra, neo4j, snowflake, databricks), methodologies (agile, scrum, kanban, waterfall, devops, ci/cd, tdd, bdd, sre, itil).
+- ALSO include AI/ML & emerging tech: generative ai, genai, large language models, llm, rag, retrieval augmented generation, langchain, llamaindex, openai api, chatgpt, prompt engineering, hugging face, transformers, fine-tuning, vector databases, pinecone, chromadb, weaviate, machine learning, deep learning, nlp, natural language processing, computer vision, tensorflow, pytorch, scikit-learn, mlops, mlflow, kubeflow, sagemaker, bedrock, vertex ai.
+- ALSO include domain-specific terms: business analysis (brd, frd, uat, gap analysis, process mapping, bpmn, user stories, wireframing, stakeholder management, requirements gathering, as-is/to-be analysis), project management (kanban, sprint planning, risk management, jira, confluence, ms project, visio, lucidchart, rally, azure boards), data/BI tools (etl, data pipelines, dimensional modeling, financial modeling, kpi, power bi, tableau, looker, qlik, dbt, airflow, informatica, talend, ssis, ssrs, ssas, data warehouse, data lake, data mesh, data governance), cybersecurity (siem, soar, penetration testing, vulnerability assessment, nist, iso 27001, soc 2), and ANY other professional domain terms explicitly mentioned.
+- Extract skills from ALL sections: skills sidebar, core competencies, technical skills, work experience bullets, summary, tools & technologies, professional summary, areas of expertise.
+- Be thorough: if a skill appears ANYWHERE in the resume text (even in a bullet point describing a project), include it.
+- Exclude: soft skills (leadership, communication, teamwork), generic terms (computer, internet, microsoft office basics).
 
 EXPERIENCE YEARS:
 - Extract the total years of professional experience as a number.
-- Look for explicit statements first: "X years of experience", "X+ years", "over X years", "X yrs".
-- If no explicit statement, calculate from work_history: sum of all role durations (most recent role end = today if is_current).
+- Look for explicit statements first: "X years of experience", "X+ years", "over X years", "X yrs", "X years in".
+- If no explicit statement, calculate from work_history: from the earliest start_date to today (not sum of individual roles, which double-counts overlapping jobs).
 - Round to 1 decimal. Return null only if no dates and no explicit statement found.
+- Do NOT count education years, internships (unless they explicitly say "intern" and lasted 6+ months), or personal projects as work experience.
 
 WORK HISTORY:
 - Extract ALL job positions listed, ordered from most recent to oldest.
 - For each: company name, job title held there, location of that role (if mentioned), whether it's the current role, start/end dates.
-- is_current=true for the most recent role or roles marked "Present"/"Current".
+- is_current=true ONLY for roles explicitly marked "Present", "Current", "Till Date", "Ongoing", or where no end date is given for the most recent role.
+- If the candidate has NO work experience at all (e.g., fresh graduate, student), return an empty array [].
 - Dates as "MM/YYYY" or "YYYY" format. null if not specified.
 
 CERTIFICATIONS:
@@ -666,6 +676,37 @@ def llm_extract(
     raw_location = _str_or_none(result.get("location"))
     work_hist = _list_of_dicts(result.get("work_history", []))
 
+    # ── Location sanity check: reject hallucinated / nonsense locations ──
+    # Known non-location words that LLMs sometimes hallucinate as cities
+    _INVALID_CITY_WORDS = {
+        "open", "remote", "hybrid", "onsite", "on-site", "work from home",
+        "wfh", "freelance", "contract", "full-time", "part-time", "n/a",
+        "not specified", "not mentioned", "not available", "confidential",
+        "various", "multiple", "global", "worldwide", "international",
+    }
+
+    def _is_suspicious_location(loc: str) -> bool:
+        """Return True if location looks hallucinated/invalid."""
+        if not loc:
+            return True
+        city = loc.lower().split(",")[0].strip()
+        # Single short word that's in the invalid set
+        if city in _INVALID_CITY_WORDS:
+            return True
+        # Very short city name (1-2 chars) is almost always wrong
+        if len(city) <= 2 and city not in {"la", "dc"}:
+            return True
+        # City name is a common tech/skill term (LLM confusion)
+        _tech_terms = {"java", "python", "react", "angular", "node", "aws", "azure",
+                       "sql", "api", "rest", "data", "cloud", "agile", "scrum",
+                       "docker", "linux", "oracle", "sap", "excel", "power"}
+        if city in _tech_terms:
+            return True
+        return False
+
+    if raw_location and _is_suspicious_location(raw_location):
+        raw_location = None
+
     # Classify work history locations into current vs past
     _NULL_VALS = {"null", "none", "n/a", "unknown", ""}
     current_locs: list[str] = []
@@ -700,8 +741,10 @@ def llm_extract(
         for wh in work_hist:
             end = str(wh.get("end_date", "") or "").lower()
             if (wh.get("is_current") or end in {"present", "current", "now", ""}) and wh.get("location"):
-                raw_location = str(wh["location"]).strip()
-                break
+                loc_candidate = str(wh["location"]).strip()
+                if not _is_suspicious_location(loc_candidate):
+                    raw_location = loc_candidate
+                    break
         # NOTE: do NOT fall back to past employer locations
 
     return {

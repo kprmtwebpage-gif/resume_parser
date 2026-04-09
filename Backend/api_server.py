@@ -75,8 +75,8 @@ SKILLS_TABLE = os.getenv("NEW_SKILLS_TABLE", "candidate_skills_profile")
 
 app = FastAPI(title="Resume Parser API", version="1.0.0")
 
-# Limit concurrent resume-parse subprocesses (prevents 50+ parser.py processes at once)
-_parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "8")))
+# Limit concurrent resume-parse subprocesses (prevents overwhelming LLM free-tier limits)
+_parse_semaphore = asyncio.Semaphore(int(os.getenv("PARSE_CONCURRENCY", "2")))
 _parse_waiting = 0   # tasks queued, waiting for a semaphore slot
 _parse_active  = 0   # tasks currently holding the semaphore (actively parsing)
 
