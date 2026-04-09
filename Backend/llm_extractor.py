@@ -278,6 +278,7 @@ NAME:
 - Split into first_name and last_name. For multi-part names (e.g., "Arbaz Shareef Mohammed"), first_name = first word, last_name = remaining words joined.
 - For single-word names, set first_name = that word, last_name = null.
 - ALWAYS return names in Title Case (capitalize first letter of each word). Examples: ABDULAI CAULKER -> Abdulai Caulker, john doe -> John Doe.
+- Do NOT split a single-word name into first+last. If the resume shows only one name (e.g., "ABHIRAM") with no visible last name, return first_name="Abhiram" and last_name=null.
 - Do NOT use company names, email usernames, addresses, job titles, or section headers as name.
 - The filename may contain the candidate's name as a hint: "{filename_hint}"
 - If the resume text is garbled or unreadable at the top, use the filename hint to identify the name.
@@ -311,7 +312,7 @@ CONTACT:
 LOCATION:
 - Extract the candidate's CURRENT location using ONLY these two sources (in priority order):
   1. EXPLICIT location in the resume: address/city/state near the candidate's name at the top, or any "Location:", "Address:", "City:", "Based in:" label anywhere in the document.
-  2. CURRENT employer's location: ONLY if the current/most-recent job role explicitly states a city or location AND that role is marked Present or has the most recent start date. If the current role has no location listed — return null, do NOT fall back to any older role.
+  2. CURRENT employer's location: ONLY if the current/most-recent job role explicitly states a city or location AND that role is marked Present or has the most recent start date. If the current role has no location listed — return null, do NOT fall back to any older role. Note: garbled Unicode (Γô, â€", Ã¢, etc.) separating company name from city is common in PDF-extracted text — look past these for "City, ST" patterns.
 - STRICT RULES:
   * NEVER use a past employer's location as the candidate's location.
   * NEVER use an education institution's address, university/college campus address, hostel address, or the city of a college/university as the candidate's location. The candidate may have relocated after graduation. If the address near the name appears on or adjacent to lines containing university/college/institute/hostel/campus/hall/room no/block, it is an educational address — return null for source 1 and check source 2.
@@ -347,6 +348,7 @@ WORK HISTORY:
 - Extract ALL job positions listed, ordered from most recent to oldest.
 - For each: company name, job title held there, location of that role (if mentioned — look for "City, State" or "City, Country" near the company name or role header), whether it's the current role, start/end dates.
 - IMPORTANT: Extract the location for EACH role. Many resumes write it as "Company — City, State | Date" or "Company Name, City, State" near the role header. Always look for geographic text near each job entry.
+- Note: PDF extraction sometimes garbles special characters (en-dash, em-dash, bullets) into sequences like "Γô", "â€"", "Ã¢", "â€"", "–", "—", etc. A pattern like "CompanyName Γô City, ST | Date Γô Present" means "CompanyName – City, ST | Date – Present". Always look PAST garbled characters for city/state text.
 - is_current=true ONLY for roles explicitly marked "Present", "Current", "Till Date", "Ongoing", or where no end date is given for the most recent role.
 - If the candidate has NO work experience at all (e.g., fresh graduate, student), return an empty array [].
 - Dates as "MM/YYYY" or "YYYY" format. null if not specified.

@@ -5157,24 +5157,19 @@ def extract_address(
         # Prefer earlier mentions slightly.
         score = base + max(0, 25 - idx)
 
-        # Phone-informed preference: if the phone indicates a country/state, use it as a tie-breaker.
+        # Phone-informed preference: use phone-derived *country* as a tie-breaker.
+        # NOTE: we intentionally do NOT use phone-derived state/city — phone area
+        # codes can mislead (e.g. picking past-employer state over current one).
+        # Only the country signal from the phone is used for scoring.
         if preferred_country:
             parts = [p.strip() for p in (loc or "").split(",") if p.strip()]
             loc_country = parts[-1] if parts else ""
-            loc_state = parts[-2] if len(parts) >= 2 else ""
 
             if loc_country and normalize_country(loc_country).casefold() == normalize_country(preferred_country).casefold():
                 score += 18
             elif loc_country and is_known_country(loc_country):
                 # Strong penalty for a different known country (e.g., "India" lines inside a US resume).
                 score -= 35
-
-            if preferred_state and loc_state:
-                if normalize_state(loc_state).casefold() == normalize_state(preferred_state).casefold():
-                    score += 12
-                elif normalize_country(loc_country).casefold() == normalize_country(preferred_country).casefold():
-                    # If we're already in the preferred country but state mismatches, gently penalize.
-                    score -= 6
 
         if score > best_score:
             best_score = score
@@ -5510,13 +5505,14 @@ def extract_address(
                 best_country = normalize_country(parts[0])
                 pref_country = normalize_country(preferred_country)
                 if best_country and pref_country and best_country.casefold() != pref_country.casefold():
-                    return format_location(None, preferred_state or None, preferred_country)
+                    # Phone says different country — return country only (no city/state from phone)
+                    return format_location(None, None, preferred_country)
 
             if len(parts) == 2 and is_known_country(parts[1]):
                 best_country = normalize_country(parts[1])
                 pref_country = normalize_country(preferred_country)
                 if best_country and pref_country and best_country.casefold() != pref_country.casefold():
-                    return format_location(None, preferred_state or None, preferred_country)
+                    return format_location(None, None, preferred_country)
 
         return best_loc
 
@@ -5527,12 +5523,14 @@ def extract_address(
         return _lp_str
 
     # Final fallback: if we couldn't find a location string in the text,
-    # optionally use phone-derived country/state rather than returning blank.
+    # use phone-derived COUNTRY only (never city/state from phone area codes —
+    # area codes can mislead, e.g. a candidate with a San Jose area code
+    # may live in Charlotte; only country is reliable).
     # IMPORTANT: callers that also search the full resume should disable this
     # for the header-only pass, otherwise a country-only result can mask a more
     # specific city/state found later.
     if allow_phone_fallback and preferred_country:
-        return format_location(None, preferred_state or None, preferred_country)
+        return format_location(None, None, preferred_country)
 
     return ""
 
@@ -9321,6 +9319,23 @@ def main() -> int:
                     # Name: LLM-first mode overrides NLP name
                     _llm_fn = (_llm.get("first_name") or "").strip()
                     _llm_ln = (_llm.get("last_name") or "").strip()
+
+                    # Guard: if NLP found a single-word name (no last name) and the
+                    # LLM appears to have SPLIT that same name into first+last
+                    # (e.g. resume says "ABHIRAM" → NLP: first="Abhiram", last=""
+                    #  → LLM: first="Abhi", last="Ram"), reject the LLM split.
+                    _nlp_single = first_name and not last_name
+                    _llm_is_split = (
+                        _nlp_single
+                        and _llm_fn and _llm_ln
+                        and (_llm_fn + _llm_ln).casefold() == first_name.casefold()
+                    )
+                    if _llm_is_split:
+                        _log.info("LLM_ENRICH [%s] name: rejecting LLM split '%s'+'%s' of single name '%s'",
+                                  file, _llm_fn, _llm_ln, first_name)
+                        _llm_fn = ""
+                        _llm_ln = ""
+
                     if (_llm_fn or _llm_ln) and (_llm_prefer or (not first_name and not last_name)):
                         _log.info("LLM_ENRICH [%s] name: %s %s -> %s %s",
                                   file, first_name or "(empty)", last_name or "(empty)",
