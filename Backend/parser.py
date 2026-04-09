@@ -5522,6 +5522,48 @@ def extract_address(
     if not best_loc and _lp_str:
         return _lp_str
 
+    # ── Current-employer location fallback ─────────────────────────────────
+    # When both header and deep scans found nothing, check whether the resume
+    # has a work-experience line for the CURRENT employer (containing "Present"
+    # or "Current") with an embedded "City, ST" pattern.  This is a strong
+    # signal of where the candidate lives and should be preferred over the
+    # phone-derived country-only fallback.
+    # Example line: "PennyMac Γô Westlake Village, CA | Aug 2023 Γô Present"
+    if not best_loc:
+        _ce_city_state_re = re.compile(
+            r'(?:[\-–—]|Γô|[|•·∙◇])\s*([A-Z][A-Za-z .\'-]{1,30}),\s*([A-Z]{2})\b'
+        )
+        _ce_city_statename_re = re.compile(
+            r'(?:[\-–—]|Γô|[|•·∙◇])\s*([A-Z][A-Za-z .\'-]{1,30}),\s*([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)*)\b'
+        )
+        for _ce_ln in all_lines[:300]:
+            if not re.search(r'(?i)\b(?:present|current)\b', _ce_ln):
+                continue
+            if not _looks_like_experience_location_line(_ce_ln):
+                continue
+            # Try "City, ST" (2-letter US state abbreviation) first
+            _ce_m = _ce_city_state_re.search(_ce_ln)
+            if _ce_m:
+                _ce_city = _sanitize_city_candidate(_ce_m.group(1))
+                _ce_state = _ce_m.group(2).strip().upper()
+                if _ce_state in US_STATE_ABBRS and is_plausible_city(_ce_city):
+                    best_loc = format_location(_ce_city, _ce_state, "United States")
+                    break
+            # Try "City, StateName" (full state name like "City, California")
+            _ce_m2 = _ce_city_statename_re.search(_ce_ln)
+            if _ce_m2:
+                _ce_city2 = _sanitize_city_candidate(_ce_m2.group(1))
+                _ce_state2 = _ce_m2.group(2).strip()
+                if is_us_state(_ce_state2) and is_plausible_city(_ce_city2):
+                    best_loc = format_location(_ce_city2, _ce_state2, "United States")
+                    break
+                # Could be "City, Country"
+                if is_known_country(_ce_state2) and is_plausible_city(_ce_city2):
+                    best_loc = format_location(_ce_city2, None, _ce_state2)
+                    break
+        if best_loc:
+            return best_loc
+
     # Final fallback: if we couldn't find a location string in the text,
     # use phone-derived COUNTRY only (never city/state from phone area codes —
     # area codes can mislead, e.g. a candidate with a San Jose area code
@@ -6344,16 +6386,11 @@ def extract_experience_years(text):
         r"(?i)(?:over\s*|more\s*than\s*|around\s*)?(\d{1,2}(?:\.\d+)?)\s*\+?\s*(?:years|yrs)\s*(?:of\s*)?",
         text,
     )
-    explicit_years = float(m.group(1)) if m else None
+    if m:
+        return float(m.group(1))
 
-    # Compute from work history date ranges (more reliable for total experience)
-    computed_years = _compute_experience_from_date_ranges(text)
-
-    if explicit_years is not None and computed_years is not None:
-        # Prefer the LARGER value — explicit "X years" might refer to a single
-        # role whereas date-range computation covers the full career span.
-        return max(explicit_years, computed_years)
-    return explicit_years or computed_years
+    # Fallback: compute from work history date ranges ONLY when no explicit mention found
+    return _compute_experience_from_date_ranges(text)
 
 
 def extract_role_experience_years(text: str, job_title: str) -> float | None:
@@ -9467,19 +9504,14 @@ def main() -> int:
                                 phone_to_store = format_phone_display(phone) or f"+{_llm_phone_digits}"
                                 _log.info("LLM_ENRICH [%s] phone (country-upgrade): %s", file, phone_to_store)
 
-                    # Experience years: use LLM value when NLP regex found nothing
+                    # Experience years: use LLM value ONLY when NLP found nothing.
+                    # When the resume explicitly says "X years/X+ years", that
+                    # value (already captured by NLP) should always be trusted.
                     _llm_exp = _llm.get("experience_years")
                     if _llm_exp is not None and isinstance(_llm_exp, (int, float)) and _llm_exp > 0:
                         if not experience_years or experience_years == 0:
                             experience_years = float(_llm_exp)
                             _log.info("LLM_ENRICH [%s] experience_years (fill): %.1f", file, experience_years)
-                        elif _llm_prefer:
-                            # Take the LARGER of NLP and LLM — NLP date-range
-                            # computation is often more accurate for total career
-                            # span, while LLM might return a single-role duration.
-                            _prev_exp = experience_years
-                            experience_years = max(float(experience_years), float(_llm_exp))
-                            _log.info("LLM_ENRICH [%s] experience_years (max): NLP=%.1f LLM=%.1f -> %.1f", file, _prev_exp, float(_llm_exp), experience_years)
 
                     # Skills: merge LLM skills with NLP skills (union, deduplicated)
                     _llm_skills = _llm.get("skills") or []
