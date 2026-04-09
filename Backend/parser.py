@@ -8328,14 +8328,18 @@ def _is_likely_resume(text: str, filename: str = "") -> tuple[bool, str]:
             fname,
         ):
             return False, "Corrupt Format / Not a Resume. Please check and upload."
+        # Check using the ORIGINAL lowercased stem (not stripped) to catch compound
+        # words like "JavaResume", "SolutionArchitect", "BackendDev" etc.
+        fname_orig = Path(filename).stem.lower()
+        if re.search(r'(resume|cv|curriculum vitae|biodata)', fname_orig):
+            return True, ""
         if re.search(r'\b(resume|cv|curriculum vitae|biodata)\b', fname):
             return True, ""
         # Also trust files whose names contain job-title indicators (developer,
         # engineer, manager, analyst, etc.) — these are almost always CVs.
-        if re.search(
-            r'\b(developer|engineer|manager|analyst|architect|consultant|specialist|designer|fullstack|full stack|devops|qa|tester|programmer)\b',
-            fname,
-        ):
+        # Check both stripped tokens AND original stem for compound words.
+        _title_pattern = r'(developer|engineer|manager|analyst|architect|consultant|specialist|designer|fullstack|devops|qa|tester|programmer)'
+        if re.search(r'\b' + _title_pattern[1:-1] + r'\b', fname) or re.search(_title_pattern, fname_orig):
             return True, ""
 
     if not text or len(text.strip()) < 80:
@@ -9371,11 +9375,7 @@ def main() -> int:
                     _llm_loc = (_llm.get("location") or "").strip()
                     _null_loc_values = {"null", "none", "n/a", "unknown", "not found", "not available", ""}
                     if _llm_loc and _llm_loc.lower() not in _null_loc_values and len(_llm_loc) >= 5:
-                        if _llm_prefer:
-                            # llm_first mode: LLM location takes priority (already validated in post-processing)
-                            _log.info("LLM_ENRICH [%s] location (llm_first): %s -> %s", file, address or "(empty)", _llm_loc)
-                            address = _llm_loc
-                        elif not address:
+                        if not address:
                             # Regex found nothing — fill from LLM
                             _log.info("LLM_ENRICH [%s] location (fill): %s", file, _llm_loc)
                             address = _llm_loc
@@ -9397,11 +9397,6 @@ def main() -> int:
                                 # Current address looks US-derived but LLM says different country
                                 _log.info("LLM_ENRICH [%s] location (country-fix): %s -> %s", file, address, _llm_loc)
                                 address = _llm_loc
-                    elif _llm_prefer and (not _llm_loc or _llm_loc.lower() in _null_loc_values):
-                        # llm_first mode: LLM explicitly returned null — trust it, clear NLP guess
-                        if address:
-                            _log.info("LLM_ENRICH [%s] location (llm_first null): clearing NLP guess %s", file, address)
-                            address = None
 
                     # Phone: use LLM phone when NLP found nothing, or LLM has country code and NLP doesn't
                     _llm_phone_raw = (_llm.get("phone") or "").strip()

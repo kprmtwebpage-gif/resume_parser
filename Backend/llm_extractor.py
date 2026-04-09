@@ -39,8 +39,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Module-level timestamp for rate-limit enforcement (thread-safe read/write via GIL)
+# Module-level timestamp for rate-limit enforcement
+import threading as _threading
 _last_call_time: float = 0.0
+_rate_lock = _threading.Lock()   # serialises concurrent LLM calls from thread-pool workers
 
 # ---------------------------------------------------------------------------
 # Extraction prompt  (verbatim as specified)
@@ -312,7 +314,7 @@ LOCATION:
   2. CURRENT employer's location: ONLY if the current/most-recent job role explicitly states a city or location AND that role is marked Present or has the most recent start date. If the current role has no location listed — return null, do NOT fall back to any older role.
 - STRICT RULES:
   * NEVER use a past employer's location as the candidate's location.
-  * NEVER use an education/university/college location as the candidate's location. The candidate may have relocated after graduation. University addresses are NOT current addresses.
+  * NEVER use an education institution's address, university/college campus address, hostel address, or the city of a college/university as the candidate's location. The candidate may have relocated after graduation. If the address near the name appears on or adjacent to lines containing university/college/institute/hostel/campus/hall/room no/block, it is an educational address — return null for source 1 and check source 2.
   * NEVER infer location from phone numbers, area codes, names, or any other signal.
   * NEVER use company names, project names, client names, or technology names as location.
   * NEVER use words from job descriptions, skill names, or section headers as city/state names.
@@ -428,19 +430,26 @@ def _rate_delay() -> None:
 
     Default is 10 seconds — safe for Groq free-tier TPM limits.
     Set LLM_RATE_DELAY=0 to disable (paid tiers / local models).
+
+    Thread-safe: uses a lock so concurrent worker threads don't bypass the delay
+    and all fire at once (which would cause 429 rate-limit errors on Cerebras/Groq).
     """
     global _last_call_time
     try:
         delay = float(os.getenv("LLM_RATE_DELAY", "10"))
     except ValueError:
         delay = 10.0
-    if delay > 0 and _last_call_time > 0:
-        elapsed = time.perf_counter() - _last_call_time
-        if elapsed < delay:
-            wait = delay - elapsed
-            logger.debug("LLM extractor: rate-limit delay %.1fs", wait)
-            time.sleep(wait)
-    _last_call_time = time.perf_counter()
+    if delay <= 0:
+        return
+    with _rate_lock:
+        now = time.perf_counter()
+        if _last_call_time > 0:
+            elapsed = now - _last_call_time
+            if elapsed < delay:
+                wait = delay - elapsed
+                logger.debug("LLM extractor: rate-limit delay %.1fs", wait)
+                time.sleep(wait)
+        _last_call_time = time.perf_counter()
 
 
 def _build_prompt(resume_text: str, ocr_text: str, filename: str = "") -> str:
