@@ -289,7 +289,7 @@ JOB TITLE:
   2. Most recent/current position title from work experience section (confidence: 0.90)
   3. If candidate lists a target role or "seeking" title, use that (confidence: 0.80)
 - Do NOT use: section headers ("Experience", "Summary"), industry labels ("Public Sector"), department names, or skill categories as job title.
-- Normalize abbreviations only: Sr->Senior, Jr->Junior, Mgr->Manager, Dept->Department.
+- ALWAYS normalize these abbreviations in the output: Sr.->Senior, Jr.->Junior, Mgr->Manager, Dept->Department, VP->Vice President, Assoc->Associate, Exec->Executive, Dev->Developer, Eng->Engineer, Admin->Administrator. The output title must NOT contain abbreviations like "Sr." or "Jr.".
 - Keep the specific title as-is. Do NOT generalize ("Document Controller" stays "Document Controller", NOT "Manager").
 - If the resume headline contains pipe-separated specializations (e.g., "Senior Business Analyst | Banking | Finance | Data Analytics"), preserve the FULL headline exactly as written — these are domain specializations, not separate job titles.
 - If the resume shows multiple UNRELATED titles in different roles, pick only the most recent/prominent one.
@@ -685,6 +685,27 @@ def llm_extract(
             return [d for d in v if isinstance(d, dict)]
         return []
 
+    # Title abbreviation normalization (LLMs sometimes ignore the prompt rule)
+    import re as _re
+    _TITLE_ABBREVS = [
+        (r'\bSr\.?\b',    'Senior'),
+        (r'\bJr\.?\b',    'Junior'),
+        (r'\bMgr\.?\b',   'Manager'),
+        (r'\bDept\.?\b',  'Department'),
+        (r'\bVP\b',       'Vice President'),
+        (r'\bAssoc\.?\b', 'Associate'),
+        (r'\bExec\.?\b',  'Executive'),
+        (r'\bDev\.?\b',   'Developer'),
+        (r'\bEng\.?\b',   'Engineer'),
+        (r'\bAdmin\.?\b', 'Administrator'),
+    ]
+    def _normalize_title(t: str | None) -> str | None:
+        if not t:
+            return t
+        for pat, repl in _TITLE_ABBREVS:
+            t = _re.sub(pat, repl, t)
+        return t.strip()
+
     # Location post-processing: strict current-only rule
     raw_location = _str_or_none(result.get("location"))
     work_hist = _list_of_dicts(result.get("work_history", []))
@@ -833,7 +854,7 @@ def llm_extract(
     return {
         "first_name":           raw_fn,
         "last_name":            raw_ln,
-        "job_title":            _str_or_none(result.get("job_title")),
+        "job_title":            _normalize_title(_str_or_none(result.get("job_title"))),
         "job_title_confidence": _float_or_none(result.get("job_title_confidence")),
         "email":                _str_or_none(result.get("email")),
         "phone":                _str_or_none(result.get("phone")),
@@ -1021,10 +1042,31 @@ def llm_extract_selective(
             return [d for d in v if isinstance(d, dict)]
         return []
 
+    # Title abbreviation normalization (reuse patterns from main extractor)
+    import re as _re
+    _TITLE_ABBREVS = [
+        (r'\bSr\.?\b',    'Senior'),
+        (r'\bJr\.?\b',    'Junior'),
+        (r'\bMgr\.?\b',   'Manager'),
+        (r'\bDept\.?\b',  'Department'),
+        (r'\bVP\b',       'Vice President'),
+        (r'\bAssoc\.?\b', 'Associate'),
+        (r'\bExec\.?\b',  'Executive'),
+        (r'\bDev\.?\b',   'Developer'),
+        (r'\bEng\.?\b',   'Engineer'),
+        (r'\bAdmin\.?\b', 'Administrator'),
+    ]
+    def _normalize_title(t: str | None) -> str | None:
+        if not t:
+            return t
+        for pat, repl in _TITLE_ABBREVS:
+            t = _re.sub(pat, repl, t)
+        return t.strip()
+
     return {
         "first_name":           _str_or_none(result.get("first_name")),
         "last_name":            _str_or_none(result.get("last_name")),
-        "job_title":            _str_or_none(result.get("job_title")),
+        "job_title":            _normalize_title(_str_or_none(result.get("job_title"))),
         "job_title_confidence": _float_or_none(result.get("job_title_confidence")),
         "skills":               _list_of_strings(result.get("skills", [])),
         "certifications":       _list_of_dicts(result.get("certifications", [])),

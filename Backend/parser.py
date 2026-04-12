@@ -9463,6 +9463,43 @@ def main() -> int:
                             # Regex found nothing — fill from LLM
                             _log.info("LLM_ENRICH [%s] location (fill): %s", file, _llm_loc)
                             address = _llm_loc
+                        elif _llm_prefer:
+                            # In llm_first mode, prefer LLM over NLP when the NLP location
+                            # looks suspicious (garbled text, very short city, university
+                            # location, or known false-positive patterns).
+                            _nlp_city = address.lower().split(",")[0].strip()
+                            # Common English words that NLP may confuse with city names
+                            _NON_CITY_WORDS = {
+                                "open", "remote", "hybrid", "onsite", "contract",
+                                "permanent", "full", "part", "time", "willing",
+                                "relocate", "anywhere", "flexible", "visa",
+                            }
+                            _nlp_looks_suspect = (
+                                len(_nlp_city) <= 3  # very short city like "Lla", "Vnr"
+                                or _nlp_city in _NON_CITY_WORDS
+                                or any(kw in address.lower() for kw in (
+                                    "vjiet", "college", "university", "institute", "campus",
+                                    "hostel", "block", "room no", "hall",
+                                ))
+                                or not _nlp_city.isalpha()  # contains digits or symbols
+                                or address.count(",") < 1  # bare token
+                            )
+                            if _nlp_looks_suspect:
+                                _log.info("LLM_ENRICH [%s] location (llm_first override suspect NLP): %s -> %s", file, address, _llm_loc)
+                                address = _llm_loc
+                            else:
+                                # Both look valid — prefer LLM when it differs in country
+                                _addr_lower = address.lower()
+                                _llm_lower  = _llm_loc.lower()
+                                _us_markers = {"united states", "usa", ", tx", ", ca", ", ny", ", fl",
+                                               "texas", "california", "new york", "florida"}
+                                _addr_is_us = any(m in _addr_lower for m in _us_markers)
+                                _llm_is_us  = any(m in _llm_lower for m in _us_markers)
+                                if _addr_is_us and not _llm_is_us:
+                                    _log.info("LLM_ENRICH [%s] location (country-fix): %s -> %s", file, address, _llm_loc)
+                                    address = _llm_loc
+                                else:
+                                    _log.info("LLM_ENRICH [%s] location (both valid, keeping NLP): NLP=%s LLM=%s", file, address, _llm_loc)
                         elif address.count(",") < 1:
                             # Regex found a bare token — upgrade to LLM's richer result
                             _log.info("LLM_ENRICH [%s] location (upgrade): %s -> %s", file, address, _llm_loc)
